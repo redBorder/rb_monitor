@@ -1,0 +1,34 @@
+{
+  "conf": {
+    "debug": 3,
+    "threads": 10,
+    "timeout": 5,
+    "max_fails": 2,
+    "sleep_main_thread": 10,
+    "sleep_worker_thread": 2
+  },
+  "sensors": [
+    {
+       "sensor_id": 1,
+       "timeout": 5,
+       "sensor_name": "sensor-arriba",
+       "monitors": [
+         {"name": "cpu", "oid": "", "unit": "%" },
+         {"name": "load_5", "oid": "1.3.6.1.4.1.2021.10.1.3.2", "kafka": 1 },
+         {"name": "load_15", "oid": "1.3.6.1.4.1.2021.10.1.3.3" },
+         {"name": "memory_used", "oid": "1.3.6.1.4.1.39483.1.2.2.4.1.2.9.115.104.101.108.108.116.101.115.116.1" },
+         {"name": "memory_total", "oid": "1.3.6.1.4.1.39483.1.2.2.4.1.2.9.115.104.101.108.108.116.101.115.116.1" },
+         {"name": "memory_used_percent", "op": "1-#{memory_use}/#{memory_total}", "kafka": 1}
+       ]
+    },{
+       "sensor_id": 2,
+       "timeout": 5,
+       "sensor_name": "sensor-abajo",
+       "monitors": [
+         {"name": "cpu", "oid": "", "unit": "%" },
+         {"name": "load_5", "oid": "1.3.6.1.4.1.2021.10.1.3.2", "kafka": 1 },
+         {"name": "load_15", "oid": "1.3.6.1.4.1.2021.10.1.3.3" }
+       ]
+    }
+  ]
+}
