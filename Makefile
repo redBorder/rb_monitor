@@ -4,4 +4,4 @@ CC = cc
 CFLAGS = -g
 
 main: main.c
-	$(CC) $(CFLAGS) -o $@ $< -ljson
+	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -std=gnu99
