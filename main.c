@@ -1,12 +1,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <json/json.h>
+#include <json/printbuf.h>
 #include <unistd.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <assert.h>
 #include <pthread.h>
+#include <signal.h>
 #include <librd/rdqueue.h>
+#include <librd/rdthread.h>
+
+#define WORKER_BUFFER_LENGHT 2048
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -25,8 +30,17 @@ struct _worker_info{
 };
 
 struct _main_info{
-	int64_t sleep_main,threads;
+	int64_t sleep_main,threads,debug;
 };
+
+int run = 1;
+void sigproc(int sig) {
+  static int called = 0;
+
+  if(called) return; else called = 1;
+  run = 0;
+  (void)sig;
+}
 
 void Log(char *fmt,...){
 	va_list ap;
@@ -103,22 +117,109 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 	return TRUE;
 }
 
+
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
+	while(run){
+		rd_fifoq_elm_t * elm;
+		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
+			int timeout = worker_info->timeout;
+			json_object * sensor_info = elm->rfqe_ptr;
+			struct printbuf* printbuf = printbuf_new();
+			sprintbuf(printbuf,"{");
+
+			if(worker_info->debug>=2)
+				Log("Pop element %p\n",elm->rfqe_ptr);
+
+			json_object_object_foreach(sensor_info, key, val){
+				if(0==strncmp(key,"timeout",strlen("timeout")))
+				{
+					timeout = json_object_get_int64(val);
+					printbuf->bpos-=1; // delete last comma
+					printbuf->buf[printbuf->bpos]='\0';
+				}
+				else if (0==strncmp(key,"sensor_name",strlen("sensor_name")))
+				{
+					sprintbuf(printbuf, "\"sensor_name\":\"");
+					sprintbuf(printbuf, json_object_get_string(val));
+					sprintbuf(printbuf, "\"");
+				}
+				else if (0==strncmp(key,"sensor_id",strlen("sensor_id")))
+				{
+					sprintbuf(printbuf, "\"sensor_id\": ");
+					sprintbuf(printbuf, json_object_get_string(val));
+
+				}
+				else if(0==strncmp(key,"monitors", strlen("monitors"))){
+					for(int i=0;i<json_object_array_length(val);++i){
+						json_object *value = json_object_array_get_idx(val, i);
+						int kafka=0;
+
+						/* list twice. Ugly, but faster than prepare printbuf and them discard. */
+						json_object_object_foreach(value,key2,val2){
+							if(0==strncmp(key2,"kafka",strlen("kafka"))){
+								kafka=1;
+								break;
+							}
+						}
+
+						if(kafka){
+							json_object_object_foreach(value,key2,val2){
+
+								if(0==strncmp(key2,"name",strlen("name")) || 0==strncmp(key2,"unit",strlen("unit"))){
+									sprintbuf(printbuf,"\"%s\":\"%s\"",key2,json_object_get_string(val2));
+								}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
+									printbuf->bpos-=1; // delete last comma.
+									                   // next printbuf(',') will put \0.
+								}else {
+									if(worker_info->debug>=1)
+										Log("Cannot parse %s argument\n",key2);
+								}
+								sprintbuf(printbuf,",");
+							}
+						}
+					}
+				}
+				sprintbuf(printbuf, ",");
+			}
+			printbuf->bpos-=2; // delete last comma (and pass \0)
+			sprintbuf(printbuf,"}");
+			//char * str_to_kafka = printbuf->buf;
+			//printbuf->buf=NULL;
+			if(worker_info->debug>=3)
+				Log("[Kafka] %s\n",printbuf->buf);
+			printbuf_free(printbuf);
+			rd_fifoq_elm_release(worker_info->queue,elm);
+		}
+		sleep(worker_info->sleep_worker);
+	}
+	return _info; // just avoiding warning.
+}
+
+void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,int debug){
+	for(int i=0;i<json_object_array_length(sensors);++i){
+		// @TODO There is an increment in reference counter with this get????
+		json_object *value = json_object_array_get_idx(sensors, i);
+		if(debug>=2){
+			Log("Push element %p\n",value);
+		}
+		rd_fifoq_add(queue,value);
+	}
 }
 
 int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
-	int go_daemon=0,debug=0;
+	int go_daemon=0,debug=0; // @todo delete duplicity of debug
 	char opt;
-	struct json_object * config_file=NULL,*config=NULL;
+	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL;
 	struct json_object * default_config = json_tokener_parse( str_default_config );
 	struct _worker_info worker_info = {0};
 	struct _main_info main_info = {0};
 	assert(default_config);
-	pthread_t * pd_thread;
-	rd_fifoq_t * queue=NULL;
+	pthread_t * pd_thread = NULL;
+	rd_fifoq_t queue = {{0}};
+	json_bool ret;
 
 
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
@@ -156,30 +257,48 @@ int main(int argc, char  *argv[])
 		exit(1);
 	}
 
-	if(FALSE==parse_json_config(default_config,&worker_info,&main_info));
+	signal(SIGINT, sigproc);
+	signal(SIGTERM, sigproc);
+
+
+	ret = parse_json_config(default_config,&worker_info,&main_info);
+	assert(ret==TRUE);
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
-		if(debug)
-			Log("[WW] Could not fetch config file. Using default config instead.");
+		if(debug>=1)
+			Log("[WW] Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
 	}
 
-	pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
-	if(NULL==pd_thread){
-		Log("[EE] Unable to allocate threads memory. Exiting.\n");
+	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
+		Log("[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
 	}else{
-		for(int i=0;i<main_info.threads;++i){
-			pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
-		}
+		rd_fifoq_init(&queue);
+		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
+		if(NULL==pd_thread){
+			Log("[EE] Unable to allocate threads memory. Exiting.\n");
+		}else{
+			worker_info.queue = &queue;
+			for(int i=0;i<main_info.threads;++i){
+				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
+			}
 
-		for(int i=0;i<main_info.threads;++i){
-			pthread_join(pd_thread[i], NULL);
+			while(run){
+				queueSensors(sensors,&queue,debug);
+				sleep(main_info.sleep_main);
+			}
+			Log("Leaving, wait 1sec for workers...\n");
+
+			for(int i=0;i<main_info.threads;++i){
+				pthread_join(pd_thread[i], NULL);
+			}
 		}
 	}
 
 	json_object_put(default_config);
 	json_object_put(config_file);
+	rd_fifoq_destroy(&queue);
 	return 0;
 }

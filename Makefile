@@ -1,7 +1,10 @@
 all: main
 
 CC = cc
-CFLAGS = -g
+CFLAGS = -g -W -Wall -Wno-missing-field-initializers 
+
+clean: 
+	-rm -rf main
 
 main: main.c
-	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -std=gnu99
+	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -std=gnu99 
