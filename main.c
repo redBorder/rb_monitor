@@ -10,8 +10,8 @@
 #include <signal.h>
 #include <librd/rdqueue.h>
 #include <librd/rdthread.h>
-
-#define WORKER_BUFFER_LENGHT 2048
+#include <net-snmp/net-snmp-config.h>
+#include <net-snmp/net-snmp-includes.h>
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -25,6 +25,7 @@ const char * str_default_config = /* "conf:" */ "{"
 
 /// Info needed by threads.
 struct _worker_info{
+	const char * community;
 	int64_t sleep_worker,max_fails,timeout,debug;
 	rd_fifoq_t *queue;
 };
@@ -120,6 +121,10 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
+	struct snmp_session session;
+	snmp_sess_init(&session); /* set defaults */
+	session.version  = SNMP_VERSION_1;
+
 	while(run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
@@ -127,6 +132,9 @@ void * worker(void *_info){
 			json_object * sensor_info = elm->rfqe_ptr;
 			struct printbuf* printbuf = printbuf_new();
 			sprintbuf(printbuf,"{");
+			const char * peername=NULL;
+			const char * sensor_name=NULL;
+			const char * community=NULL;
 
 			if(worker_info->debug>=2)
 				Log("Pop element %p\n",elm->rfqe_ptr);
@@ -140,9 +148,8 @@ void * worker(void *_info){
 				}
 				else if (0==strncmp(key,"sensor_name",strlen("sensor_name")))
 				{
-					sprintbuf(printbuf, "\"sensor_name\":\"");
-					sprintbuf(printbuf, json_object_get_string(val));
-					sprintbuf(printbuf, "\"");
+					sensor_name = json_object_get_string(val);
+					sprintbuf(printbuf, "\"%s\":\"%s\"",key,sensor_name);
 				}
 				else if (0==strncmp(key,"sensor_id",strlen("sensor_id")))
 				{
@@ -150,8 +157,32 @@ void * worker(void *_info){
 					sprintbuf(printbuf, json_object_get_string(val));
 
 				}
-				else if(0==strncmp(key,"monitors", strlen("monitors"))){
-					for(int i=0;i<json_object_array_length(val);++i){
+				else if (0==strncmp(key,"peername",strlen("peername")))
+				{
+					/* better not modify peername after this! */
+					peername = json_object_get_string(val);
+					printbuf->bpos-=1; // delete last comma
+
+				}else if(0==strncmp(key,"community",sizeof "community"-1)){
+					community = json_object_get_string(val);
+					printbuf->bpos-=1; // delete last comma
+				}else if(0==strncmp(key,"monitors", strlen("monitors"))){
+					if(!peername && worker_info->debug>=1){
+						Log("[EE] Peername not setted in %s. Skipping.\n",sensor_name?sensor_name:"some sensor\n");
+					}
+					if(!peername && worker_info->debug>=1){
+						Log("[EE] Community not setted in %s. Skipping.\n",sensor_name?sensor_name:"some sensor\n");
+					}
+
+					session.peername = (char *)peername; /* We trust in session. It will not modify it*/
+					session.community = (unsigned char *)community; /* We trust in session. It will not modify it*/
+					session.community_len = strlen(community);
+					struct snmp_session *ss;
+					if(NULL == (ss = snmp_open(&session))){
+						Log("Error creating session: %s",snmp_errstring(session.s_snmp_errno));
+						break; /*foreach*/
+					}
+					for(int i=0;ss && peername && i<json_object_array_length(val);++i){
 						json_object *value = json_object_array_get_idx(val, i);
 						int kafka=0;
 
@@ -164,21 +195,62 @@ void * worker(void *_info){
 						}
 
 						if(kafka){
+							const char * name=NULL;
 							json_object_object_foreach(value,key2,val2){
-
-								if(0==strncmp(key2,"name",strlen("name")) || 0==strncmp(key2,"unit",strlen("unit"))){
-									sprintbuf(printbuf,"\"%s\":\"%s\"",key2,json_object_get_string(val2));
+								printf("Evaluating key2 %s: %d\n",key2,strncmp(key2,"name",strlen("name")));
+								if(0==strncmp(key2,"name",strlen("name"))){ 
+									name = json_object_get_string(val2);
+								}else if(0==strncmp(key2,"unit",strlen("unit"))){
+									if(NULL==name && worker_info->debug>=1)
+										Log("[WW] \"unit\" before \"name\" in some point. Skipping");
+									else 
+										sprintbuf(printbuf, "\"%s_%s\":\"%s\",",name,key2,json_object_get_string(val2));
 								}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
-									printbuf->bpos-=1; // delete last comma.
-									                   // next printbuf(',') will put \0.
+									// Do nothing
+								}else if(0==strncmp(key2,"oid",strlen("oid"))){
+									if(!name && worker_info->debug>=1)
+										Log("[WW] name of param not set in %s\n",sensor_name?sensor_name:0);
+									struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
+									struct snmp_pdu *response=NULL;
+									oid entry_oid[MAX_OID_LEN];
+									size_t entry_oid_len = MAX_OID_LEN;
+									read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
+									snmp_add_null_var(pdu,entry_oid,entry_oid_len);
+									int status = snmp_synch_response(ss,pdu,&response);
+									if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
+										/* A lot of variables. Just if we pass SNMPV3 someday.
+										struct variable_list *vars;
+										for(vars=response->variables; vars; vars=vars->next_variable)
+											print_variable(vars->name,vars->name_length,vars);
+										*/
+										printf("response type: %d\n",response->variables->type);
+										switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
+											case ASN_INTEGER:
+												sprintbuf(printbuf,"\"%s\":%ld,",name,response->variables->val.integer);
+												break;
+											case ASN_OCTET_STR:
+												sprintbuf(printbuf,"\"%s\":\"%s\",",name,response->variables->val.string);
+												break;
+										}
+										snmp_free_pdu(response);
+
+									}else if(worker_info->debug){
+										if (status == STAT_SUCCESS)
+											Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
+     								else
+											Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
+									}
 								}else {
 									if(worker_info->debug>=1)
 										Log("Cannot parse %s argument\n",key2);
 								}
-								sprintbuf(printbuf,",");
 							}
 						}
 					}
+					snmp_close(ss);
+				}else {
+					if(worker_info->debug>=1)
+						Log("Cannot parse %s argument\n",key);
 				}
 				sprintbuf(printbuf, ",");
 			}
@@ -186,13 +258,16 @@ void * worker(void *_info){
 			sprintbuf(printbuf,"}");
 			//char * str_to_kafka = printbuf->buf;
 			//printbuf->buf=NULL;
-			if(worker_info->debug>=3)
-				Log("[Kafka] %s\n",printbuf->buf);
+			if(peername && sensor_name && community)
+				if(worker_info->debug>=3)
+					Log("[Kafka] %s\n",printbuf->buf);
 			printbuf_free(printbuf);
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}
 		sleep(worker_info->sleep_worker);
 	}
+
+
 	return _info; // just avoiding warning.
 }
 
@@ -276,6 +351,7 @@ int main(int argc, char  *argv[])
 		Log("[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
 	}else{
 		rd_fifoq_init(&queue);
+		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
 			Log("[EE] Unable to allocate threads memory. Exiting.\n");
