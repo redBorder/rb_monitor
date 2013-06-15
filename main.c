@@ -12,6 +12,7 @@
 #include <librd/rdthread.h>
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
+#include <librdkafka/rdkafka.h>
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -20,13 +21,15 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"timeout\": 5,"
     "\"max_fails\": 2,"
     "\"sleep_main\": 10,"
-    "\"sleep_worker\": 2"
+    "\"sleep_worker\": 2,"
+    "\"kafka_broker\": \"localhost\","
+    "\"kafka_topic\": \"SNMP\""
   "}";
 
 /// Info needed by threads.
 struct _worker_info{
-	const char * community;
-	int64_t sleep_worker,max_fails,timeout,debug;
+	const char * community,*kafka_broker,*kafka_topic;
+	int64_t sleep_worker,max_fails,timeout,kafka_partition,debug;
 	rd_fifoq_t *queue;
 };
 
@@ -105,6 +108,18 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 			if(errno!=0)
 				Log("[EE] Could not parse %s value: %s","sleep_main\n",strerror(errno));
 		}
+		else if(0==strncmp(key,"kafka_broker", strlen("kafka_broker")))
+		{
+			worker_info->kafka_broker	= json_object_get_string(val);
+		}
+		else if(0==strncmp(key,"kafka_topic", strlen("kafka_topic")))
+		{
+			worker_info->kafka_topic	= json_object_get_string(val);
+		}
+		else if(0==strncmp(key,"kafka_partition", strlen("kafka_partition")))
+		{
+			worker_info->kafka_partition	= json_object_get_int64(val);
+		}
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
 			errno = 0;
@@ -124,8 +139,18 @@ void * worker(void *_info){
 	struct snmp_session session;
 	snmp_sess_init(&session); /* set defaults */
 	session.version  = SNMP_VERSION_1;
+	rd_kafka_t *rk;
+	int thread_ok = 1;
 
-	while(run){
+	if (!(rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
+		if(worker_info->debug>=1)
+			Log("Error calling kafka_new producer: %s\n",strerror(errno));
+		thread_ok=0;
+	}
+	
+
+
+	while(thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
 			int timeout = worker_info->timeout;
@@ -258,9 +283,13 @@ void * worker(void *_info){
 			sprintbuf(printbuf,"}");
 			//char * str_to_kafka = printbuf->buf;
 			//printbuf->buf=NULL;
-			if(peername && sensor_name && community)
+			if(peername && sensor_name && community){
 				if(worker_info->debug>=3)
 					Log("[Kafka] %s\n",printbuf->buf);
+				rd_kafka_produce(rk, (char *)worker_info->kafka_topic, worker_info->kafka_partition, 
+				                 RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos);
+				printbuf->buf=NULL; // rdkafka wikk free it
+			}
 			printbuf_free(printbuf);
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}

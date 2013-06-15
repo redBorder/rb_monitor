@@ -7,4 +7,4 @@ clean:
 	-rm -rf main
 
 main: main.c
-	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -lsnmp -std=gnu99 
+	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -std=gnu99 
