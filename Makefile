@@ -11,7 +11,7 @@ clean:
 	-rm -rf main
 
 rb_monitor: main.c
-	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -std=gnu99
+	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:
 	install -t $(PREFIX)/bin $(PROGNAME)

@@ -13,6 +13,7 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <librdkafka/rdkafka.h>
+#include <matheval.h>
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -133,6 +134,13 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 	return TRUE;
 }
 
+struct libmatheval_stuffs{
+	const char ** names;
+	double *values;
+	unsigned int variables_pos;
+	unsigned int total_lenght;
+};
+
 
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
@@ -148,8 +156,6 @@ void * worker(void *_info){
 		thread_ok=0;
 	}
 	
-
-
 	while(thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
@@ -192,6 +198,15 @@ void * worker(void *_info){
 					community = json_object_get_string(val);
 					printbuf->bpos-=1; // delete last comma
 				}else if(0==strncmp(key,"monitors", strlen("monitors"))){
+					const char * name=NULL;
+
+					/* Just to avoid dynamic memory */
+					const char *names[json_object_array_length(val)];
+					double values[json_object_array_length(val)];
+					
+					struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(val)};
+
+
 					if(!peername && worker_info->debug>=1){
 						Log("[EE] Peername not setted in %s. Skipping.\n",sensor_name?sensor_name:"some sensor\n");
 					}
@@ -212,63 +227,81 @@ void * worker(void *_info){
 						int kafka=0;
 
 						/* list twice. Ugly, but faster than prepare printbuf and them discard. */
-						json_object_object_foreach(value,key2,val2){
-							if(0==strncmp(key2,"kafka",strlen("kafka"))){
+						json_object_object_foreach(value,key3,val3){
+							if(0==strncmp(key3,"kafka",strlen("kafka"))){
 								kafka=1;
 								break;
 							}
 						}
 
-						if(kafka){
-							const char * name=NULL;
-							json_object_object_foreach(value,key2,val2){
-								printf("Evaluating key2 %s: %d\n",key2,strncmp(key2,"name",strlen("name")));
-								if(0==strncmp(key2,"name",strlen("name"))){ 
-									name = json_object_get_string(val2);
-								}else if(0==strncmp(key2,"unit",strlen("unit"))){
-									if(NULL==name && worker_info->debug>=1)
-										Log("[WW] \"unit\" before \"name\" in some point. Skipping");
-									else 
-										sprintbuf(printbuf, "\"%s_%s\":\"%s\",",name,key2,json_object_get_string(val2));
-								}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
-									// Do nothing
-								}else if(0==strncmp(key2,"oid",strlen("oid"))){
-									if(!name && worker_info->debug>=1)
-										Log("[WW] name of param not set in %s\n",sensor_name?sensor_name:0);
-									struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
-									struct snmp_pdu *response=NULL;
-									oid entry_oid[MAX_OID_LEN];
-									size_t entry_oid_len = MAX_OID_LEN;
-									read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
-									snmp_add_null_var(pdu,entry_oid,entry_oid_len);
-									int status = snmp_synch_response(ss,pdu,&response);
-									if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
-										/* A lot of variables. Just if we pass SNMPV3 someday.
-										struct variable_list *vars;
-										for(vars=response->variables; vars; vars=vars->next_variable)
-											print_variable(vars->name,vars->name_length,vars);
-										*/
-										printf("response type: %d\n",response->variables->type);
-										switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
-											case ASN_INTEGER:
+						json_object_object_foreach(value,key2,val2){
+							if(0==strncmp(key2,"name",strlen("name"))){ 
+								name = json_object_get_string(val2);
+							}else if(0==strncmp(key2,"unit",strlen("unit"))){
+								if(NULL==name && worker_info->debug>=1)
+									Log("[WW] \"unit\" before \"name\" in some point. Skipping");
+								else 
+									sprintbuf(printbuf, "\"%s_%s\":\"%s\",",name,key2,json_object_get_string(val2));
+							}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
+								// Do nothing
+							}else if(0==strncmp(key2,"oid",strlen("oid"))){
+								if(!name && worker_info->debug>=1)
+									Log("[WW] name of param not set in %s\n",sensor_name?sensor_name:0);
+								struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
+								struct snmp_pdu *response=NULL;
+								oid entry_oid[MAX_OID_LEN];
+								size_t entry_oid_len = MAX_OID_LEN;
+								read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
+								snmp_add_null_var(pdu,entry_oid,entry_oid_len);
+								int status = snmp_synch_response(ss,pdu,&response);
+								if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
+									/* A lot of variables. Just if we pass SNMPV3 someday.
+									struct variable_list *vars;
+									for(vars=response->variables; vars; vars=vars->next_variable)
+										print_variable(vars->name,vars->name_length,vars);
+									*/
+									if(worker_info->debug>=4)
+										Log("response type: %d\n",response->variables->type);
+									switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
+										case ASN_INTEGER:
+											if(kafka){
 												sprintbuf(printbuf,"\"%s\":%ld,",name,response->variables->val.integer);
-												break;
-											case ASN_OCTET_STR:
-												sprintbuf(printbuf,"\"%s\":\"%s\",",name,response->variables->val.string);
-												break;
-										}
-										snmp_free_pdu(response);
-
-									}else if(worker_info->debug){
-										if (status == STAT_SUCCESS)
-											Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
-     								else
-											Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
+											}else{
+												if(worker_info->debug>=3){
+													Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",name,json_object_get_string(val2),*response->variables->val.integer);
+												}
+												matheval.names[matheval.variables_pos] = name;
+												matheval.values[matheval.variables_pos++] = *response->variables->val.integer;
+												assert(matheval.variables_pos<matheval.total_lenght);
+											}
+											break;
+										case ASN_OCTET_STR:
+											sprintbuf(printbuf,"\"%s\":\"%s\",",name,response->variables->val.string);
+											break;
+										default:
+											Log("[WW] Unknow variable type %d in line %d\n",response->variables->type,__LINE__);
 									}
-								}else {
-									if(worker_info->debug>=1)
-										Log("Cannot parse %s argument\n",key2);
+									snmp_free_pdu(response);
+
+								}else if(worker_info->debug){
+									if (status == STAT_SUCCESS)
+										Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
+ 								else
+										Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
 								}
+							}else if(0==strncmp(key2,"op",strlen("op"))){
+								/* @TODO buffer this! */
+								void *f = evaluator_create ((char *)json_object_get_string(val2)); /*really it has to do (void *). See libmatheval doc. */
+								double d = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+								evaluator_destroy (f);
+								if(worker_info->debug>=4)
+									Log("Result of operation %s: %lf\n",key2,d);
+								/* op will send by default, so we ignore kafka param */
+								sprintbuf(printbuf,"\"%s\":%lf,",name,d);
+
+							}else{
+								if(worker_info->debug>=1)
+									Log("Cannot parse %s argument\n",key2);
 							}
 						}
 					}

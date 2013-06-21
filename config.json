@@ -24,9 +24,9 @@
       [
         {"name": "load_5", "oid": "1.3.6.1.4.1.2021.10.1.3.2", "unit": "%", "kafka": 1 },
         {"name": "load_15", "oid": "1.3.6.1.4.1.2021.10.1.3.3", "unit": "%", "kafka": 1},
-        //{"name": "memory_used", "oid": "1.3.6.1.4.1.39483.1.2.2.4.1.2.9.115.104.101.108.108.116.101.115.116.1" },
-        //{"name": "memory_total", "oid": "1.3.6.1.4.1.39483.1.2.2.4.1.2.9.115.104.101.108.108.116.101.115.116.1" },
-        //{"name": "memory_used_percent", "op": "1-#{memory_use}/#{memory_total}", "kafka": 1}
+        {"name": "memory_total", "oid": "UCD-SNMP-MIB::memTotalReal.0", "sleep": 1 },
+        {"name": "memory_free", "oid": "UCD-SNMP-MIB::memAvailReal.0" },
+        {"name": "memory_used", "op": "100*(memory_total-memory_free)/memory_total", "unit": "%", "kafka": 1}
       ]
     },
     {
