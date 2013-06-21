@@ -188,7 +188,7 @@ void * worker(void *_info){
 					sprintbuf(printbuf, json_object_get_string(val));
 
 				}
-				else if (0==strncmp(key,"peername",strlen("peername")))
+				else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip")))
 				{
 					/* better not modify peername after this! */
 					peername = json_object_get_string(val);
