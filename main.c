@@ -34,6 +34,21 @@ struct _worker_info{
 	rd_fifoq_t *queue;
 };
 
+struct _sensor_data{
+	int timeout;
+	const char * peername; 
+	const char * sensor_name;
+	uint64_t sensor_id;
+	const char * community;
+};
+
+struct _perthread_worker_info{
+	struct snmp_session session;
+	rd_kafka_t * rk;
+	int thread_ok;
+	struct _sensor_data sensor_data;
+};
+
 struct _main_info{
 	int64_t sleep_main,threads,debug;
 };
@@ -141,189 +156,275 @@ struct libmatheval_stuffs{
 	unsigned int total_lenght;
 };
 
+int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
+	if(matheval->variables_pos<matheval->total_lenght){
+		matheval->names[matheval->variables_pos] = name;
+		matheval->values[matheval->variables_pos++] = val;
+	}else{
+		Log("[FIX] More variables than I can save in line %d. Have to fix\n",__LINE__);
+		return 0;
+	}
+	return 1;
+}
+
+/* @warning This function assumes ALL fields of sensor_data will be populated */
+int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
+			json_object * monitors)
+{
+	int aok=1;
+	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
+
+	/* Just to avoid dynamic memory */
+	const char *names[json_object_array_length(monitors)];
+	double values[json_object_array_length(monitors)];
+	
+	struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(monitors)};
+
+	assert(sensor_data->sensor_name);
+	if(worker_info->debug>=1){
+		if(!sensor_data->peername){
+			Log("[EE] Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
+			aok=0;
+		}
+		if(!sensor_data->peername){
+			Log("[EE] Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
+			aok=0;
+		}
+	}
+
+	pt_worker_info->session.peername = (char *)sensor_data->peername; /* We trust in session. It will not modify it*/
+	pt_worker_info->session.community = (unsigned char *)sensor_data->community; /* We trust in session. It will not modify it*/
+	pt_worker_info->session.community_len = strlen(sensor_data->community);
+	struct snmp_session *ss;
+	if(NULL == (ss = snmp_open(&pt_worker_info->session))){
+		Log("Error creating session: %s",snmp_errstring(pt_worker_info->session.s_snmp_errno));
+		aok=0;
+	}
+
+	for(int i=0;ss && aok && i<json_object_array_length(monitors);++i){
+		struct timeval tv;
+		gettimeofday(&tv,NULL);
+
+		const char * name = NULL;
+		json_object *value = json_object_array_get_idx(monitors, i);
+		int kafka=0;
+		struct printbuf* printbuf;
+
+		/* list twice. Ugly, but faster than prepare printbuf and them discard. */
+		json_object_object_foreach(value,key,val){
+			if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"op",strlen("op"))){
+				kafka=1;
+				break;
+			}
+		}
+
+		if(kafka){
+			printbuf = printbuf_new();
+			sprintbuf(printbuf,"{");
+			sprintbuf(printbuf,"\"event_timestamp\":%lu,",tv.tv_sec*1000 + tv.tv_usec/1000);
+			sprintbuf(printbuf,"\"sensor_id\":%lu,",sensor_data->sensor_id);
+		}
+
+		json_object_object_foreach(value,key2,val2){
+			if(0==strncmp(key2,"name",strlen("name"))){ 
+				name = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"unit",strlen("unit"))){
+				if(printbuf)
+					sprintbuf(printbuf, "\"%s\":\"%s\",",key2,json_object_get_string(val2));
+			}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
+				// Do nothing
+			}else if(0==strncmp(key2,"oid",strlen("oid"))){
+				assert(sensor_data->sensor_name);
+				/* @TODO test passing a sensor without params to caller function. */
+				if(!name && worker_info->debug>=1){
+					Log("[WW] name of param not set in %s. Skipping\n",sensor_data->sensor_name);
+					continue /*foreach*/;
+				}
+				if(printbuf){
+					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
+					sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
+					sprintbuf(printbuf, "\"type\":\"monitor\",");
+				}
+				
+				struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
+				struct snmp_pdu *response=NULL;
+				oid entry_oid[MAX_OID_LEN];
+				size_t entry_oid_len = MAX_OID_LEN;
+				read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
+				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
+				int status = snmp_synch_response(ss,pdu,&response);
+				if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
+					/* A lot of variables. Just if we pass SNMPV3 someday.
+					struct variable_list *vars;
+					for(vars=response->variables; vars; vars=vars->next_variable)
+						print_variable(vars->name,vars->name_length,vars);
+					*/
+					double number;
+					if(worker_info->debug>=4)
+						Log("response type: %d\n",response->variables->type);
+					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
+						case ASN_INTEGER:
+							if(printbuf)
+								sprintbuf(printbuf,"\"value\":%ld,",*response->variables->val.integer);
+							if(worker_info->debug>=3){
+								Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",
+									name,json_object_get_string(val2),*response->variables->val.integer);
+							}
+							libmatheval_append(&matheval,name,*response->variables->val.integer);
+						
+							break;
+						case ASN_OCTET_STR:
+							number = atol((const char *)response->variables->val.string);
+							if(worker_info->debug>=3){
+								Log("Saving %lf var in libmatheval array. OID=%s;Value=%d\n",name,json_object_get_string(val2),number);
+							}
+							libmatheval_append(&matheval,name,number);
+
+							if(printbuf)
+								sprintbuf(printbuf,"\"value\":\"%s\",",response->variables->val.string);							
+							break;
+						default:
+							Log("[WW] Unknow variable type %d in line %d\n",response->variables->type,__LINE__);
+					};
+					snmp_free_pdu(response);
+
+				}else if(worker_info->debug){
+					if (status == STAT_SUCCESS)
+						Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
+					else
+						Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
+				}
+			}else if(0==strncmp(key2,"op",strlen("op"))){
+				/* @TODO buffer this! */
+				void *f = evaluator_create ((char *)json_object_get_string(val2)); /*really it has to do (void *). See libmatheval doc. */
+				double d = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+				evaluator_destroy (f);
+				if(worker_info->debug>=4)
+					Log("Result of operation %s: %lf\n",key2,d);
+				/* op will send by default, so we ignore kafka param */
+				libmatheval_append(&matheval, name,d);
+
+				if(printbuf)
+					sprintbuf(printbuf,"\"value\":%lf,",d);
+
+			}else{
+				if(worker_info->debug>=1)
+					Log("Cannot parse %s argument (line %d)\n",key2,__LINE__);
+			}
+		}
+
+		if(printbuf){
+			
+			printbuf->bpos--; /* delete last comma */
+			sprintbuf(printbuf,"}");
+
+			//char * str_to_kafka = printbuf->buf;
+			//printbuf->buf=NULL;
+			if(sensor_data->peername && sensor_data->sensor_name && sensor_data->community){
+				if(worker_info->debug>=3)
+					Log("[Kafka] %s\n",printbuf->buf);
+				if(0==rd_kafka_produce(pt_worker_info->rk, (char *)worker_info->kafka_topic, worker_info->kafka_partition, 
+				                 RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos))
+					printbuf->buf=NULL; // rdkafka will free it
+			}
+			printbuf_free(printbuf);
+			printbuf = NULL;
+		}
+
+	}
+	snmp_close(ss);
+
+	return aok;
+} 
+
+int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
+	memset(&pt_worker_info->sensor_data,1,sizeof(pt_worker_info->sensor_data));
+	pt_worker_info->sensor_data.timeout = worker_info->timeout;
+	json_object * monitors = NULL;
+	int aok = 1;
+
+	json_object_object_foreach(sensor_info, key, val){
+		if(0==strncmp(key,"timeout",strlen("timeout"))){
+			pt_worker_info->sensor_data.timeout = json_object_get_int64(val);
+		}else if (0==strncmp(key,"sensor_name",strlen("sensor_name"))){
+			pt_worker_info->sensor_data.sensor_name = json_object_get_string(val);
+		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
+			pt_worker_info->sensor_data.sensor_id = json_object_get_int64(val);
+		}else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip"))){
+			pt_worker_info->sensor_data.peername = json_object_get_string(val);
+		}else if(0==strncmp(key,"community",sizeof "community"-1)){
+			pt_worker_info->sensor_data.community = json_object_get_string(val);
+		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
+			monitors = val;
+		}else {
+			if(worker_info->debug>=1)
+				Log("Cannot parse %s argument\n",key);
+		}
+	}
+
+
+	if(aok){
+		if(pt_worker_info->sensor_data.sensor_name == NULL){
+			aok = 0;
+			if(worker_info->debug>=1){
+				Log("[CONFIG] Sensor_name not setted in some sensor\n");
+			}
+		}
+	}if(aok){
+		if(pt_worker_info->sensor_data.peername == NULL){
+			aok = 0;
+			if(worker_info->debug>=1){
+				Log("[CONFIG] Peername not setted in sensor %s",
+					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
+			}
+		}
+	}if(aok){
+		if(pt_worker_info->sensor_data.community == NULL){
+			aok = 0;
+			if(worker_info->debug>=1){
+				Log("[CONFIG] Community not setted in sensor %s",
+					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
+			}
+		}
+	}if(aok){
+		if(NULL==monitors){
+			aok = 0;
+			if(worker_info->debug>=1){
+				Log("[CONFIG] Monitors not setted in sensor %s",
+					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
+			}
+		}
+	}
+	
+	if(aok)
+		aok = process_sensor_monitors(worker_info, pt_worker_info, monitors);
+
+	return aok;
+}
+
 
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
-	struct snmp_session session;
-	snmp_sess_init(&session); /* set defaults */
-	session.version  = SNMP_VERSION_1;
-	rd_kafka_t *rk;
-	int thread_ok = 1;
+	struct _perthread_worker_info pt_worker_info;
+	
+	snmp_sess_init(&pt_worker_info.session); /* set defaults */
+	pt_worker_info.session.version  = SNMP_VERSION_1;
+	
+	pt_worker_info.thread_ok = 1;
 
-	if (!(rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
+	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
 		if(worker_info->debug>=1)
 			Log("Error calling kafka_new producer: %s\n",strerror(errno));
-		thread_ok=0;
+		pt_worker_info.thread_ok=0;
 	}
 	
-	while(thread_ok && run){
+	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
-			int timeout = worker_info->timeout;
-			json_object * sensor_info = elm->rfqe_ptr;
-			struct printbuf* printbuf = printbuf_new();
-			sprintbuf(printbuf,"{");
-			const char * peername=NULL;
-			const char * sensor_name=NULL;
-			const char * community=NULL;
-
 			if(worker_info->debug>=2)
 				Log("Pop element %p\n",elm->rfqe_ptr);
-
-			json_object_object_foreach(sensor_info, key, val){
-				if(0==strncmp(key,"timeout",strlen("timeout")))
-				{
-					timeout = json_object_get_int64(val);
-					printbuf->bpos-=1; // delete last comma
-					printbuf->buf[printbuf->bpos]='\0';
-				}
-				else if (0==strncmp(key,"sensor_name",strlen("sensor_name")))
-				{
-					sensor_name = json_object_get_string(val);
-					sprintbuf(printbuf, "\"%s\":\"%s\"",key,sensor_name);
-				}
-				else if (0==strncmp(key,"sensor_id",strlen("sensor_id")))
-				{
-					sprintbuf(printbuf, "\"sensor_id\": ");
-					sprintbuf(printbuf, json_object_get_string(val));
-
-				}
-				else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip")))
-				{
-					/* better not modify peername after this! */
-					peername = json_object_get_string(val);
-					printbuf->bpos-=1; // delete last comma
-
-				}else if(0==strncmp(key,"community",sizeof "community"-1)){
-					community = json_object_get_string(val);
-					printbuf->bpos-=1; // delete last comma
-				}else if(0==strncmp(key,"monitors", strlen("monitors"))){
-					const char * name=NULL;
-
-					/* Just to avoid dynamic memory */
-					const char *names[json_object_array_length(val)];
-					double values[json_object_array_length(val)];
-					
-					struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(val)};
-
-
-					if(!peername && worker_info->debug>=1){
-						Log("[EE] Peername not setted in %s. Skipping.\n",sensor_name?sensor_name:"some sensor\n");
-					}
-					if(!peername && worker_info->debug>=1){
-						Log("[EE] Community not setted in %s. Skipping.\n",sensor_name?sensor_name:"some sensor\n");
-					}
-
-					session.peername = (char *)peername; /* We trust in session. It will not modify it*/
-					session.community = (unsigned char *)community; /* We trust in session. It will not modify it*/
-					session.community_len = strlen(community);
-					struct snmp_session *ss;
-					if(NULL == (ss = snmp_open(&session))){
-						Log("Error creating session: %s",snmp_errstring(session.s_snmp_errno));
-						break; /*foreach*/
-					}
-					for(int i=0;ss && peername && i<json_object_array_length(val);++i){
-						json_object *value = json_object_array_get_idx(val, i);
-						int kafka=0;
-
-						/* list twice. Ugly, but faster than prepare printbuf and them discard. */
-						json_object_object_foreach(value,key3,val3){
-							if(0==strncmp(key3,"kafka",strlen("kafka"))){
-								kafka=1;
-								break;
-							}
-						}
-
-						json_object_object_foreach(value,key2,val2){
-							if(0==strncmp(key2,"name",strlen("name"))){ 
-								name = json_object_get_string(val2);
-							}else if(0==strncmp(key2,"unit",strlen("unit"))){
-								if(NULL==name && worker_info->debug>=1)
-									Log("[WW] \"unit\" before \"name\" in some point. Skipping");
-								else 
-									sprintbuf(printbuf, "\"%s_%s\":\"%s\",",name,key2,json_object_get_string(val2));
-							}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
-								// Do nothing
-							}else if(0==strncmp(key2,"oid",strlen("oid"))){
-								if(!name && worker_info->debug>=1)
-									Log("[WW] name of param not set in %s\n",sensor_name?sensor_name:0);
-								struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
-								struct snmp_pdu *response=NULL;
-								oid entry_oid[MAX_OID_LEN];
-								size_t entry_oid_len = MAX_OID_LEN;
-								read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
-								snmp_add_null_var(pdu,entry_oid,entry_oid_len);
-								int status = snmp_synch_response(ss,pdu,&response);
-								if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
-									/* A lot of variables. Just if we pass SNMPV3 someday.
-									struct variable_list *vars;
-									for(vars=response->variables; vars; vars=vars->next_variable)
-										print_variable(vars->name,vars->name_length,vars);
-									*/
-									if(worker_info->debug>=4)
-										Log("response type: %d\n",response->variables->type);
-									switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
-										case ASN_INTEGER:
-											if(kafka){
-												sprintbuf(printbuf,"\"%s\":%ld,",name,response->variables->val.integer);
-											}else{
-												if(worker_info->debug>=3){
-													Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",name,json_object_get_string(val2),*response->variables->val.integer);
-												}
-												matheval.names[matheval.variables_pos] = name;
-												matheval.values[matheval.variables_pos++] = *response->variables->val.integer;
-												assert(matheval.variables_pos<matheval.total_lenght);
-											}
-											break;
-										case ASN_OCTET_STR:
-											sprintbuf(printbuf,"\"%s\":\"%s\",",name,response->variables->val.string);
-											break;
-										default:
-											Log("[WW] Unknow variable type %d in line %d\n",response->variables->type,__LINE__);
-									}
-									snmp_free_pdu(response);
-
-								}else if(worker_info->debug){
-									if (status == STAT_SUCCESS)
-										Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
- 								else
-										Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
-								}
-							}else if(0==strncmp(key2,"op",strlen("op"))){
-								/* @TODO buffer this! */
-								void *f = evaluator_create ((char *)json_object_get_string(val2)); /*really it has to do (void *). See libmatheval doc. */
-								double d = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
-								evaluator_destroy (f);
-								if(worker_info->debug>=4)
-									Log("Result of operation %s: %lf\n",key2,d);
-								/* op will send by default, so we ignore kafka param */
-								sprintbuf(printbuf,"\"%s\":%lf,",name,d);
-
-							}else{
-								if(worker_info->debug>=1)
-									Log("Cannot parse %s argument\n",key2);
-							}
-						}
-					}
-					snmp_close(ss);
-				}else {
-					if(worker_info->debug>=1)
-						Log("Cannot parse %s argument\n",key);
-				}
-				sprintbuf(printbuf, ",");
-			}
-			printbuf->bpos-=2; // delete last comma (and pass \0)
-			sprintbuf(printbuf,"}");
-			//char * str_to_kafka = printbuf->buf;
-			//printbuf->buf=NULL;
-			if(peername && sensor_name && community){
-				if(worker_info->debug>=3)
-					Log("[Kafka] %s\n",printbuf->buf);
-				rd_kafka_produce(rk, (char *)worker_info->kafka_topic, worker_info->kafka_partition, 
-				                 RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos);
-				printbuf->buf=NULL; // rdkafka wikk free it
-			}
-			printbuf_free(printbuf);
+			json_object * sensor_info = elm->rfqe_ptr;
+			process_sensor(worker_info,&pt_worker_info,sensor_info);
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}
 		sleep(worker_info->sleep_worker);
