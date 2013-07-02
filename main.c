@@ -15,6 +15,10 @@
 #include <librdkafka/rdkafka.h>
 #include <matheval.h>
 
+#ifndef NDEBUG
+#include <ctype.h>
+#endif
+
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
     "\"debug\": 3,"
@@ -265,7 +269,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
 						case ASN_INTEGER:
 							if(printbuf)
-								sprintbuf(printbuf,"\"value\":%ld,",*response->variables->val.integer);
+								sprintbuf(printbuf,"\"value\":%d,",*response->variables->val.integer);
 							if(worker_info->debug>=3){
 								Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",
 									name,json_object_get_string(val2),*response->variables->val.integer);
@@ -276,16 +280,26 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						case ASN_OCTET_STR:
 							number = atol((const char *)response->variables->val.string);
 							if(worker_info->debug>=3){
-								Log("Saving %lf var in libmatheval array. OID=%s;Value=%d\n",name,json_object_get_string(val2),number);
+								Log("Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val2),number);
 							}
 							libmatheval_append(&matheval,name,number);
 
-							if(printbuf)
-								sprintbuf(printbuf,"\"value\":\"%s\",",response->variables->val.string);							
+							if(printbuf){
+								char * aux = malloc(sizeof(char)*(response->variables->val_len + 1));
+								snprintf(aux, response->variables->val_len + 1, "%s", 
+									response->variables->val.string);
+								sprintbuf(printbuf,"\"value\":\"%s\",",aux);
+								free(aux);
+							}
 							break;
 						default:
 							Log("[WW] Unknow variable type %d in line %d\n",response->variables->type,__LINE__);
 					};
+					#ifndef NDEBUG
+					int i=0;
+					for(i=0;printbuf && i<printbuf->bpos;++i)
+						assert(isprint(printbuf->buf[i] ));
+					#endif
 					snmp_free_pdu(response);
 
 				}else if(worker_info->debug){
@@ -304,8 +318,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				/* op will send by default, so we ignore kafka param */
 				libmatheval_append(&matheval, name,d);
 
-				if(printbuf)
-					sprintbuf(printbuf,"\"value\":%lf,",d);
+				if(printbuf){
+					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
+					sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
+					sprintbuf(printbuf, "\"type\":\"monitor\",");
+					sprintbuf(printbuf, "\"value\":\"%ld\",",d);
+				}
 
 			}else{
 				if(worker_info->debug>=1)
@@ -314,7 +332,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		}
 
 		if(printbuf){
-			
 			printbuf->bpos--; /* delete last comma */
 			sprintbuf(printbuf,"}");
 

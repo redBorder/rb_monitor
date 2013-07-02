@@ -3,14 +3,14 @@ PROGNAME=rb_monitor
 all: $(PROGNAME) 
 
 CC = cc
-CFLAGS = -g -W -Wall -Wno-missing-field-initializers 
+CFLAGS = -g -W -Wall -Wno-missing-field-initializers -DNDEBUG
 
 PREFIX=/opt/rb
 
 clean: 
-	-rm -rf main
+	-rm -rf $(PROGNAME)
 
-rb_monitor: main.c
+$(PROGNAME): main.c
 	$(CC) $(CFLAGS) -o $@ $< -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:
