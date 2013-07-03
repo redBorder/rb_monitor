@@ -240,8 +240,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key2,"oid",strlen("oid"))){
 				assert(sensor_data->sensor_name);
 				/* @TODO test passing a sensor without params to caller function. */
-				if(!name && worker_info->debug>=1){
-					Log("[WW] name of param not set in %s. Skipping\n",sensor_data->sensor_name);
+				if(!name){
+					if(worker_info->debug>=1)
+						Log("[WW] name of param not set in %s. Skipping\n",sensor_data->sensor_name);
 					continue /*foreach*/;
 				}
 				if(printbuf){
@@ -278,6 +279,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						
 							break;
 						case ASN_OCTET_STR:
+							/* We don't know if it's a double inside a string; We try to convert and save */
 							number = atol((const char *)response->variables->val.string);
 							if(worker_info->debug>=3){
 								Log("Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val2),number);
@@ -322,7 +324,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
 					sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
 					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					sprintbuf(printbuf, "\"value\":\"%ld\",",d);
+					sprintbuf(printbuf, "\"value\":\"%lf\",",d);
 				}
 
 			}else{
