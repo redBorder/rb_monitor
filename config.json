@@ -8,7 +8,8 @@
     "sleep_worker_thread": 1,
     "kafka_broker": "192.168.101.204",
     "kafka_topic": "redBorderMonitor",
-    "kafka_partition": 0
+    "kafka_start_partition": 0,
+    "kafka_end_partition" : 2
   }
   ,
   "sensors":

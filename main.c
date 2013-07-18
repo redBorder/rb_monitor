@@ -28,13 +28,15 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"sleep_main\": 10,"
     "\"sleep_worker\": 2,"
     "\"kafka_broker\": \"localhost\","
-    "\"kafka_topic\": \"SNMP\""
+    "\"kafka_topic\": \"SNMP\","
+    "\"kafka_start_partition\": 0,"
+    "\"kafka_end_partition\": 2"
   "}";
 
 /// Info needed by threads.
 struct _worker_info{
 	const char * community,*kafka_broker,*kafka_topic;
-	int64_t sleep_worker,max_fails,timeout,kafka_partition,debug;
+	int64_t sleep_worker,max_fails,timeout,kafka_start_partition,kafka_current_partition,kafka_end_partition,debug;
 	rd_fifoq_t *queue;
 };
 
@@ -136,9 +138,13 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->kafka_topic	= json_object_get_string(val);
 		}
-		else if(0==strncmp(key,"kafka_partition", strlen("kafka_partition")))
+		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition")))
 		{
-			worker_info->kafka_partition	= json_object_get_int64(val);
+			worker_info->kafka_start_partition = worker_info->kafka_end_partition = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
+		{
+			worker_info->kafka_end_partition = json_object_get_int64(val);
 		}
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
@@ -341,12 +347,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			//printbuf->buf=NULL;
 			if(sensor_data->peername && sensor_data->sensor_name && sensor_data->community){
 				if(worker_info->debug>=3)
-					Log("[Kafka] %s\n",printbuf->buf);
-				if(0==rd_kafka_produce(pt_worker_info->rk, (char *)worker_info->kafka_topic, worker_info->kafka_partition, 
-				                 RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos))
+					Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
+				if(0==rd_kafka_produce(pt_worker_info->rk, (char *)worker_info->kafka_topic, 
+						worker_info->kafka_current_partition++, 
+						RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos))
 					printbuf->buf=NULL; // rdkafka will free it
 			}
 			printbuf_free(printbuf);
+			if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
+				worker_info->kafka_current_partition = worker_info->kafka_start_partition;
 			printbuf = NULL;
 		}
 
