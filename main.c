@@ -231,7 +231,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		if(kafka){
 			printbuf = printbuf_new();
 			sprintbuf(printbuf,"{");
-			sprintbuf(printbuf,"\"event_timestamp\":%lu,",tv.tv_sec*1000 + tv.tv_usec/1000);
+			sprintbuf(printbuf,"\"timestamp\":%lu,",tv.tv_sec*1000 + tv.tv_usec/1000);
 			sprintbuf(printbuf,"\"sensor_id\":%lu,",sensor_data->sensor_id);
 		}
 
