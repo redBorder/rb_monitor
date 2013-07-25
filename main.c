@@ -33,8 +33,10 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"kafka_end_partition\": 2"
   "}";
 
-/// Info needed by threads.
+/// SHARED Info needed by threads.
 struct _worker_info{
+	struct snmp_session default_session;
+	pthread_mutex_t session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
 	int64_t sleep_worker,max_fails,timeout,kafka_start_partition,kafka_current_partition,kafka_end_partition,debug;
 	rd_fifoq_t *queue;
@@ -49,7 +51,7 @@ struct _sensor_data{
 };
 
 struct _perthread_worker_info{
-	struct snmp_session session;
+	struct snmp_session *session;
 	rd_kafka_t * rk;
 	int thread_ok;
 	struct _sensor_data sensor_data;
@@ -63,7 +65,7 @@ int run = 1;
 void sigproc(int sig) {
   static int called = 0;
 
-  if(called) return; else called = 1;
+  if(called++) return;
   run = 0;
   (void)sig;
 }
@@ -183,6 +185,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
+	struct snmp_session *ss;
 
 	/* Just to avoid dynamic memory */
 	const char *names[json_object_array_length(monitors)];
@@ -202,14 +205,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		}
 	}
 
-	pt_worker_info->session.peername = (char *)sensor_data->peername; /* We trust in session. It will not modify it*/
-	pt_worker_info->session.community = (unsigned char *)sensor_data->community; /* We trust in session. It will not modify it*/
-	pt_worker_info->session.community_len = strlen(sensor_data->community);
-	struct snmp_session *ss;
-	if(NULL == (ss = snmp_open(&pt_worker_info->session))){
-		Log("Error creating session: %s",snmp_errstring(pt_worker_info->session.s_snmp_errno));
+	pthread_mutex_lock(&worker_info->session_mutex);
+	worker_info->default_session.peername = (char *)sensor_data->peername; /* We trust in session. It will not modify it*/
+	worker_info->default_session.community = (unsigned char *)sensor_data->community; /* We trust in session. It will not modify it*/
+	worker_info->default_session.timeout = sensor_data->timeout;
+	if(NULL == (ss = snmp_open(&worker_info->default_session))){
+		Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
 		aok=0;
 	}
+	pthread_mutex_unlock(&worker_info->session_mutex);
 
 	for(int i=0;ss && aok && i<json_object_array_length(monitors);++i){
 		struct timeval tv;
@@ -435,9 +439,6 @@ void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
 	
-	snmp_sess_init(&pt_worker_info.session); /* set defaults */
-	pt_worker_info.session.version  = SNMP_VERSION_1;
-	
 	pt_worker_info.thread_ok = 1;
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
@@ -448,7 +449,7 @@ void * worker(void *_info){
 	
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
-		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1))){
+		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
 			if(worker_info->debug>=2)
 				Log("Pop element %p\n",elm->rfqe_ptr);
 			json_object * sensor_info = elm->rfqe_ptr;
@@ -480,8 +481,9 @@ int main(int argc, char  *argv[])
 	char opt;
 	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL;
 	struct json_object * default_config = json_tokener_parse( str_default_config );
-	struct _worker_info worker_info = {0};
+	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
+	memset(&worker_info,0,sizeof(worker_info));
 	assert(default_config);
 	pthread_t * pd_thread = NULL;
 	rd_fifoq_t queue = {{0}};
@@ -538,6 +540,10 @@ int main(int argc, char  *argv[])
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
 	}
 
+	snmp_sess_init(&worker_info.default_session); /* set defaults */
+	worker_info.default_session.version  = SNMP_VERSION_1;
+	pthread_mutex_init(&worker_info.session_mutex,0);
+
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
 		Log("[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
 	}else{
@@ -564,6 +570,7 @@ int main(int argc, char  *argv[])
 		}
 	}
 
+	pthread_mutex_destroy(&worker_info.session_mutex);
 	json_object_put(default_config);
 	json_object_put(config_file);
 	rd_fifoq_destroy(&queue);
