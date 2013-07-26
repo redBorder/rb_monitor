@@ -1,7 +1,7 @@
 {
   "conf": {
     "debug": 3,
-    "threads": 3,
+    "threads": 1,
     "timeout": 1,
     "max_fails": 2,
     "sleep_main_thread": 5,
@@ -9,7 +9,7 @@
     "kafka_broker": "192.168.101.204",
     "kafka_topic": "redBorderMonitor",
     "kafka_start_partition": 0,
-    "kafka_end_partition" : 2
+    "kafka_end_partition" : 0
   }
   ,
   "sensors":

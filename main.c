@@ -51,7 +51,6 @@ struct _sensor_data{
 };
 
 struct _perthread_worker_info{
-	struct snmp_session *session;
 	rd_kafka_t * rk;
 	int thread_ok;
 	struct _sensor_data sensor_data;
@@ -185,6 +184,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
+	void * sessp; /* I have no idea what is this for. See session_api.h */
 	struct snmp_session *ss;
 
 	/* Just to avoid dynamic memory */
@@ -199,23 +199,32 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			Log("[EE] Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
 			aok=0;
 		}
-		if(!sensor_data->peername){
+		if(!sensor_data->community){
 			Log("[EE] Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
 			aok=0;
 		}
 	}
 
-	pthread_mutex_lock(&worker_info->session_mutex);
-	worker_info->default_session.peername = (char *)sensor_data->peername; /* We trust in session. It will not modify it*/
-	worker_info->default_session.community = (unsigned char *)sensor_data->community; /* We trust in session. It will not modify it*/
-	worker_info->default_session.timeout = sensor_data->timeout;
-	if(NULL == (ss = snmp_open(&worker_info->default_session))){
-		Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
-		aok=0;
+	if(aok){
+		pthread_mutex_lock(&worker_info->session_mutex);
+		/* @TODO: You can do it later, see session_api.h */
+		sessp = snmp_sess_open(&worker_info->default_session);
+		if(NULL== sessp || NULL == (ss = snmp_sess_session(sessp))){
+			Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
+			aok=0;
+		}else{
+			/*memcpy(ss,&worker_info->default_session,sizeof(*ss)); Much pointers!*/
+			/*if (ss->community) free(ss->community);*/
+			ss->community = (u_char *)strdup(sensor_data->community);
+			ss->community_len = strlen(sensor_data->community);
+			/*if (ss->peername) free(ss->peername);*/
+			ss->peername = strdup(sensor_data->peername);
+			ss->timeout = sensor_data->timeout;
+		}
+		pthread_mutex_unlock(&worker_info->session_mutex);
 	}
-	pthread_mutex_unlock(&worker_info->session_mutex);
 
-	for(int i=0;ss && aok && i<json_object_array_length(monitors);++i){
+	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
 		struct timeval tv;
 		gettimeofday(&tv,NULL);
 
@@ -267,7 +276,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				size_t entry_oid_len = MAX_OID_LEN;
 				read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
 				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
-				int status = snmp_synch_response(ss,pdu,&response);
+				int status = snmp_sess_synch_response(sessp,pdu,&response);
 				if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
 					/* A lot of variables. Just if we pass SNMPV3 someday.
 					struct variable_list *vars;
@@ -364,7 +373,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		}
 
 	}
-	snmp_close(ss);
+	snmp_sess_close(sessp);
 
 	return aok;
 } 
