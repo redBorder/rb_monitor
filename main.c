@@ -52,6 +52,9 @@ struct _sensor_data{
 
 struct _perthread_worker_info{
 	rd_kafka_t * rk;
+	#ifndef KAFKA_07
+	rd_kafka_topic_t *rkt;
+	#endif
 	int thread_ok;
 	struct _sensor_data sensor_data;
 };
@@ -208,6 +211,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	if(aok){
 		pthread_mutex_lock(&worker_info->session_mutex);
 		/* @TODO: You can do it later, see session_api.h */
+		worker_info->default_session.peername = strdup(sensor_data->peername);
 		sessp = snmp_sess_open(&worker_info->default_session);
 		if(NULL== sessp || NULL == (ss = snmp_sess_session(sessp))){
 			Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
@@ -218,8 +222,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			ss->community = (u_char *)strdup(sensor_data->community);
 			ss->community_len = strlen(sensor_data->community);
 			/*if (ss->peername) free(ss->peername);*/
-			ss->peername = strdup(sensor_data->peername);
 			ss->timeout = sensor_data->timeout;
+
+			ss->flags = worker_info->default_session.flags;
 		}
 		pthread_mutex_unlock(&worker_info->session_mutex);
 	}
@@ -361,10 +366,26 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			if(sensor_data->peername && sensor_data->sensor_name && sensor_data->community){
 				if(worker_info->debug>=3)
 					Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
-				if(0==rd_kafka_produce(pt_worker_info->rk, (char *)worker_info->kafka_topic, 
-						worker_info->kafka_current_partition++, 
-						RD_KAFKA_OP_F_FREE, printbuf->buf, printbuf->bpos))
+#ifdef KAFKA_07
+				if(0==rd_kafka_produce(
+					pt_worker_info->rk, (char *)worker_info->kafka_topic, 
+						worker_info->kafka_current_partition++,
+						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos))
 					printbuf->buf=NULL; // rdkafka will free it
+					
+#else /* KAFKA_08 */
+				if(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
+						RD_KAFKA_MSG_F_FREE,
+						/* Payload and length */
+						printbuf->buf, printbuf->bpos,
+						/* Optional key and its length */
+						NULL, 0,
+						/* Message opaque, provided in
+						 * delivery report callback as
+						 * msg_opaque. */
+						NULL))
+					printbuf->buf=NULL; // rdkafka will free it
+#endif
 			}
 			printbuf_free(printbuf);
 			if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
@@ -447,14 +468,37 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	
+	#ifndef KAFKA_07
+	rd_kafka_conf_t conf;
+	rd_kafka_topic_conf_t topic_conf;
+	char errstr[256];
+	#endif	
 	pt_worker_info.thread_ok = 1;
+	
 
+	#ifdef KAFKA_07
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
 		if(worker_info->debug>=1)
 			Log("Error calling kafka_new producer: %s\n",strerror(errno));
 		pt_worker_info.thread_ok=0;
 	}
+	#else /* KAFKA_08 */
+	rd_kafka_defaultconf_set(&conf);
+	rd_kafka_topic_defaultconf_set(&topic_conf);
+	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, &conf,errstr, sizeof(errstr)))) {
+		if(worker_info->debug>=1)
+			Log("Error calling kafka_new producer: %s\n",errstr);
+		pt_worker_info.thread_ok=0;
+	}
+
+	if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
+		if(worker_info->debug>=1)
+			Log("No valid brokers specified\n");
+		pt_worker_info.thread_ok=0;
+	}
+	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, &topic_conf);
+	rd_kafka_topic_defaultconf_set(&topic_conf);
+	#endif
 	
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
