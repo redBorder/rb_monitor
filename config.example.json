@@ -6,8 +6,9 @@
     "max_fails": 2,
     "sleep_main_thread": 5,
     "sleep_worker_thread": 1,
-    "kafka_broker": "192.168.101.201",
-    "kafka_topic": "redBorderMonitor",
+    "kafka_broker": "192.168.101.204",
+    "kafka_topic": "rb_monitor",
+    "kafka_timeout": 2,
     "kafka_start_partition": 0,
     "kafka_end_partition" : 0
   }
@@ -17,7 +18,7 @@
   [
     {
       "sensor_id":1,
-      "timeout":1000,
+      "timeout":2000,
       "sensor_name": "sensor-arriba",
       "sensor_ip": "sensor-arriba", /* This field is better after sensor_name, so we can debug it */
       "community" : "redBorder",

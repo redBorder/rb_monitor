@@ -38,7 +38,8 @@ struct _worker_info{
 	struct snmp_session default_session;
 	pthread_mutex_t session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
-	int64_t sleep_worker,max_fails,timeout,kafka_start_partition,kafka_current_partition,kafka_end_partition,debug;
+	int64_t sleep_worker,max_fails,timeout,kafka_start_partition,kafka_current_partition,
+	        kafka_end_partition,kafka_timeout,debug;
 	rd_fifoq_t *queue;
 };
 
@@ -150,6 +151,10 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->kafka_end_partition = json_object_get_int64(val);
 		}
+		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
+		{
+			worker_info->kafka_timeout = json_object_get_int64(val);
+		}
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
 			errno = 0;
@@ -170,7 +175,7 @@ struct libmatheval_stuffs{
 	unsigned int total_lenght;
 };
 
-int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
+static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
 	if(matheval->variables_pos<matheval->total_lenght){
 		matheval->names[matheval->variables_pos] = name;
 		matheval->values[matheval->variables_pos++] = val;
@@ -179,6 +184,23 @@ int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,doub
 		return 0;
 	}
 	return 1;
+}
+
+/**
+ * Message delivery report callback.
+ * Called once for each message.
+ * See rdkafka.h for more information.
+ */
+static void msg_delivered (rd_kafka_t *rk,
+			   void *payload, size_t len,
+			   int error_code,
+			   void *opaque, void *msg_opaque) {
+
+	if (error_code)
+		printf("%% Message delivery failed: %s\n",
+		       rd_kafka_err2str(rk, error_code));
+	else
+		printf("%% Message delivered (%zd bytes)\n", len);
 }
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
@@ -211,7 +233,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	if(aok){
 		pthread_mutex_lock(&worker_info->session_mutex);
 		/* @TODO: You can do it later, see session_api.h */
-		worker_info->default_session.peername = strdup(sensor_data->peername);
+		worker_info->default_session.peername = (char *)sensor_data->peername;
 		sessp = snmp_sess_open(&worker_info->default_session);
 		if(NULL== sessp || NULL == (ss = snmp_sess_session(sessp))){
 			Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
@@ -370,8 +392,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(0==rd_kafka_produce(
 					pt_worker_info->rk, (char *)worker_info->kafka_topic, 
 						worker_info->kafka_current_partition++,
-						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos))
+						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos)){
 					printbuf->buf=NULL; // rdkafka will free it
+				}
 					
 #else /* KAFKA_08 */
 				if(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
@@ -383,9 +406,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						/* Message opaque, provided in
 						 * delivery report callback as
 						 * msg_opaque. */
-						NULL))
+						NULL)){
 					printbuf->buf=NULL; // rdkafka will free it
+
+					rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
+				}
 #endif
+				else
+				{
+					Log("[Errkafka] Cannot produce kafka message\n");
+				}
 			}
 			printbuf_free(printbuf);
 			if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
@@ -484,6 +514,8 @@ void * worker(void *_info){
 	}
 	#else /* KAFKA_08 */
 	rd_kafka_defaultconf_set(&conf);
+	conf.producer.dr_cb = msg_delivered;
+
 	rd_kafka_topic_defaultconf_set(&topic_conf);
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, &conf,errstr, sizeof(errstr)))) {
 		if(worker_info->debug>=1)
@@ -620,8 +652,10 @@ int main(int argc, char  *argv[])
 			for(int i=0;i<main_info.threads;++i){
 				pthread_join(pd_thread[i], NULL);
 			}
+			free(pd_thread);
 		}
 	}
+
 
 	pthread_mutex_destroy(&worker_info.session_mutex);
 	json_object_put(default_config);
