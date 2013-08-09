@@ -38,8 +38,12 @@ struct _worker_info{
 	struct snmp_session default_session;
 	pthread_mutex_t session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
-	int64_t sleep_worker,max_fails,timeout,kafka_start_partition,kafka_current_partition,
-	        kafka_end_partition,kafka_timeout,debug;
+	int64_t sleep_worker,max_fails,timeout,debug;
+	#if RD_KAFKA_VERSION == 0x00080000
+	int64_t kafka_timeout;
+	#else
+	int64_t kafka_start_partition,kafka_current_partition,kafka_end_partition;
+	#endif
 	rd_fifoq_t *queue;
 };
 
@@ -53,7 +57,7 @@ struct _sensor_data{
 
 struct _perthread_worker_info{
 	rd_kafka_t * rk;
-	#ifndef KAFKA_07
+	#if RD_KAFKA_VERSION == 0x00080000
 	rd_kafka_topic_t *rkt;
 	#endif
 	int thread_ok;
@@ -73,7 +77,7 @@ void sigproc(int sig) {
   (void)sig;
 }
 
-void Log(char *fmt,...){
+static inline void Log(char *fmt,...){
 	va_list ap;
 	va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
@@ -143,6 +147,17 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->kafka_topic	= json_object_get_string(val);
 		}
+#if RD_KAFKA_VERSION == 0x00080000
+		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition"))
+			 || 0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
+		{
+			Log("%s Can only be specified in kafka 0.7. Skipping",key);
+		}
+		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
+		{
+			worker_info->kafka_timeout = json_object_get_int64(val);
+		}
+#else
 		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition")))
 		{
 			worker_info->kafka_start_partition = worker_info->kafka_end_partition = json_object_get_int64(val);
@@ -153,8 +168,9 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		}
 		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
 		{
-			worker_info->kafka_timeout = json_object_get_int64(val);
+			Log("%s Can only be specified in kafka 0.8. Skipping",key);
 		}
+#endif
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
 			errno = 0;
@@ -186,15 +202,16 @@ static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *na
 	return 1;
 }
 
+#if RD_KAFKA_VERSION == 0x00080000
 /**
  * Message delivery report callback.
  * Called once for each message.
  * See rdkafka.h for more information.
  */
 static void msg_delivered (rd_kafka_t *rk,
-			   void *payload, size_t len,
+			   void __attribute((unused)) *payload, size_t len,
 			   int error_code,
-			   void *opaque, void *msg_opaque) {
+			   void __attribute((unused)) *opaque, void __attribute((unused)) *msg_opaque) {
 
 	if (error_code)
 		printf("%% Message delivery failed: %s\n",
@@ -202,6 +219,8 @@ static void msg_delivered (rd_kafka_t *rk,
 	else
 		printf("%% Message delivered (%zd bytes)\n", len);
 }
+
+#endif
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
@@ -261,7 +280,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		struct printbuf* printbuf;
 
 		/* list twice. Ugly, but faster than prepare printbuf and them discard. */
-		json_object_object_foreach(value,key,val){
+		json_object_object_foreach(value,key, val){
+			(void)val;
 			if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"op",strlen("op"))){
 				kafka=1;
 				break;
@@ -387,16 +407,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			//printbuf->buf=NULL;
 			if(sensor_data->peername && sensor_data->sensor_name && sensor_data->community){
 				if(worker_info->debug>=3)
+				{
+#if RD_KAFKA_VERSION == 0x00080000
+					Log("[Kafka:random] %s\n",printbuf->buf);
+#else
 					Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
-#ifdef KAFKA_07
-				if(0==rd_kafka_produce(
-					pt_worker_info->rk, (char *)worker_info->kafka_topic, 
-						worker_info->kafka_current_partition++,
-						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos)){
-					printbuf->buf=NULL; // rdkafka will free it
+#endif
 				}
+#if RD_KAFKA_VERSION == 0x00080000
 					
-#else /* KAFKA_08 */
 				if(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
 						RD_KAFKA_MSG_F_FREE,
 						/* Payload and length */
@@ -411,6 +430,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 					rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
 				}
+
+#else /* KAFKA_07 */
+
+				if(0==rd_kafka_produce(
+					pt_worker_info->rk, (char *)worker_info->kafka_topic, 
+						worker_info->kafka_current_partition++,
+						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos)){
+					printbuf->buf=NULL; // rdkafka will free it
+				}
+
 #endif
 				else
 				{
@@ -418,8 +447,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 			}
 			printbuf_free(printbuf);
+			#if RD_KAFKA_VERSION && RD_KAFKA_VERSION < 0x00080000
 			if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
 				worker_info->kafka_current_partition = worker_info->kafka_start_partition;
+			#endif
 			printbuf = NULL;
 		}
 
@@ -498,7 +529,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	#ifndef KAFKA_07
+	#if RD_KAFKA_VERSION == 0x00080000
 	rd_kafka_conf_t conf;
 	rd_kafka_topic_conf_t topic_conf;
 	char errstr[256];
@@ -506,13 +537,8 @@ void * worker(void *_info){
 	pt_worker_info.thread_ok = 1;
 	
 
-	#ifdef KAFKA_07
-	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
-		if(worker_info->debug>=1)
-			Log("Error calling kafka_new producer: %s\n",strerror(errno));
-		pt_worker_info.thread_ok=0;
-	}
-	#else /* KAFKA_08 */
+	#if RD_KAFKA_VERSION == 0x00080000
+
 	rd_kafka_defaultconf_set(&conf);
 	conf.producer.dr_cb = msg_delivered;
 
@@ -530,6 +556,14 @@ void * worker(void *_info){
 	}
 	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, &topic_conf);
 	rd_kafka_topic_defaultconf_set(&topic_conf);
+
+	#else /* KAFKA_08 */
+
+	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
+		if(worker_info->debug>=1)
+			Log("Error calling kafka_new producer: %s\n",strerror(errno));
+		pt_worker_info.thread_ok=0;
+	}
 	#endif
 	
 	while(pt_worker_info.thread_ok && run){
@@ -562,7 +596,7 @@ void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,int debug){
 int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
-	int go_daemon=0,debug=0; // @todo delete duplicity of debug
+	int debug=0; // @todo delete duplicity of debug
 	char opt;
 	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL;
 	struct json_object * default_config = json_tokener_parse( str_default_config );
@@ -581,7 +615,7 @@ int main(int argc, char  *argv[])
 			printHelp(argv[0]);
 			exit(0);
 		case 'g':
-			go_daemon = 1;
+			/* go_daemon = 1; */
 			break;
 		case 'c':
 			configPath = optarg;
@@ -661,5 +695,5 @@ int main(int argc, char  *argv[])
 	json_object_put(default_config);
 	json_object_put(config_file);
 	rd_fifoq_destroy(&queue);
-	return 0;
+	return ret;
 }

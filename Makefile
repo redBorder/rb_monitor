@@ -2,14 +2,14 @@ PROGNAME=rb_monitor
 
 all: $(PROGNAME) 
 
-CC = cc
-CFLAGS = -g -W -Wall -Wno-missing-field-initializers -DNDEBUG -DWITH_LIBRD
+CC ?= cc
+CFLAGS ?= -g -W -Wall -Wno-missing-field-initializers -DNDEBUG -DWITH_LIBRD
 
-PREFIX=/opt/rb
-LIBRDKAFKA_INCLUDES = /opt/rb/include
-LIBRD_INCLUDES = /opt/rb/include
-LIBRDKAFKA_LIBRARIES = /opt/rb/lib
-LIBRD_LIBRARIES = /opt/rb/lib
+PREFIX?=/opt/rb
+LIBRDKAFKA_INCLUDES ?= /opt/rb/include
+LIBRD_INCLUDES ?= /opt/rb/include
+LIBRDKAFKA_LIBRARIES ?= /opt/rb/lib
+LIBRD_LIBRARIES ?= /opt/rb/lib
 
 CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
 LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
