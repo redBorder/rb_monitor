@@ -277,7 +277,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		const char * name = NULL;
 		json_object *value = json_object_array_get_idx(monitors, i);
 		int kafka=0;
-		struct printbuf* printbuf;
+		struct printbuf* printbuf=NULL;
 
 		/* list twice. Ugly, but faster than prepare printbuf and them discard. */
 		json_object_object_foreach(value,key, val){
