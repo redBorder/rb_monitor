@@ -29,8 +29,10 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"sleep_worker\": 2,"
     "\"kafka_broker\": \"localhost\","
     "\"kafka_topic\": \"SNMP\","
+    #if RD_KAFKA_VERSION<0x00080000
     "\"kafka_start_partition\": 0,"
     "\"kafka_end_partition\": 2"
+    #endif
   "}";
 
 /// SHARED Info needed by threads.
@@ -228,7 +230,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
-	void * sessp; /* I have no idea what is this for. See session_api.h */
+	void * sessp;
 	struct snmp_session *ss;
 
 	/* Just to avoid dynamic memory */
@@ -274,100 +276,94 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		struct timeval tv;
 		gettimeofday(&tv,NULL);
 
-		const char * name = NULL;
-		json_object *value = json_object_array_get_idx(monitors, i);
+		const char * name=NULL,*name_split_suffix = NULL;
+		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
 		int kafka=0;
+		const char * splittok=NULL,*splitop=NULL;
 		struct printbuf* printbuf=NULL;
+		const char * unit=NULL;
+		char value_buf[1024];
+		double number;
+		int number_setted = 0;
+		
 
-		/* list twice. Ugly, but faster than prepare printbuf and them discard. */
-		json_object_object_foreach(value,key, val){
-			(void)val;
-			if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"op",strlen("op"))){
-				kafka=1;
-				break;
-			}
-		}
 
-		if(kafka){
-			printbuf = printbuf_new();
-			sprintbuf(printbuf,"{");
-			sprintbuf(printbuf,"\"timestamp\":%lu,",tv.tv_sec);
-			sprintbuf(printbuf,"\"sensor_id\":%lu,",sensor_data->sensor_id);
-		}
+		json_object_object_foreach(monitor_parameters_array,key,val){
+			if(0==strncmp(key,"split",strlen("split")+1)){
+				splittok = json_object_get_string(val);
+			}else if(0==strncmp(key,"splitop",strlen("splitop"))){
+				splitop = json_object_get_string(val);
+			}else if(0==strncmp(key,"name",strlen("name")+1)){ 
+				name = json_object_get_string(val);
+			}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
+				name_split_suffix = json_object_get_string(val);
+			}else if(0==strncmp(key,"unit",strlen("unit"))){
+				unit = json_object_get_string(val);
+			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
+				kafka = 1;
+			}else if(0==strncmp(key,"oid",strlen("oid"))){
 
-		json_object_object_foreach(value,key2,val2){
-			if(0==strncmp(key2,"name",strlen("name"))){ 
-				name = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"unit",strlen("unit"))){
-				if(printbuf)
-					sprintbuf(printbuf, "\"%s\":\"%s\",",key2,json_object_get_string(val2));
-			}else if(0==strncmp(key2,"kafka",strlen("kafka"))){
-				// Do nothing
-			}else if(0==strncmp(key2,"oid",strlen("oid"))){
-				assert(sensor_data->sensor_name);
 				/* @TODO test passing a sensor without params to caller function. */
-				if(!name){
+				if(unlikely(!name)){
 					if(worker_info->debug>=1)
 						Log("[WW] name of param not set in %s. Skipping\n",sensor_data->sensor_name);
-					continue /*foreach*/;
+					break /*foreach*/;
 				}
-				if(printbuf){
-					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
-					sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
-					sprintbuf(printbuf, "\"type\":\"monitor\",");
-				}
-				
+
 				struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
 				struct snmp_pdu *response=NULL;
 				oid entry_oid[MAX_OID_LEN];
 				size_t entry_oid_len = MAX_OID_LEN;
-				read_objid(json_object_get_string(val2),entry_oid,&entry_oid_len);
+				read_objid(json_object_get_string(val),entry_oid,&entry_oid_len);
 				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
 				int status = snmp_sess_synch_response(sessp,pdu,&response);
-				if(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR){
+				if(likely(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR)){
 					/* A lot of variables. Just if we pass SNMPV3 someday.
 					struct variable_list *vars;
 					for(vars=response->variables; vars; vars=vars->next_variable)
 						print_variable(vars->name,vars->name_length,vars);
 					*/
+					
 					double number;
 					if(worker_info->debug>=4)
 						Log("response type: %d\n",response->variables->type);
+
 					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
 						case ASN_INTEGER:
-							if(printbuf)
-								sprintbuf(printbuf,"\"value\":%d,",*response->variables->val.integer);
+							snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
 							if(worker_info->debug>=3){
 								Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",
-									name,json_object_get_string(val2),*response->variables->val.integer);
+									name,json_object_get_string(val),*response->variables->val.integer);
 							}
 							libmatheval_append(&matheval,name,*response->variables->val.integer);
 						
 							break;
 						case ASN_OCTET_STR:
 							/* We don't know if it's a double inside a string; We try to convert and save */
-							number = atol((const char *)response->variables->val.string);
-							if(worker_info->debug>=3){
-								Log("Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val2),number);
+							number = strtod((const char *)response->variables->val.string,NULL);
+							number_setted = 1;
+							if(splittok)
+							{
+								if(worker_info->debug>=3){
+									Log("Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
+								}
+								libmatheval_append(&matheval,name,number);
 							}
-							libmatheval_append(&matheval,name,number);
 
-							if(printbuf){
-								char * aux = malloc(sizeof(char)*(response->variables->val_len + 1));
-								snprintf(aux, response->variables->val_len + 1, "%s", 
-									response->variables->val.string);
-								sprintbuf(printbuf,"\"value\":\"%s\",",aux);
-								free(aux);
+							// @TODO check val_len before copy string.
+							strncpy(value_buf,(const char *)response->variables->val.string,sizeof(value_buf));
+							value_buf[response->variables->val_len] = '\0';
+
+							if(worker_info->debug>3){
+								Log("SNMP response: %s\n",response->variables->val.string);
+								Log("Saved SNMP response (added \\n): %s\n",value_buf);
 							}
+
 							break;
 						default:
-							Log("[WW] Unknow variable type %d in line %d\n",response->variables->type,__LINE__);
+							Log("[WW] Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
 					};
-					#ifndef NDEBUG
-					int i=0;
-					for(i=0;printbuf && i<printbuf->bpos;++i)
-						assert(isprint(printbuf->buf[i] ));
-					#endif
+
 					snmp_free_pdu(response);
 
 				}else if(worker_info->debug){
@@ -376,83 +372,112 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					else
 						Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
 				}
-			}else if(0==strncmp(key2,"op",strlen("op"))){
+			}else if(0==strncmp(key,"op",strlen("op"))){
 				/* @TODO buffer this! */
-				void *f = evaluator_create ((char *)json_object_get_string(val2)); /*really it has to do (void *). See libmatheval doc. */
-				double d = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+				void *f = evaluator_create ((char *)json_object_get_string(val)); /*really it has to do (void *). See libmatheval doc. */
+				number = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+				number_setted = 1;
 				evaluator_destroy (f);
 				if(worker_info->debug>=4)
-					Log("Result of operation %s: %lf\n",key2,d);
+					Log("Result of operation %s: %lf\n",key,number);
 				/* op will send by default, so we ignore kafka param */
-				libmatheval_append(&matheval, name,d);
-
-				if(printbuf){
-					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
-					sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
-					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					sprintbuf(printbuf, "\"value\":\"%lf\",",d);
-				}
+				libmatheval_append(&matheval, name,number);
 
 			}else{
 				if(worker_info->debug>=1)
-					Log("Cannot parse %s argument (line %d)\n",key2,__LINE__);
+					Log("Cannot parse %s argument (line %d)\n",key,__LINE__);
 			}
+		} /* foreach */
+
+		if(unlikely(NULL==sensor_data->sensor_name)){
+			Log("[WW] sensor name not setted. Skipping.\n");
+			break;
 		}
 
-		if(printbuf){
-			printbuf->bpos--; /* delete last comma */
-			sprintbuf(printbuf,"}");
+		if(kafka){
+			char * tok = splittok ? strtok(value_buf,splittok) : value_buf;
+			                   /* at least one pass if splittok not setted */
+			while(NULL!=tok)
+			{
+				printbuf = printbuf_new();
+				if(likely(NULL!=printbuf)){
+					// @TODO use printbuf_memappend_fast instead! */
+					sprintbuf(printbuf, "{");
+					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
+					sprintbuf(printbuf, "\"sensor_id\":%lu,",sensor_data->sensor_id);
+					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
+					if(splittok && name_split_suffix)
+						sprintbuf(printbuf, "\"monitor\":\"%s%s\",",name,name_split_suffix);
+					else
+						sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
+					sprintbuf(printbuf, "\"type\":\"monitor\",");
+					sprintbuf(printbuf, "\"value\":\"%s\"", tok);
+					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
+					sprintbuf(printbuf, "}");
 
-			//char * str_to_kafka = printbuf->buf;
-			//printbuf->buf=NULL;
-			if(sensor_data->peername && sensor_data->sensor_name && sensor_data->community){
-				if(worker_info->debug>=3)
-				{
-#if RD_KAFKA_VERSION == 0x00080000
-					Log("[Kafka:random] %s\n",printbuf->buf);
-#else
-					Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
-#endif
+					//char * str_to_kafka = printbuf->buf;
+					//printbuf->buf=NULL;
+					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community)){
+						if(worker_info->debug>=3)
+						{
+							#if RD_KAFKA_VERSION == 0x00080000
+							Log("[Kafka:random] %s\n",printbuf->buf);
+							#else
+							Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
+							#endif
+						}
+						#if RD_KAFKA_VERSION == 0x00080000
+
+						#ifndef NDEBUG
+						int i=0;
+						for(i=0;printbuf && i<printbuf->bpos;++i)
+							assert(isprint(printbuf->buf[i] ));
+						#endif
+							
+						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
+								RD_KAFKA_MSG_F_FREE,
+								/* Payload and length */
+								printbuf->buf, printbuf->bpos,
+								/* Optional key and its length */
+								NULL, 0,
+								/* Message opaque, provided in
+								 * delivery report callback as
+								 * msg_opaque. */
+								NULL))){
+							printbuf->buf=NULL; // rdkafka will free it
+
+							rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
+						}
+
+						#else /* KAFKA_07 */
+
+						if(likely(0==rd_kafka_produce(
+							pt_worker_info->rk, (char *)worker_info->kafka_topic, 
+								worker_info->kafka_current_partition++,
+								RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos))){
+							printbuf->buf=NULL; // rdkafka will free it
+						}
+
+						#endif
+
+						else
+						{
+							Log("[Errkafka] Cannot produce kafka message\n");
+						}
+
+						tok = splittok ? strtok(NULL,splittok) : NULL;
+					}
+					printbuf_free(printbuf);
+					#if RD_KAFKA_VERSION && RD_KAFKA_VERSION < 0x00080000
+					if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
+						worker_info->kafka_current_partition = worker_info->kafka_start_partition;
+					#endif
+					printbuf = NULL;
+				}else{
+					Log("Cannot allocate memory for printbuf. Skipping\n");
 				}
-#if RD_KAFKA_VERSION == 0x00080000
-					
-				if(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
-						RD_KAFKA_MSG_F_FREE,
-						/* Payload and length */
-						printbuf->buf, printbuf->bpos,
-						/* Optional key and its length */
-						NULL, 0,
-						/* Message opaque, provided in
-						 * delivery report callback as
-						 * msg_opaque. */
-						NULL)){
-					printbuf->buf=NULL; // rdkafka will free it
-
-					rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
-				}
-
-#else /* KAFKA_07 */
-
-				if(0==rd_kafka_produce(
-					pt_worker_info->rk, (char *)worker_info->kafka_topic, 
-						worker_info->kafka_current_partition++,
-						RD_KAFKA_OP_F_FREE,printbuf->buf, printbuf->bpos)){
-					printbuf->buf=NULL; // rdkafka will free it
-				}
-
-#endif
-				else
-				{
-					Log("[Errkafka] Cannot produce kafka message\n");
-				}
-			}
-			printbuf_free(printbuf);
-			#if RD_KAFKA_VERSION && RD_KAFKA_VERSION < 0x00080000
-			if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
-				worker_info->kafka_current_partition = worker_info->kafka_start_partition;
-			#endif
-			printbuf = NULL;
-		}
+			} /* while tok */
+		} /* if kafka */
 
 	}
 	snmp_sess_close(sessp);
@@ -468,7 +493,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 
 	json_object_object_foreach(sensor_info, key, val){
 		if(0==strncmp(key,"timeout",strlen("timeout"))){
-			pt_worker_info->sensor_data.timeout = json_object_get_int64(val);
+			pt_worker_info->sensor_data.timeout = json_object_get_int64(val)*1e6; /* convert ms -> s */
 		}else if (0==strncmp(key,"sensor_name",strlen("sensor_name"))){
 			pt_worker_info->sensor_data.sensor_name = json_object_get_string(val);
 		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
@@ -647,7 +672,7 @@ int main(int argc, char  *argv[])
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
 
-
+	assert(default_config);
 	ret = parse_json_config(default_config,&worker_info,&main_info);
 	assert(ret==TRUE);
 
