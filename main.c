@@ -230,7 +230,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
-	void * sessp;
+	void * sessp=NULL;
 	struct snmp_session *ss;
 
 	/* Just to avoid dynamic memory */
