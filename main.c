@@ -498,7 +498,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						}
 					}
 					printbuf_free(printbuf);
-					#if RD_KAFKA_VERSION && RD_KAFKA_VERSION < 0x00080000
+					#ifndef RD_KAFKA_VERSION // RD_KAFKA_VERSION < 0x00080000
 					if(worker_info->kafka_current_partition>worker_info->kafka_end_partition)
 						worker_info->kafka_current_partition = worker_info->kafka_start_partition;
 					#endif
@@ -525,12 +525,12 @@ static inline void process_sensor_check_setted(const void *ptr,int *aok,const in
 	if(*aok && ptr == NULL){
 			*aok = 0;
 			if(debug>=1)
-				Log("%s%s",errmsg,sensor_name?sensor_name:"(some sensor)");
+				Log("%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
 	}
 }
 
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
-	memset(&pt_worker_info->sensor_data,1,sizeof(pt_worker_info->sensor_data));
+	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
 	pt_worker_info->sensor_data.timeout = worker_info->timeout;
 	json_object * monitors = NULL;
 	int aok = 1;
@@ -556,7 +556,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 
 
 	process_sensor_check_setted(pt_worker_info->sensor_data.sensor_name,&aok,worker_info->debug>=1,
-		"[CONFIG] Sensor_name not setted in ","some sensor");
+		"[CONFIG] Sensor_name not setted in ",NULL);
 	process_sensor_check_setted(pt_worker_info->sensor_data.peername,&aok,worker_info->debug,
 		"[CONFIG] Peername not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
 	process_sensor_check_setted(pt_worker_info->sensor_data.community,&aok,worker_info->debug,
