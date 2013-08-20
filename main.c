@@ -276,7 +276,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		struct timeval tv;
 		gettimeofday(&tv,NULL);
 
-		const char * name=NULL,*name_split_suffix = NULL;
+		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
 		int kafka=0;
 		const char * splittok=NULL,*splitop=NULL;
@@ -291,12 +291,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		json_object_object_foreach(monitor_parameters_array,key,val){
 			if(0==strncmp(key,"split",strlen("split")+1)){
 				splittok = json_object_get_string(val);
-			}else if(0==strncmp(key,"splitop",strlen("splitop"))){
+			}else if(0==strncmp(key,"split_op",strlen("split_op"))){
 				splitop = json_object_get_string(val);
 			}else if(0==strncmp(key,"name",strlen("name")+1)){ 
 				name = json_object_get_string(val);
 			}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
 				name_split_suffix = json_object_get_string(val);
+			}else if(0==strcmp(key,"instance_prefix")){
+				instance_prefix = json_object_get_string(val);
 			}else if(0==strncmp(key,"unit",strlen("unit"))){
 				unit = json_object_get_string(val);
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
@@ -395,6 +397,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		}
 
 		if(kafka){
+			double sum=0;unsigned int count=0;int freetok=0;
 			char * tok = splittok ? strtok(value_buf,splittok) : value_buf;
 			                   /* at least one pass if splittok not setted */
 			while(NULL!=tok)
@@ -410,8 +413,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						sprintbuf(printbuf, "\"monitor\":\"%s%s\",",name,name_split_suffix);
 					else
 						sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
+					if(splittok && instance_prefix)
+						sprintbuf(printbuf, "\"instance\":\"%s%d\",",instance_prefix,count);
 					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					sprintbuf(printbuf, "\"value\":\"%s\"", tok);
+					sprintbuf(printbuf, "\"value\":\"%s\",", tok);
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					sprintbuf(printbuf, "}");
 
@@ -446,7 +451,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								NULL))){
 							printbuf->buf=NULL; // rdkafka will free it
 
-							rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
 						}
 
 						#else /* KAFKA_07 */
@@ -465,7 +469,33 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							Log("[Errkafka] Cannot produce kafka message\n");
 						}
 
+						if(NULL!=splitop)
+							sum += atof(tok);
+						count++; /* always count */
+
+						if(freetok){
+							free(tok);
+							freetok=0;
+						}
+
 						tok = splittok ? strtok(NULL,splittok) : NULL;
+
+						if(NULL==tok && NULL!=splitop){
+							tok = calloc(1024,sizeof(char));
+							if(0==strcmp("sum",splitop))
+								snprintf(tok,1024,"%lf",sum);
+							else if(0==strcmp("mean",splitop))
+								snprintf(tok,1024,"%lf",sum/count);
+							else if(worker_info->debug){
+								Log("[WW] Splitop %s unknow in monitor parameter %s\n",splitop,name);
+								free(tok);
+								break; /* exit of while loop */
+							}
+							freetok=1;
+							splittok=NULL; /* avoid strtok calls and re-enter in while after process tok */
+							               /* avoid print per_instance_suffix too */
+							splitop=NULL;  /* avoid enter in this block */
+						}
 					}
 					printbuf_free(printbuf);
 					#if RD_KAFKA_VERSION && RD_KAFKA_VERSION < 0x00080000
@@ -477,6 +507,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					Log("Cannot allocate memory for printbuf. Skipping\n");
 				}
 			} /* while tok */
+
+			#if RD_KAFKA_VERSION == 0x00080000
+			rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
+			#endif /* RD_KAFKA_VERSION */
+
 		} /* if kafka */
 
 	}
