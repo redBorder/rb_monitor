@@ -520,6 +520,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	return aok;
 } 
 
+static inline void process_sensor_check_setted(const void *ptr,int *aok,const int debug, const char *errmsg,const char *sensor_name){
+	assert(aok);
+	if(*aok && ptr == NULL){
+			*aok = 0;
+			if(debug>=1)
+				Log("%s%s",errmsg,sensor_name?sensor_name:"(some sensor)");
+	}
+}
+
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
 	memset(&pt_worker_info->sensor_data,1,sizeof(pt_worker_info->sensor_data));
 	pt_worker_info->sensor_data.timeout = worker_info->timeout;
@@ -546,38 +555,14 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 	}
 
 
-	if(aok){
-		if(pt_worker_info->sensor_data.sensor_name == NULL){
-			aok = 0;
-			if(worker_info->debug>=1){
-				Log("[CONFIG] Sensor_name not setted in some sensor\n");
-			}
-		}
-	}if(aok){
-		if(pt_worker_info->sensor_data.peername == NULL){
-			aok = 0;
-			if(worker_info->debug>=1){
-				Log("[CONFIG] Peername not setted in sensor %s",
-					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
-			}
-		}
-	}if(aok){
-		if(pt_worker_info->sensor_data.community == NULL){
-			aok = 0;
-			if(worker_info->debug>=1){
-				Log("[CONFIG] Community not setted in sensor %s",
-					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
-			}
-		}
-	}if(aok){
-		if(NULL==monitors){
-			aok = 0;
-			if(worker_info->debug>=1){
-				Log("[CONFIG] Monitors not setted in sensor %s",
-					pt_worker_info->sensor_data.sensor_name?pt_worker_info->sensor_data.sensor_name:"(some sensor)");
-			}
-		}
-	}
+	process_sensor_check_setted(pt_worker_info->sensor_data.sensor_name,&aok,worker_info->debug>=1,
+		"[CONFIG] Sensor_name not setted in ","some sensor");
+	process_sensor_check_setted(pt_worker_info->sensor_data.peername,&aok,worker_info->debug,
+		"[CONFIG] Peername not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
+	process_sensor_check_setted(pt_worker_info->sensor_data.community,&aok,worker_info->debug,
+		"[CONFIG] Community not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
+	process_sensor_check_setted(monitors,&aok,worker_info->debug,
+		"[CONFIG] Monitors not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
 	
 	if(aok)
 		aok = process_sensor_monitors(worker_info, pt_worker_info, monitors);
