@@ -3,6 +3,7 @@
 #include <json/json.h>
 #include <json/printbuf.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <assert.h>
@@ -19,9 +20,15 @@
 #include <ctype.h>
 #endif
 
+#define DEBUG_STDOUT 0x1
+#define DEBUG_STDERR 0x2
+#define DEBUG_SYSLOG 0x4
+
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
     "\"debug\": 3,"
+    "\"syslog\":0,"
+    "\"stdout\":1,"
     "\"threads\": 10,"
     "\"timeout\": 5,"
     "\"max_fails\": 2,"
@@ -40,7 +47,7 @@ struct _worker_info{
 	struct snmp_session default_session;
 	pthread_mutex_t session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
-	int64_t sleep_worker,max_fails,timeout,debug;
+	int64_t sleep_worker,max_fails,timeout,debug,debug_output_flags;
 	#if RD_KAFKA_VERSION == 0x00080000
 	int64_t kafka_timeout;
 	#else
@@ -67,7 +74,7 @@ struct _perthread_worker_info{
 };
 
 struct _main_info{
-	int64_t sleep_main,threads,debug;
+	int64_t sleep_main,threads,debug,debug_output_flags;
 };
 
 int run = 1;
@@ -105,41 +112,28 @@ void printHelp(const char * progName){
 json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
 	                                          struct _main_info *main_info){
 	
-
+	int ret = TRUE;
 	json_object_object_foreach(config, key, val){
-		if(0==strncmp(key,"debug",sizeof "debug"-1)){
-			errno = 0;
+		errno = 0;
+		if(0==strncmp(key,"debug",sizeof "debug"-1))
+		{
 			worker_info->debug = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","debug\n",strerror(errno));
 		}
 		else if(0==strncmp(key,"threads",sizeof "threads"-1))
 		{
-			errno = 0;
 			main_info->threads = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","threads\n",strerror(errno));
 		}
 		else if(0==strncmp(key,"timeout",sizeof "timeout"-1))
 		{
-			errno = 0;
 			worker_info->timeout = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","timeout\n",strerror(errno));
 		}
 		else if(0==strncmp(key,"max_fails",sizeof "max_fails"-1))
 		{
-			errno = 0;
 			worker_info->max_fails = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","max_fails\n",strerror(errno));
 		}
 		else if(0==strncmp(key,"sleep_main",sizeof "sleep_main"-1))
 		{
-			errno = 0;
 			main_info->sleep_main = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","sleep_main\n",strerror(errno));
 		}
 		else if(0==strncmp(key,"kafka_broker", strlen("kafka_broker")))
 		{
@@ -175,15 +169,18 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 #endif
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
-			errno = 0;
 			worker_info->sleep_worker = json_object_get_int64(val);
-			if(errno!=0)
-				Log("[EE] Could not parse %s value: %s","sleep_worker_thread\n",strerror(errno));
 		}else{
 			Log("[EE] Don't know what config.%s key means.\n",key);
 		}
+		
+		if(errno!=0)
+		{
+			Log("[EE] Could not parse %s value: %s",key,strerror(errno));
+			ret=FALSE;
+		}
 	}
-	return TRUE;
+	return ret;
 }
 
 struct libmatheval_stuffs{
@@ -289,6 +286,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 
 		json_object_object_foreach(monitor_parameters_array,key,val){
+			errno=0;
 			if(0==strncmp(key,"split",strlen("split")+1)){
 				splittok = json_object_get_string(val);
 			}else if(0==strncmp(key,"split_op",strlen("split_op"))){
@@ -388,6 +386,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else{
 				if(worker_info->debug>=1)
 					Log("Cannot parse %s argument (line %d)\n",key,__LINE__);
+			}
+
+			if(errno!=0)
+			{
+				Log("[EE] Could not parse %s value: %s",key,strerror(errno));
 			}
 		} /* foreach */
 
@@ -641,7 +644,6 @@ void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,int debug){
 int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
-	int debug=0; // @todo delete duplicity of debug
 	char opt;
 	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL;
 	struct json_object * default_config = json_tokener_parse( str_default_config );
@@ -666,7 +668,7 @@ int main(int argc, char  *argv[])
 			configPath = optarg;
 			break;
 		case 'd':
-			debug = atoi(optarg);
+			main_info.debug = atoi(optarg);
 			break;
 		default:
 			printHelp(argv[0]);
@@ -674,7 +676,7 @@ int main(int argc, char  *argv[])
 		}
 	}
 
-	if(debug)
+	if(main_info.debug)
 		MC_SET_DEBUG(1);
 
 	if(configPath == NULL){
@@ -697,7 +699,7 @@ int main(int argc, char  *argv[])
 	assert(ret==TRUE);
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
-		if(debug>=1)
+		if(main_info.debug>=1)
 			Log("[WW] Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
@@ -723,7 +725,7 @@ int main(int argc, char  *argv[])
 			}
 
 			while(run){
-				queueSensors(sensors,&queue,debug);
+				queueSensors(sensors,&queue,main_info.debug);
 				sleep(main_info.sleep_main);
 			}
 			Log("Leaving, wait 1sec for workers...\n");
