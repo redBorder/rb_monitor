@@ -400,8 +400,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		}
 
 		if(kafka){
+			char * saveptr=NULL;
 			double sum=0;unsigned int count=0;int freetok=0;
-			char * tok = splittok ? strtok(value_buf,splittok) : value_buf;
+			char * tok = splittok ? strtok_r(value_buf,splittok,&saveptr) : value_buf;
 			                   /* at least one pass if splittok not setted */
 			while(NULL!=tok)
 			{
@@ -481,7 +482,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							freetok=0;
 						}
 
-						tok = splittok ? strtok(NULL,splittok) : NULL;
+						tok = splittok ? strtok_r(NULL,splittok,&saveptr) : NULL;
 
 						if(NULL==tok && NULL!=splitop){
 							tok = calloc(1024,sizeof(char));
