@@ -21,8 +21,7 @@
 #endif
 
 #define DEBUG_STDOUT 0x1
-#define DEBUG_STDERR 0x2
-#define DEBUG_SYSLOG 0x4
+#define DEBUG_SYSLOG 0x2
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -45,7 +44,7 @@ const char * str_default_config = /* "conf:" */ "{"
 /// SHARED Info needed by threads.
 struct _worker_info{
 	struct snmp_session default_session;
-	pthread_mutex_t session_mutex;
+	pthread_mutex_t snmp_session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
 	int64_t sleep_worker,max_fails,timeout,debug,debug_output_flags;
 	#if RD_KAFKA_VERSION == 0x00080000
@@ -74,7 +73,8 @@ struct _perthread_worker_info{
 };
 
 struct _main_info{
-	int64_t sleep_main,threads,debug,debug_output_flags;
+	const char * syslog_indent;
+	int64_t sleep_main,threads;
 };
 
 int run = 1;
@@ -86,11 +86,56 @@ void sigproc(int sig) {
   (void)sig;
 }
 
-static inline void Log(char *fmt,...){
-	va_list ap;
-	va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
+#if 0
+#define LOG_EMERG       0       /* system is unusable */
+#define LOG_ALERT       1       /* action must be taken immediately */
+#define LOG_CRIT        2       /* critical conditions */
+#define LOG_ERR         3       /* error conditions */
+#define LOG_WARNING     4       /* warning conditions */
+#define LOG_NOTICE      5       /* normal but significant condition */
+#define LOG_INFO        6       /* informational */
+#define LOG_DEBUG       7       /* debug-level messages */
+#endif
+
+
+/** @WARNING worker_info->syslog_session_mutex locked and unlocked in this call! 
+    be aware: performance, race conditions...
+    */
+static inline void Log(struct _worker_info *worker_info, const int level,char *fmt,...){
+	assert(worker_info);
+
+	if(level >= worker_info->debug)
+		return;
+
+	if(worker_info->debug_output_flags != 0){
+		va_list ap;
+		if(worker_info->debug_output_flags & DEBUG_STDOUT)
+		{
+			va_start(ap, fmt);
+			switch(level){
+				case LOG_EMERG:
+				case LOG_ALERT:
+				case LOG_CRIT:
+				case LOG_ERR:
+				case LOG_WARNING:
+	    			vfprintf(stderr, fmt, ap);
+	    			break;					
+				case LOG_NOTICE:
+				case LOG_INFO:
+				case LOG_DEBUG:
+					vfprintf(stdout, fmt, ap);
+					break;
+			};
+			va_end(ap);
+		}
+
+		if(worker_info->debug_output_flags & DEBUG_SYSLOG)
+		{
+			va_start(ap, fmt);
+			vsyslog(level, fmt, ap);
+		    va_end(ap);
+		}
+	}
 }
 
 
@@ -118,6 +163,21 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		if(0==strncmp(key,"debug",sizeof "debug"-1))
 		{
 			worker_info->debug = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"stdout",sizeof "stdout"-1))
+		{
+			if(json_object_get_int64(val)) 
+				worker_info->debug_output_flags |= DEBUG_STDOUT;
+			else                           
+				worker_info->debug_output_flags &= ~DEBUG_STDOUT;
+		}
+		else if(0==strncmp(key,"syslog",sizeof "syslog"-1))
+		{
+			if(json_object_get_int64(val)) 
+				worker_info->debug_output_flags |= DEBUG_SYSLOG;
+			else
+				worker_info->debug_output_flags &= ~DEBUG_SYSLOG;
+
 		}
 		else if(0==strncmp(key,"threads",sizeof "threads"-1))
 		{
@@ -147,7 +207,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition"))
 			 || 0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
 		{
-			Log("%s Can only be specified in kafka 0.7. Skipping",key);
+			Log(worker_info,LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
 		}
 		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
 		{
@@ -171,12 +231,12 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->sleep_worker = json_object_get_int64(val);
 		}else{
-			Log("[EE] Don't know what config.%s key means.\n",key);
+			Log(worker_info,LOG_ERR,"Don't know what config.%s key means.\n",key);
 		}
 		
 		if(errno!=0)
 		{
-			Log("[EE] Could not parse %s value: %s",key,strerror(errno));
+			Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			ret=FALSE;
 		}
 	}
@@ -190,36 +250,45 @@ struct libmatheval_stuffs{
 	unsigned int total_lenght;
 };
 
-static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
+static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
 	if(matheval->variables_pos<matheval->total_lenght){
 		matheval->names[matheval->variables_pos] = name;
 		matheval->values[matheval->variables_pos++] = val;
 	}else{
-		Log("[FIX] More variables than I can save in line %d. Have to fix\n",__LINE__);
+		Log(worker_info,LOG_ERR,"[FIX] More variables than I can save in line %d. Have to fix\n",__LINE__);
 		return 0;
 	}
 	return 1;
 }
 
-#if RD_KAFKA_VERSION == 0x00080000
+#if RD_KAFKA_VERSION == 0x00080000 && !defined(NDEBUG)
 /**
  * Message delivery report callback.
  * Called once for each message.
  * See rdkafka.h for more information.
  */
 static void msg_delivered (rd_kafka_t *rk,
-			   void __attribute((unused)) *payload, size_t len,
+			   void *payload, size_t len,
 			   int error_code,
-			   void __attribute((unused)) *opaque, void __attribute((unused)) *msg_opaque) {
-
+			   void *opaque, void *msg_opaque) {
 	if (error_code)
-		printf("%% Message delivery failed: %s\n",
+		Log("%% Message delivery failed: %s\n",
 		       rd_kafka_err2str(rk, error_code));
 	else
-		printf("%% Message delivered (%zd bytes)\n", len);
+		Log("%% Message delivered (%zd bytes)\n", len);
 }
 
 #endif
+
+static inline void check_setted(const void *ptr,struct _worker_info *worker_info,
+	int *aok,const char *errmsg,const char *sensor_name)
+{
+	assert(aok);
+	if(*aok && ptr == NULL){
+			*aok = 0;
+			Log(worker_info,LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
+	}
+}
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
@@ -237,24 +306,18 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(monitors)};
 
 	assert(sensor_data->sensor_name);
-	if(worker_info->debug>=1){
-		if(!sensor_data->peername){
-			Log("[EE] Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
-			aok=0;
-		}
-		if(!sensor_data->community){
-			Log("[EE] Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
-			aok=0;
-		}
-	}
+	check_setted(sensor_data->peername,worker_info,&aok,
+		"Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
+	check_setted(sensor_data->community,worker_info,&aok,
+		"Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
 
 	if(aok){
-		pthread_mutex_lock(&worker_info->session_mutex);
+		pthread_mutex_lock(&worker_info->snmp_session_mutex);
 		/* @TODO: You can do it later, see session_api.h */
 		worker_info->default_session.peername = (char *)sensor_data->peername;
 		sessp = snmp_sess_open(&worker_info->default_session);
 		if(NULL== sessp || NULL == (ss = snmp_sess_session(sessp))){
-			Log("Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
+			Log(worker_info,LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
 			aok=0;
 		}else{
 			/*memcpy(ss,&worker_info->default_session,sizeof(*ss)); Much pointers!*/
@@ -266,7 +329,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 			ss->flags = worker_info->default_session.flags;
 		}
-		pthread_mutex_unlock(&worker_info->session_mutex);
+		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
 	}
 
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
@@ -302,11 +365,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				kafka = 1;
 			}else if(0==strncmp(key,"oid",strlen("oid"))){
-
+				/* @TODO extract in his own SNMPget function */
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
-					if(worker_info->debug>=1)
-						Log("[WW] name of param not set in %s. Skipping\n",sensor_data->sensor_name);
+					Log(worker_info,LOG_WARNING,"name of param not set in %s. Skipping\n",
+						sensor_data->sensor_name);
 					break /*foreach*/;
 				}
 
@@ -325,17 +388,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					*/
 					
 					double number;
-					if(worker_info->debug>=4)
-						Log("response type: %d\n",response->variables->type);
+					Log(worker_info,LOG_DEBUG,"response type: %d\n",response->variables->type);
 
 					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
 						case ASN_INTEGER:
 							snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
-							if(worker_info->debug>=3){
-								Log("Saving %s var in libmatheval array. OID=%s;Value=%d\n",
-									name,json_object_get_string(val),*response->variables->val.integer);
-							}
-							libmatheval_append(&matheval,name,*response->variables->val.integer);
+							Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. OID=%s;Value=%d\n",
+								name,json_object_get_string(val),*response->variables->val.integer);
+							libmatheval_append(worker_info,&matheval,name,*response->variables->val.integer);
 						
 							break;
 						case ASN_OCTET_STR:
@@ -344,33 +404,29 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							number_setted = 1;
 							if(splittok)
 							{
-								if(worker_info->debug>=3){
-									Log("Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
-								}
-								libmatheval_append(&matheval,name,number);
+								Log(worker_info,LOG_DEBUG,"Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
+								libmatheval_append(worker_info,&matheval,name,number);
 							}
 
 							// @TODO check val_len before copy string.
 							strncpy(value_buf,(const char *)response->variables->val.string,sizeof(value_buf));
 							value_buf[response->variables->val_len] = '\0';
 
-							if(worker_info->debug>3){
-								Log("SNMP response: %s\n",response->variables->val.string);
-								Log("Saved SNMP response (added \\n): %s\n",value_buf);
-							}
+							Log(worker_info,LOG_DEBUG,"SNMP response: %s\n",response->variables->val.string);
+							Log(worker_info,LOG_DEBUG,"Saved SNMP response (added \\n): %s\n",value_buf);
 
 							break;
 						default:
-							Log("[WW] Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
+							Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
 					};
 
 					snmp_free_pdu(response);
 
-				}else if(worker_info->debug){
+				}else{
 					if (status == STAT_SUCCESS)
-						Log("Error in packet\nReason: %s\n",snmp_errstring(response->errstat));
+						Log(worker_info,LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
 					else
-						Log("Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
+						Log(worker_info,LOG_ERR,"Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){
 				/* @TODO buffer this! */
@@ -378,24 +434,22 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				number = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
 				number_setted = 1;
 				evaluator_destroy (f);
-				if(worker_info->debug>=4)
-					Log("Result of operation %s: %lf\n",key,number);
+				Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
 				/* op will send by default, so we ignore kafka param */
-				libmatheval_append(&matheval, name,number);
+				libmatheval_append(worker_info,&matheval, name,number);
 
 			}else{
-				if(worker_info->debug>=1)
-					Log("Cannot parse %s argument (line %d)\n",key,__LINE__);
+				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
 			}
 
 			if(errno!=0)
 			{
-				Log("[EE] Could not parse %s value: %s",key,strerror(errno));
+				Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			}
 		} /* foreach */
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
-			Log("[WW] sensor name not setted. Skipping.\n");
+			Log(worker_info,LOG_ERR,"sensor name not setted. Skipping.\n");
 			break;
 		}
 
@@ -427,14 +481,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					//char * str_to_kafka = printbuf->buf;
 					//printbuf->buf=NULL;
 					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community)){
-						if(worker_info->debug>=3)
-						{
-							#if RD_KAFKA_VERSION == 0x00080000
-							Log("[Kafka:random] %s\n",printbuf->buf);
-							#else
-							Log("[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
-							#endif
-						}
+						#if RD_KAFKA_VERSION == 0x00080000
+						Log(worker_info,LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
+						#else
+						Log(worker_info,LOG_DEBUG,"[Kafka:%d] %s\n",worker_info->kafka_current_partition,printbuf->buf);
+						#endif
+
 						#if RD_KAFKA_VERSION == 0x00080000
 
 						#ifndef NDEBUG
@@ -470,7 +522,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 						else
 						{
-							Log("[Errkafka] Cannot produce kafka message\n");
+							Log(worker_info,LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
 						}
 
 						if(NULL!=splitop)
@@ -490,8 +542,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								snprintf(tok,1024,"%lf",sum);
 							else if(0==strcmp("mean",splitop))
 								snprintf(tok,1024,"%lf",sum/count);
-							else if(worker_info->debug){
-								Log("[WW] Splitop %s unknow in monitor parameter %s\n",splitop,name);
+							else{
+								Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
 								free(tok);
 								break; /* exit of while loop */
 							}
@@ -508,7 +560,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					#endif
 					printbuf = NULL;
 				}else{
-					Log("Cannot allocate memory for printbuf. Skipping\n");
+					Log(worker_info,LOG_ALERT,"Cannot allocate memory for printbuf. Skipping\n");
 				}
 			} /* while tok */
 
@@ -523,15 +575,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 	return aok;
 } 
-
-static inline void process_sensor_check_setted(const void *ptr,int *aok,const int debug, const char *errmsg,const char *sensor_name){
-	assert(aok);
-	if(*aok && ptr == NULL){
-			*aok = 0;
-			if(debug>=1)
-				Log("%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
-	}
-}
 
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
 	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
@@ -553,19 +596,18 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
 			monitors = val;
 		}else {
-			if(worker_info->debug>=1)
-				Log("Cannot parse %s argument\n",key);
+			Log(worker_info,LOG_ERR,"Cannot parse %s argument\n",key);
 		}
 	}
 
 
-	process_sensor_check_setted(pt_worker_info->sensor_data.sensor_name,&aok,worker_info->debug>=1,
+	check_setted(pt_worker_info->sensor_data.sensor_name,worker_info,&aok,
 		"[CONFIG] Sensor_name not setted in ",NULL);
-	process_sensor_check_setted(pt_worker_info->sensor_data.peername,&aok,worker_info->debug,
+	check_setted(pt_worker_info->sensor_data.peername,worker_info,&aok,
 		"[CONFIG] Peername not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
-	process_sensor_check_setted(pt_worker_info->sensor_data.community,&aok,worker_info->debug,
+	check_setted(pt_worker_info->sensor_data.community,worker_info,&aok,
 		"[CONFIG] Community not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
-	process_sensor_check_setted(monitors,&aok,worker_info->debug,
+	check_setted(monitors,worker_info,&aok,
 		"[CONFIG] Monitors not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
 	
 	if(aok)
@@ -589,18 +631,21 @@ void * worker(void *_info){
 	#if RD_KAFKA_VERSION == 0x00080000
 
 	rd_kafka_defaultconf_set(&conf);
+	#if !defined(NDEBUG)
 	conf.producer.dr_cb = msg_delivered;
+	#endif
 
 	rd_kafka_topic_defaultconf_set(&topic_conf);
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, &conf,errstr, sizeof(errstr)))) {
-		if(worker_info->debug>=1)
-			Log("Error calling kafka_new producer: %s\n",errstr);
+		Log(worker_info,LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
 		pt_worker_info.thread_ok=0;
 	}
 
+	if(pt_worker_info.thread_ok && worker_info->debug_output_flags | DEBUG_SYSLOG)
+		rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
+
 	if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
-		if(worker_info->debug>=1)
-			Log("No valid brokers specified\n");
+		Log(worker_info,LOG_ERR,"No valid brokers specified\n");
 		pt_worker_info.thread_ok=0;
 	}
 	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, &topic_conf);
@@ -609,8 +654,7 @@ void * worker(void *_info){
 	#else /* KAFKA_08 */
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, worker_info->kafka_broker, NULL))) {
-		if(worker_info->debug>=1)
-			Log("Error calling kafka_new producer: %s\n",strerror(errno));
+		Log(worker_info,LOG_ERR,"Error calling kafka_new producer: %s\n",strerror(errno));
 		pt_worker_info.thread_ok=0;
 	}
 	#endif
@@ -618,8 +662,7 @@ void * worker(void *_info){
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
-			if(worker_info->debug>=2)
-				Log("Pop element %p\n",elm->rfqe_ptr);
+			Log(worker_info,LOG_DEBUG,"Pop element %p\n",elm->rfqe_ptr);
 			json_object * sensor_info = elm->rfqe_ptr;
 			process_sensor(worker_info,&pt_worker_info,sensor_info);
 			rd_fifoq_elm_release(worker_info->queue,elm);
@@ -631,13 +674,11 @@ void * worker(void *_info){
 	return _info; // just avoiding warning.
 }
 
-void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,int debug){
+void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,struct _worker_info *worker_info){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		// @TODO There is an increment in reference counter with this get????
 		json_object *value = json_object_array_get_idx(sensors, i);
-		if(debug>=2){
-			Log("Push element %p\n",value);
-		}
+		Log(worker_info,LOG_DEBUG,"Push element %p\n",value);
 		rd_fifoq_add(queue,value);
 	}
 }
@@ -669,7 +710,7 @@ int main(int argc, char  *argv[])
 			configPath = optarg;
 			break;
 		case 'd':
-			main_info.debug = atoi(optarg);
+			worker_info.debug = atoi(optarg);
 			break;
 		default:
 			printHelp(argv[0]);
@@ -677,18 +718,17 @@ int main(int argc, char  *argv[])
 		}
 	}
 
-	if(main_info.debug)
+	if(worker_info.debug >=0)
 		MC_SET_DEBUG(1);
 
 	if(configPath == NULL){
-		Log("[EE] Config path not set. Exiting\n");
+		Log(&worker_info,LOG_ERR,"Config path not set. Exiting\n");
 		exit(1);
 	}
 
 	config_file = json_object_from_file(configPath);
 	if(!config_file){
-		Log("[EE] Could not open config file %s\n",configPath);
-		Log("Exiting\n");
+		Log(&worker_info,LOG_CRIT,"[EE] Could not open config file %s. Exiting\n",configPath);
 		exit(1);
 	}
 
@@ -700,8 +740,7 @@ int main(int argc, char  *argv[])
 	assert(ret==TRUE);
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
-		if(main_info.debug>=1)
-			Log("[WW] Could not fetch \"conf\" object from config file. Using default config instead.");
+		Log(&worker_info,LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
@@ -709,16 +748,18 @@ int main(int argc, char  *argv[])
 
 	snmp_sess_init(&worker_info.default_session); /* set defaults */
 	worker_info.default_session.version  = SNMP_VERSION_1;
-	pthread_mutex_init(&worker_info.session_mutex,0);
+	pthread_mutex_init(&worker_info.snmp_session_mutex,0);
+	main_info.syslog_indent = "rb_monitor";
+	openlog(main_info.syslog_indent, 0, LOG_USER);
 
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
-		Log("[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
+		Log(&worker_info,LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
 	}else{
 		rd_fifoq_init(&queue);
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
-			Log("[EE] Unable to allocate threads memory. Exiting.\n");
+			Log(&worker_info,LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.\n");
 		}else{
 			worker_info.queue = &queue;
 			for(int i=0;i<main_info.threads;++i){
@@ -726,10 +767,10 @@ int main(int argc, char  *argv[])
 			}
 
 			while(run){
-				queueSensors(sensors,&queue,main_info.debug);
+				queueSensors(sensors,&queue,&worker_info);
 				sleep(main_info.sleep_main);
 			}
-			Log("Leaving, wait 1sec for workers...\n");
+			Log(&worker_info,LOG_INFO,"Leaving, wait 1sec for workers...\n");
 
 			for(int i=0;i<main_info.threads;++i){
 				pthread_join(pd_thread[i], NULL);
@@ -738,10 +779,10 @@ int main(int argc, char  *argv[])
 		}
 	}
 
-
-	pthread_mutex_destroy(&worker_info.session_mutex);
+	pthread_mutex_destroy(&worker_info.snmp_session_mutex);
 	json_object_put(default_config);
 	json_object_put(config_file);
 	rd_fifoq_destroy(&queue);
+	closelog();
 	return ret;
 }

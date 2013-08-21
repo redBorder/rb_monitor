@@ -1,9 +1,9 @@
 {
   "conf": {
-    "debug": 3,
+    "debug": 6, /* See syslog error levels */
     "syslog": 0,
     "stdout": 1,
-    "threads": 1,
+    "threads": 10,
     "timeout": 1,
     "max_fails": 2,
     "sleep_main_thread": 5,
@@ -45,7 +45,7 @@
         /* includeAllDisks 10% must be present in snmpd.conf */
         {"name": "disk_used",  "oid": "UCD-SNMP-MIB::dskPercent.1", "unit": "%", "kafka": 1},
 
-                /*                          IPS monitoring variables    */
+         /*                             IPS monitoring variables                             */
          /* name_split_suffix => monitor suffix that tell we are in a per_instance parameter */
          /*             split => per instance split character                                */
          /*   instance_prefix => per instance                                                */
