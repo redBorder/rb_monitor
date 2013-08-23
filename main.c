@@ -477,6 +477,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
 					/* op will send by default, so we ignore kafka param */
 					libmatheval_append(worker_info,&matheval, name,number);
+					snprintf(value_buf,1024,"%lf",number);
 				}
 
 			}else{
