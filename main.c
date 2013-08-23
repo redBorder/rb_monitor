@@ -14,6 +14,7 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <librdkafka/rdkafka.h>
+#include <math.h>
 #include <matheval.h>
 
 #ifndef NDEBUG
@@ -25,7 +26,7 @@
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
-    "\"debug\": 3,"
+    "\"debug\": 100,"
     "\"syslog\":0,"
     "\"stdout\":1,"
     "\"threads\": 10,"
@@ -302,6 +303,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	/* Just to avoid dynamic memory */
 	const char *names[json_object_array_length(monitors)];
 	double values[json_object_array_length(monitors)];
+	const char *bad_names[json_object_array_length(monitors)]; /* ops cannot be added to libmatheval array.*/
+	size_t bad_names_pos = 0;
 	
 	struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(monitors)};
 
@@ -338,7 +341,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		int kafka=0;
+		int kafka=0,nonzero=0;
 		const char * splittok=NULL,*splitop=NULL;
 		struct printbuf* printbuf=NULL;
 		const char * unit=NULL;
@@ -362,6 +365,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				instance_prefix = json_object_get_string(val);
 			}else if(0==strncmp(key,"unit",strlen("unit"))){
 				unit = json_object_get_string(val);
+			}else if(0==strcmp(key,"nonzero")){
+				nonzero = 1;
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				kafka = 1;
 			}else if(0==strncmp(key,"oid",strlen("oid"))){
@@ -393,19 +398,36 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
 						case ASN_INTEGER:
 							snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
-							Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. OID=%s;Value=%d\n",
-								name,json_object_get_string(val),*response->variables->val.integer);
-							libmatheval_append(worker_info,&matheval,name,*response->variables->val.integer);
+							if(nonzero && 0 == *response->variables->val.integer)
+							{
+								Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+								bad_names[bad_names_pos++] = name;
+								kafka=0;
+							}
+							else
+							{
+								Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. OID=%s;Value=%d\n",
+									name,json_object_get_string(val),*response->variables->val.integer);
+								libmatheval_append(worker_info,&matheval,name,*response->variables->val.integer);
+							}
 						
 							break;
 						case ASN_OCTET_STR:
 							/* We don't know if it's a double inside a string; We try to convert and save */
 							number = strtod((const char *)response->variables->val.string,NULL);
 							number_setted = 1;
-							if(splittok)
+							if(NULL==splittok)
 							{
-								Log(worker_info,LOG_DEBUG,"Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
-								libmatheval_append(worker_info,&matheval,name,number);
+								if(nonzero && 0 == *response->variables->val.integer)
+								{
+									Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+									kafka=0;
+								}
+								else
+								{
+									Log(worker_info,LOG_DEBUG,"Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
+									libmatheval_append(worker_info,&matheval,name,number);
+								}
 							}
 
 							// @TODO check val_len before copy string.
@@ -430,13 +452,32 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){
 				/* @TODO buffer this! */
-				void *f = evaluator_create ((char *)json_object_get_string(val)); /*really it has to do (void *). See libmatheval doc. */
-				number = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
-				number_setted = 1;
-				evaluator_destroy (f);
-				Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
-				/* op will send by default, so we ignore kafka param */
-				libmatheval_append(worker_info,&matheval, name,number);
+				char * operation = (char *)json_object_get_string(val);
+				int op_ok=1;
+				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
+				{
+					if(strstr(bad_names[i],operation)){
+						Log(worker_info,LOG_NOTICE,"OP %s Uses a previously bad marked value (%s). Skipping\n",
+							operation,bad_names[i]);
+						kafka=0;
+						op_ok=0;
+					}
+
+				}
+				if(op_ok)
+				{
+					void *f = evaluator_create (operation); /*really it has to do (void *). See libmatheval doc. */
+					number = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+					number_setted = 1;
+					evaluator_destroy (f);
+					Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
+					if(number == 0 && nonzero)
+						Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
+					if(number == INFINITY|| number == -INFINITY|| number == NAN)
+						Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+					/* op will send by default, so we ignore kafka param */
+					libmatheval_append(worker_info,&matheval, name,number);
+				}
 
 			}else{
 				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
@@ -697,6 +738,9 @@ int main(int argc, char  *argv[])
 	rd_fifoq_t queue = {{0}};
 	json_bool ret;
 
+	assert(default_config);
+	ret = parse_json_config(default_config,&worker_info,&main_info);
+	assert(ret==TRUE);
 
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {
@@ -735,9 +779,6 @@ int main(int argc, char  *argv[])
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
 
-	assert(default_config);
-	ret = parse_json_config(default_config,&worker_info,&main_info);
-	assert(ret==TRUE);
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
 		Log(&worker_info,LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
