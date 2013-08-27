@@ -272,11 +272,12 @@ static void msg_delivered (rd_kafka_t *rk,
 			   void *payload, size_t len,
 			   int error_code,
 			   void *opaque, void *msg_opaque) {
+	(void)payload,(void)msg_opaque;
 	if (error_code)
-		Log("%% Message delivery failed: %s\n",
+		Log(opaque,LOG_DEBUG,"%% Message delivery failed: %s\n",
 		       rd_kafka_err2str(rk, error_code));
 	else
-		Log("%% Message delivered (%zd bytes)\n", len);
+		Log(opaque,LOG_DEBUG,"%% Message delivered (%zd bytes)\n", len);
 }
 
 #endif
@@ -674,6 +675,7 @@ void * worker(void *_info){
 
 	rd_kafka_defaultconf_set(&conf);
 	#if !defined(NDEBUG)
+	conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
 	conf.producer.dr_cb = msg_delivered;
 	#endif
 
