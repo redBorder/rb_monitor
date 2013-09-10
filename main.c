@@ -66,6 +66,13 @@ struct _sensor_data{
 	const char * community;
 };
 
+struct libmatheval_stuffs{
+	const char ** names;
+	double *values;
+	unsigned int variables_pos;
+	unsigned int total_lenght;
+};
+
 struct _perthread_worker_info{
 	rd_kafka_t * rk;
 	#if RD_KAFKA_VERSION == 0x00080000
@@ -73,6 +80,7 @@ struct _perthread_worker_info{
 	#endif
 	int thread_ok;
 	struct _sensor_data sensor_data;
+	struct libmatheval_stuffs libmatheval_variables;
 };
 
 struct _main_info{
@@ -141,6 +149,33 @@ static inline void Log(struct _worker_info *worker_info, const int level,char *f
 	}
 }
 
+static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
+	if(matheval->variables_pos<matheval->total_lenght){
+		assert(worker_info);
+		assert(matheval);
+		assert(matheval->names);
+		assert(matheval->values);
+	}else{
+		if (NULL != (matheval->names = realloc(matheval->names,matheval->total_lenght*2*sizeof(char *)))
+			&& NULL != (matheval->values = realloc(matheval->values,matheval->total_lenght*2*sizeof(double))))
+		{
+			matheval->total_lenght*=2;
+		}
+		else
+		{
+			Log(worker_info,LOG_CRIT,"Memory error. \n",__LINE__);
+			if(matheval->names) free(matheval->names);
+			matheval->total_lenght = 0;
+			return 0;
+		}
+	}
+
+	matheval->names[matheval->variables_pos] = name;
+	matheval->values[matheval->variables_pos++] = val;
+	Log(worker_info,LOG_DEBUG,"[libmatheval] Saved %s->%lf [%u/%u filled]\n",
+		name,val,matheval->variables_pos,matheval->total_lenght);
+	return 1;
+}
 
 void printHelp(const char * progName){
 	fprintf(stderr,
@@ -180,7 +215,6 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 				worker_info->debug_output_flags |= DEBUG_SYSLOG;
 			else
 				worker_info->debug_output_flags &= ~DEBUG_SYSLOG;
-
 		}
 		else if(0==strncmp(key,"threads",sizeof "threads"-1))
 		{
@@ -250,24 +284,6 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 	return ret;
 }
 
-struct libmatheval_stuffs{
-	const char ** names;
-	double *values;
-	unsigned int variables_pos;
-	unsigned int total_lenght;
-};
-
-static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
-	if(matheval->variables_pos<matheval->total_lenght){
-		matheval->names[matheval->variables_pos] = name;
-		matheval->values[matheval->variables_pos++] = val;
-	}else{
-		Log(worker_info,LOG_ERR,"[FIX] More variables than I can save in line %d. Have to fix\n",__LINE__);
-		return 0;
-	}
-	return 1;
-}
-
 #if RD_KAFKA_VERSION == 0x00080000 && !defined(NDEBUG)
 /**
  * Message delivery report callback.
@@ -293,8 +309,8 @@ static inline void check_setted(const void *ptr,struct _worker_info *worker_info
 {
 	assert(aok);
 	if(*aok && ptr == NULL){
-			*aok = 0;
-			Log(worker_info,LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
+		*aok = 0;
+		Log(worker_info,LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
 	}
 }
 
@@ -304,22 +320,45 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
+	struct libmatheval_stuffs *libmatheval_variables = &pt_worker_info->libmatheval_variables;
 	void * sessp=NULL;
 	struct snmp_session *ss;
 
-	/* Just to avoid dynamic memory */
-	const char *names[json_object_array_length(monitors)];
-	double values[json_object_array_length(monitors)];
+	libmatheval_variables->variables_pos = 0;
 	const char *bad_names[json_object_array_length(monitors)]; /* ops cannot be added to libmatheval array.*/
 	size_t bad_names_pos = 0;
-	
-	struct libmatheval_stuffs matheval = {names,values,0,json_object_array_length(monitors)};
 
 	assert(sensor_data->sensor_name);
 	check_setted(sensor_data->peername,worker_info,&aok,
 		"Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
 	check_setted(sensor_data->community,worker_info,&aok,
 		"Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
+
+	if(libmatheval_variables->names == NULL) /* starting allocate */
+	{
+		const size_t new_size = json_object_array_length(monitors)*10; /* Allocating enough memory */
+		libmatheval_variables->names = 
+			calloc(new_size,sizeof(char *));
+		if(NULL==libmatheval_variables->names)
+		{
+			Log(worker_info,LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			aok = 0;
+		}
+		else
+		{
+			libmatheval_variables->values =
+				calloc(new_size,sizeof(double));
+			if(NULL==libmatheval_variables->values)
+			{
+				Log(worker_info,LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+				aok = 0;
+			}
+			else
+			{
+				libmatheval_variables->total_lenght = new_size;
+			}
+		}
+	}
 
 	if(aok){
 		pthread_mutex_lock(&worker_info->snmp_session_mutex);
@@ -415,7 +454,13 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							{
 								Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. OID=%s;Value=%d\n",
 									name,json_object_get_string(val),*response->variables->val.integer);
-								libmatheval_append(worker_info,&matheval,name,*response->variables->val.integer);
+								if(0==libmatheval_append(
+									worker_info,libmatheval_variables,name,*response->variables->val.integer
+									))
+								{
+									Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+									aok = 0;
+								}
 							}
 						
 							break;
@@ -433,7 +478,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								else
 								{
 									Log(worker_info,LOG_DEBUG,"Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
-									libmatheval_append(worker_info,&matheval,name,number);
+									if(0==libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables,name,number))
+									{
+										Log(worker_info,LOG_ERR,"Error adding libmatheval variable\n");
+										aok = 0;
+									}
 								}
 							}
 
@@ -474,7 +523,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(op_ok)
 				{
 					void *f = evaluator_create (operation); /*really it has to do (void *). See libmatheval doc. */
-					number = evaluator_evaluate (f, matheval.variables_pos ,(char **) matheval.names,matheval.values);
+					number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
+						(char **) libmatheval_variables->names,	libmatheval_variables->values);
 					number_setted = 1;
 					evaluator_destroy (f);
 					Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
@@ -483,7 +533,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(number == INFINITY|| number == -INFINITY|| number == NAN)
 						Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
 					/* op will send by default, so we ignore kafka param */
-					libmatheval_append(worker_info,&matheval, name,number);
+					libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, name,number);
 					snprintf(value_buf,1024,"%lf",number);
 				}
 
@@ -629,6 +679,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
 	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
+	pt_worker_info->libmatheval_variables.variables_pos = 0;
 	pt_worker_info->sensor_data.timeout = worker_info->timeout;
 	json_object * monitors = NULL;
 	int aok = 1;
@@ -678,6 +729,8 @@ void * worker(void *_info){
 	#endif	
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
+
+	memset(&pt_worker_info.libmatheval_variables,0,sizeof(pt_worker_info.libmatheval_variables));
 	
 
 	#if RD_KAFKA_VERSION == 0x00080000
@@ -740,8 +793,11 @@ void * worker(void *_info){
 		sleep(worker_info->sleep_worker);
 	}
 
+	free(pt_worker_info.libmatheval_variables.names);
+	free(pt_worker_info.libmatheval_variables.values);
+
 	throw_msg_count = atoi(worker_info->max_kafka_fails);
-	while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) > 0))
+	while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) ))
 	{
 		if(prev_msg_left == msg_left) /* Send no messages in a second? probably, the broker has fall down */
 			throw_msg_count--;
