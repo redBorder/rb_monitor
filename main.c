@@ -31,7 +31,8 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"stdout\":1,"
     "\"threads\": 10,"
     "\"timeout\": 5,"
-    "\"max_fails\": 2,"
+    "\"max_snmp_fails\": 2,"
+    "\"max_kafka_fails\": 2,"
     "\"sleep_main\": 10,"
     "\"sleep_worker\": 2,"
     "\"kafka_broker\": \"localhost\","
@@ -47,7 +48,8 @@ struct _worker_info{
 	struct snmp_session default_session;
 	pthread_mutex_t snmp_session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
-	int64_t sleep_worker,max_fails,timeout,debug,debug_output_flags;
+	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
+	int64_t sleep_worker,max_snmp_fails,timeout,debug,debug_output_flags;
 	#if RD_KAFKA_VERSION == 0x00080000
 	int64_t kafka_timeout;
 	#else
@@ -188,9 +190,13 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->timeout = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"max_fails",sizeof "max_fails"-1))
+		else if(0==strncmp(key,"max_snmp_fails",sizeof "max_snmp_fails"-1))
 		{
-			worker_info->max_fails = json_object_get_int64(val);
+			worker_info->max_snmp_fails = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"max_kafka_fails",sizeof "max_kafka_fails"-1))
+		{
+			worker_info->max_kafka_fails = json_object_get_string(val);
 		}
 		else if(0==strncmp(key,"sleep_main",sizeof "sleep_main"-1))
 		{
@@ -579,7 +585,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 						tok = splittok ? strtok_r(NULL,splittok,&saveptr) : NULL;
 
-						if(NULL==tok && NULL!=splitop){
+						if(NULL==tok && NULL!=splitop){ /* we've reached last token, and we have an operation to do
+						                                with the data */
 							tok = calloc(1024,sizeof(char));
 							if(0==strcmp("sum",splitop))
 								snprintf(tok,1024,"%lf",sum);
@@ -608,7 +615,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			} /* while tok */
 
 			#if RD_KAFKA_VERSION == 0x00080000
-			rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout);
+			if(worker_info->debug >= LOG_DEBUG )
+				rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
 			#endif /* RD_KAFKA_VERSION */
 
 		} /* if kafka */
@@ -669,6 +677,7 @@ void * worker(void *_info){
 	char errstr[256];
 	#endif	
 	pt_worker_info.thread_ok = 1;
+	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
 	
 
 	#if RD_KAFKA_VERSION == 0x00080000
@@ -680,6 +689,23 @@ void * worker(void *_info){
 	#endif
 
 	rd_kafka_topic_defaultconf_set(&topic_conf);
+
+	const rd_kafka_conf_res_t confset = 
+		rd_kafka_conf_set (&conf,"message.send.max.retries",worker_info->max_kafka_fails,
+		errstr, sizeof errstr);
+
+	switch(confset)
+	{
+		case RD_KAFKA_CONF_UNKNOWN: /* Unknown configuration name. */
+			Log(worker_info,LOG_EMERG,"Error in line %d, invalid name. FIX\n",__LINE__);
+			break;
+		case RD_KAFKA_CONF_INVALID:
+			Log(worker_info,LOG_ERR,"Error in configuration file. Value not valid in max_kafka_fails.\n");
+			break;
+		case RD_KAFKA_CONF_OK:
+			break; /* AOK */
+	}
+
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, &conf,errstr, sizeof(errstr)))) {
 		Log(worker_info,LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
 		pt_worker_info.thread_ok=0;
@@ -714,6 +740,22 @@ void * worker(void *_info){
 		sleep(worker_info->sleep_worker);
 	}
 
+	throw_msg_count = atoi(worker_info->max_kafka_fails);
+	while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) > 0))
+	{
+		if(prev_msg_left == msg_left) /* Send no messages in a second? probably, the broker has fall down */
+			throw_msg_count--;
+		else
+			throw_msg_count = atoi(worker_info->max_kafka_fails);
+		Log(worker_info,LOG_INFO,
+			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
+			pthread_self(),msg_left,throw_msg_count);
+		prev_msg_left = msg_left;
+		sleep(worker_info->timeout/1000 + 1);
+	}
+
+	rd_kafka_topic_destroy(pt_worker_info.rkt);
+	rd_kafka_destroy(pt_worker_info.rk);
 
 	return _info; // just avoiding warning.
 }

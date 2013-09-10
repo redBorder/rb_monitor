@@ -3,7 +3,7 @@ PROGNAME=rb_monitor
 all: $(PROGNAME) 
 
 CC ?= cc
-CFLAGS ?= -g -W -Wall -Wno-missing-field-initializers -DWITH_LIBRD -DNDEBUG -O3
+CFLAGS ?= -g -W -Wall -Wno-missing-field-initializers -DWITH_LIBRD #-DNDEBUG -O3
 
 PREFIX?=/opt/rb
 LIBRDKAFKA_INCLUDES ?= /opt/rb/include
