@@ -21,6 +21,9 @@
 #include <ctype.h>
 #endif
 
+#define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
+#define SPLITOP_RESULT_LEN 512     /* String that will save a double */
+
 #define DEBUG_STDOUT 0x1
 #define DEBUG_SYSLOG 0x2
 
@@ -112,7 +115,7 @@ void sigproc(int sig) {
 /** @WARNING worker_info->syslog_session_mutex locked and unlocked in this call! 
     be aware: performance, race conditions...
     */
-static inline void Log(struct _worker_info *worker_info, const int level,char *fmt,...){
+static inline void Log(const struct _worker_info *worker_info, const int level,char *fmt,...){
 	assert(worker_info);
 
 	if(level >= worker_info->debug)
@@ -150,6 +153,9 @@ static inline void Log(struct _worker_info *worker_info, const int level,char *f
 }
 
 static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
+	Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. Value=%lf\n",
+						                                         name,val);
+
 	if(matheval->variables_pos<matheval->total_lenght){
 		assert(worker_info);
 		assert(matheval);
@@ -314,6 +320,56 @@ static inline void check_setted(const void *ptr,struct _worker_info *worker_info
 	}
 }
 
+/** 
+	Adapt the snmp response in string and double responses.
+	@param value_buf  Return buffer where the response will be saved (text format)
+	@param number     If possible, the response will be saved in double format here
+	@param response   SNMP response
+	@return           0 if number was not setted; non 0 otherwise.
+ */
+static inline int snmp_solve_response(const struct _worker_info *worker_info, 
+	char * value_buf,const size_t value_buf_len,double * number,struct snmp_pdu *response)
+{
+	/* A lot of variables. Just if we pass SNMPV3 someday.
+	struct variable_list *vars;
+	for(vars=response->variables; vars; vars=vars->next_variable)
+		print_variable(vars->name,vars->name_length,vars);
+	*/
+	int ret = 0;
+	assert(value_buf);
+	assert(number);
+	assert(response);
+	
+	//Log(worker_info,LOG_DEBUG,"response type: %d\n",response->variables->type);
+
+	switch(response->variables->type) // See in /usr/include/net-snmp/types.h
+	{ 
+		case ASN_INTEGER:
+			snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
+			*number = *response->variables->val.integer;
+			ret = 1;		
+			break;
+		case ASN_OCTET_STR:
+			/* We don't know if it's a double inside a string; We try to convert and save */
+			strncpy(value_buf,(const char *)response->variables->val.string,value_buf_len);
+			// @TODO check val_len before copy string.
+			value_buf[response->variables->val_len] = '\0';
+			*number = strtod((const char *)response->variables->val.string,NULL);
+			ret = 1;
+			break;
+		default:
+			Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
+	};
+
+	return ret;
+
+}
+
+/** @note our way to save a SNMP string vector in libmatheval_array is:
+    names:  [ ...  vector_name_0 ... vector_name_(N)     vector_name   ... ]
+    values: [ ...     number0    ...    number(N)      split_op_result ... ]
+*/
+
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
 			json_object * monitors)
@@ -321,6 +377,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = &pt_worker_info->libmatheval_variables;
+	size_t libmatheval_start_pos;
 	void * sessp=NULL;
 	struct snmp_session *ss;
 
@@ -389,32 +446,73 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
 		int kafka=0,nonzero=0;
 		const char * splittok=NULL,*splitop=NULL;
-		struct printbuf* printbuf=NULL;
+		char *split_op_result=NULL;
 		const char * unit=NULL;
 		char value_buf[1024];
 		double number;
 		int number_setted = 0;
-		
 
+		
+		char ** splitted_toks  = NULL;
+		unsigned int splitted_toks_num  = 0;
+		unsigned int splitted_toks_size = 0;
+		
+		
+		/* First pass: get attributes except op: and oid:*/
+		json_object_object_foreach(monitor_parameters_array,key2,val2)
+		{
+			errno=0;
+			if(0==strncmp(key2,"split",strlen("split")+1)){
+				splittok = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"split_op",strlen("split_op"))){
+				splitop = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"name",strlen("name")+1)){ 
+				name = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"name_split_suffix",strlen("name_split_suffix"))){
+				name_split_suffix = json_object_get_string(val2);
+			}else if(0==strcmp(key2,"instance_prefix")){
+				instance_prefix = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"unit",strlen("unit"))){
+				unit = json_object_get_string(val2);
+			}else if(0==strcmp(key2,"nonzero")){
+				nonzero = 1;
+			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
+				kafka = 1;
+			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
+				// will be resolved in the next foreach
+			}else{
+				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key2,__LINE__);
+			}
+
+			if(errno!=0){
+				Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key2,strerror(errno));
+			}
+
+		} /* foreach */
+
+		if(unlikely(NULL==sensor_data->sensor_name)){
+			Log(worker_info,LOG_ERR,"sensor name not setted. Skipping.\n");
+			break;
+		}
 
 		json_object_object_foreach(monitor_parameters_array,key,val){
 			errno=0;
 			if(0==strncmp(key,"split",strlen("split")+1)){
-				splittok = json_object_get_string(val);
-			}else if(0==strncmp(key,"split_op",strlen("split_op"))){
-				splitop = json_object_get_string(val);
-			}else if(0==strncmp(key,"name",strlen("name")+1)){ 
-				name = json_object_get_string(val);
-			}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
-				name_split_suffix = json_object_get_string(val);
+				// already resolved
+			}else if(0==strcmp(key,"split_op")){
+				// already resolved
+			}else if(0==strcmp(key,"name")){ 
+				// already resolved
+			}else if(0==strcmp(key,"name_split_suffix")){
+				// already resolved
 			}else if(0==strcmp(key,"instance_prefix")){
-				instance_prefix = json_object_get_string(val);
+				// already resolved
 			}else if(0==strncmp(key,"unit",strlen("unit"))){
-				unit = json_object_get_string(val);
+				// already resolved
 			}else if(0==strcmp(key,"nonzero")){
-				nonzero = 1;
+				// already resolved
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
-				kafka = 1;
+				// already resolved
 			}else if(0==strncmp(key,"oid",strlen("oid"))){
 				/* @TODO extract in his own SNMPget function */
 				/* @TODO test passing a sensor without params to caller function. */
@@ -431,76 +529,108 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				read_objid(json_object_get_string(val),entry_oid,&entry_oid_len);
 				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
 				int status = snmp_sess_synch_response(sessp,pdu,&response);
-				if(likely(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR)){
-					/* A lot of variables. Just if we pass SNMPV3 someday.
-					struct variable_list *vars;
-					for(vars=response->variables; vars; vars=vars->next_variable)
-						print_variable(vars->name,vars->name_length,vars);
-					*/
-					
-					double number;
-					Log(worker_info,LOG_DEBUG,"response type: %d\n",response->variables->type);
-
-					switch(response->variables->type){ // See in /usr/include/net-snmp/types.h
-						case ASN_INTEGER:
-							snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
-							if(nonzero && 0 == *response->variables->val.integer)
+				if(likely(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR))
+				{
+					number_setted = snmp_solve_response(worker_info,value_buf,sizeof(value_buf),&number,response);
+					Log(worker_info,LOG_DEBUG,"SNMP OID %s response: %s\n",json_object_get_string(val),value_buf);
+					if(!splitop)
+					{
+						if(0==libmatheval_append(worker_info,libmatheval_variables,name,number))
+						{
+							Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+							aok = 0;
+						}
+					}
+					else
+					{
+						char * auxchar;
+						char * tok = strtok_r(value_buf,splittok,&auxchar);
+						unsigned int count = 0;
+						double sum=0;
+						libmatheval_start_pos = libmatheval_variables->variables_pos;
+						const size_t name_len = strlen(name);
+						char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
+						strcpy(tok_name,name);
+						while(tok){
+							snprintf(tok_name+name_len,7,"_%u",count);
+							if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
 							{
-								Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
-								bad_names[bad_names_pos++] = name;
-								kafka=0;
+								if(unlikely(splitted_toks_num==splitted_toks_size))
+								{
+									splitted_toks = realloc(splitted_toks,splitted_toks_size ? splitted_toks_size*2 : START_SPLITTEDTOKS_SIZE);
+									if(splitted_toks)
+									{
+										splitted_toks_size*=2;
+									}
+									else
+									{
+										splitted_toks_size=0;
+										Log(worker_info,LOG_CRIT,"Memory error.\n");
+										aok = 0;
+										break;
+									}
+								}
+								splitted_toks[splitted_toks_num++] = tok;
 							}
 							else
 							{
-								Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. OID=%s;Value=%d\n",
-									name,json_object_get_string(val),*response->variables->val.integer);
-								if(0==libmatheval_append(
-									worker_info,libmatheval_variables,name,*response->variables->val.integer
-									))
-								{
-									Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-									aok = 0;
-								}
+								Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+								aok = 0;
 							}
-						
-							break;
-						case ASN_OCTET_STR:
-							/* We don't know if it's a double inside a string; We try to convert and save */
-							number = strtod((const char *)response->variables->val.string,NULL);
-							number_setted = 1;
-							if(NULL==splittok)
+
+							if(NULL!=splitop)
+								sum += atof(tok);
+							count++; /* always count */
+
+							tok = strtok_r(NULL,splittok,&auxchar);
+						} /* while(tok) */
+
+						// Last token reached. Have we an operation to do?
+						if(NULL!=splitop){
+							if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
 							{
-								if(nonzero && 0 == *response->variables->val.integer)
+								double result = 0;
+								int splitop_is_valid = 1;
+								if(0==strcmp("sum",splitop)){
+									result = sum;
+								}else if(0==strcmp("mean",splitop)){
+									result = sum/count;
+								}
+								
+								if(splitop_is_valid)
 								{
-									Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
-									kafka=0;
+									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",sum);
+									if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
+									{
+										Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+											name,split_op_result);
+									}
 								}
 								else
 								{
-									Log(worker_info,LOG_DEBUG,"Saving %lf var in libmatheval array. OID=%s;Value=\"%lf\"\n",name,json_object_get_string(val),number);
-									if(0==libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables,name,number))
-									{
-										Log(worker_info,LOG_ERR,"Error adding libmatheval variable\n");
-										aok = 0;
-									}
+									Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+									free(split_op_result);
+									split_op_result=NULL;
 								}
 							}
+							else
+							{
+								Log(worker_info,LOG_CRIT,"Memory error.\n");
+								break; /* foreach */
+							}
+						}
+					}
 
-							// @TODO check val_len before copy string.
-							strncpy(value_buf,(const char *)response->variables->val.string,sizeof(value_buf));
-							value_buf[response->variables->val_len] = '\0';
-
-							Log(worker_info,LOG_DEBUG,"SNMP response: %s\n",response->variables->val.string);
-							Log(worker_info,LOG_DEBUG,"Saved SNMP response (added \\n): %s\n",value_buf);
-
-							break;
-						default:
-							Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
-					};
-
+					if(nonzero && 0 == number)
+					{
+						Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+						bad_names[bad_names_pos++] = name;
+						kafka=0;
+					}
 					snmp_free_pdu(response);
-
-				}else{
+				}
+				else
+				{
 					if (status == STAT_SUCCESS)
 						Log(worker_info,LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
 					else
@@ -518,7 +648,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						kafka=0;
 						op_ok=0;
 					}
-
 				}
 				if(op_ok)
 				{
@@ -547,33 +676,30 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 		} /* foreach */
 
-		if(unlikely(NULL==sensor_data->sensor_name)){
-			Log(worker_info,LOG_ERR,"sensor name not setted. Skipping.\n");
-			break;
-		}
-
 		if(kafka){
-			char * saveptr=NULL;
-			double sum=0;unsigned int count=0;int freetok=0;
-			char * tok = splittok ? strtok_r(value_buf,splittok,&saveptr) : value_buf;
-			                   /* at least one pass if splittok not setted */
-			while(NULL!=tok)
+			if(splittok==NULL) /* non-splitted response. Forced adaption. */
 			{
-				printbuf = printbuf_new();
+				splitted_toks = calloc(1,sizeof(char *));
+				splitted_toks[0] = value_buf;
+				splitted_toks_num = 1;
+			}
+			for(size_t i=0;i<=splitted_toks_num;++i) /* i==splitted_toks_num => splitop destinated iteration */
+			{
+				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
 					// @TODO use printbuf_memappend_fast instead! */
 					sprintbuf(printbuf, "{");
 					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
 					sprintbuf(printbuf, "\"sensor_id\":%lu,",sensor_data->sensor_id);
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
-					if(splittok && name_split_suffix)
+					if(splittok && name_split_suffix && i<splitted_toks_num)
 						sprintbuf(printbuf, "\"monitor\":\"%s%s\",",name,name_split_suffix);
 					else
 						sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
-					if(splittok && instance_prefix)
-						sprintbuf(printbuf, "\"instance\":\"%s%d\",",instance_prefix,count);
+					if(splittok && instance_prefix && i<splitted_toks_num)
+						sprintbuf(printbuf, "\"instance\":\"%s%d\",",instance_prefix,i);
 					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					sprintbuf(printbuf, "\"value\":\"%s\",", tok);
+					sprintbuf(printbuf, "\"value\":\"%s\",", i<splitted_toks_num ? splitted_toks[i] : split_op_result);
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					sprintbuf(printbuf, "}");
 
@@ -623,35 +749,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							Log(worker_info,LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
 						}
-
-						if(NULL!=splitop)
-							sum += atof(tok);
-						count++; /* always count */
-
-						if(freetok){
-							free(tok);
-							freetok=0;
-						}
-
-						tok = splittok ? strtok_r(NULL,splittok,&saveptr) : NULL;
-
-						if(NULL==tok && NULL!=splitop){ /* we've reached last token, and we have an operation to do
-						                                with the data */
-							tok = calloc(1024,sizeof(char));
-							if(0==strcmp("sum",splitop))
-								snprintf(tok,1024,"%lf",sum);
-							else if(0==strcmp("mean",splitop))
-								snprintf(tok,1024,"%lf",sum/count);
-							else{
-								Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
-								free(tok);
-								break; /* exit of while loop */
-							}
-							freetok=1;
-							splittok=NULL; /* avoid strtok calls and re-enter in while after process tok */
-							               /* avoid print per_instance_suffix too */
-							splitop=NULL;  /* avoid enter in this block */
-						}
 					}
 					printbuf_free(printbuf);
 					#ifndef RD_KAFKA_VERSION // RD_KAFKA_VERSION < 0x00080000
@@ -659,18 +756,23 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						worker_info->kafka_current_partition = worker_info->kafka_start_partition;
 					#endif
 					printbuf = NULL;
-				}else{
+				}else{ /* if(printbuf) after malloc */
 					Log(worker_info,LOG_ALERT,"Cannot allocate memory for printbuf. Skipping\n");
 				}
-			} /* while tok */
+			} /* for i in splittoks */
 
 			#if RD_KAFKA_VERSION == 0x00080000
 			if(worker_info->debug >= LOG_DEBUG )
 				rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
 			#endif /* RD_KAFKA_VERSION */
 
+
 		} /* if kafka */
 
+		if(splitted_toks) 
+			free(splitted_toks);
+		if(split_op_result)
+			free(split_op_result);
 	}
 	snmp_sess_close(sessp);
 
@@ -807,6 +909,9 @@ void * worker(void *_info){
 			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
 			pthread_self(),msg_left,throw_msg_count);
 		prev_msg_left = msg_left;
+		#ifndef NDEBUG
+		rd_kafka_poll(pt_worker_info.rk,1);
+		#endif
 		sleep(worker_info->timeout/1000 + 1);
 	}
 
