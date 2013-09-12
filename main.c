@@ -685,6 +685,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 			for(size_t i=0;i<=splitted_toks_num;++i) /* i==splitted_toks_num => splitop destinated iteration */
 			{
+				if(i==splitted_toks_num && !split_op_result)
+					continue;
 				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
 					// @TODO use printbuf_memappend_fast instead! */
