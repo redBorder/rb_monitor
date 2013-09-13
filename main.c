@@ -21,11 +21,22 @@
 #include <ctype.h>
 #endif
 
+#include "rb_stringlist.h"
+
 #define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */
+#define MAX_VECTOR_OP_VARIABLES 64 /* Maximum variables in a vector operation */
+                                   /* @TODO make dynamic */
+                                   /* @TODO test low values */
+
+const char * OPERATIONS = "+-*/";
 
 #define DEBUG_STDOUT 0x1
 #define DEBUG_SYSLOG 0x2
+
+void swap(void **a,void **b){
+	void * temp=*b;*b=*a; *a=temp;
+}
 
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
@@ -153,7 +164,7 @@ static inline void Log(const struct _worker_info *worker_info, const int level,c
 }
 
 static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
-	Log(worker_info,LOG_DEBUG,"Saving %s var in libmatheval array. Value=%lf\n",
+	Log(worker_info,LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
 						                                         name,val);
 
 	if(matheval->variables_pos<matheval->total_lenght){
@@ -178,8 +189,6 @@ static int libmatheval_append(struct _worker_info *worker_info, struct libmathev
 
 	matheval->names[matheval->variables_pos] = name;
 	matheval->values[matheval->variables_pos++] = val;
-	Log(worker_info,LOG_DEBUG,"[libmatheval] Saved %s->%lf [%u/%u filled]\n",
-		name,val,matheval->variables_pos,matheval->total_lenght);
 	return 1;
 }
 
@@ -448,14 +457,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		const char * splittok=NULL,*splitop=NULL;
 		char *split_op_result=NULL;
 		const char * unit=NULL;
-		char value_buf[1024];
-		double number;
+		char value_buf[1024]; /* @TODO make flexible */
+		double number; // <- @TODO merge with split_op_result */
 		int number_setted = 0;
 
 		
-		char ** splitted_toks  = NULL;
-		unsigned int splitted_toks_num  = 0;
-		unsigned int splitted_toks_size = 0;
+		rb_stringlist_t valueslist = {0};
 		
 		
 		/* First pass: get attributes except op: and oid:*/
@@ -514,7 +521,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				// already resolved
 			}else if(0==strncmp(key,"oid",strlen("oid"))){
-				/* @TODO extract in his own SNMPget function */
+				/* @TODO extract in it's own SNMPget function */
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
 					Log(worker_info,LOG_WARNING,"name of param not set in %s. Skipping\n",
@@ -530,7 +537,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
 				int status = snmp_sess_synch_response(sessp,pdu,&response);
 				if(likely(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR))
-				{
+				{ // @TODO refactor all this block. Search for repeated code.
 					number_setted = snmp_solve_response(worker_info,value_buf,sizeof(value_buf),&number,response);
 					Log(worker_info,LOG_DEBUG,"SNMP OID %s response: %s\n",json_object_get_string(val),value_buf);
 					if(!splitop)
@@ -542,35 +549,25 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						}
 					}
 					else
-					{
+					{ /* adding suffix if vector. @TODO: implement in libmatheval_append? One char* suffix param? */
 						char * auxchar;
 						char * tok = strtok_r(value_buf,splittok,&auxchar);
 						unsigned int count = 0;
 						double sum=0;
 						libmatheval_start_pos = libmatheval_variables->variables_pos;
 						const size_t name_len = strlen(name);
-						char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
-						strcpy(tok_name,name);
 						while(tok){
+							char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
+							strcpy(tok_name,name);
 							snprintf(tok_name+name_len,7,"_%u",count);
 							if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
 							{
-								if(unlikely(splitted_toks_num==splitted_toks_size))
+								if(! likely(rb_stringlist_add(&valueslist,tok)))
 								{
-									splitted_toks = realloc(splitted_toks,splitted_toks_size ? splitted_toks_size*2 : START_SPLITTEDTOKS_SIZE);
-									if(splitted_toks)
-									{
-										splitted_toks_size*=2;
-									}
-									else
-									{
-										splitted_toks_size=0;
-										Log(worker_info,LOG_CRIT,"Memory error.\n");
-										aok = 0;
-										break;
-									}
+									Log(worker_info,LOG_CRIT,"Memory error.\n");
+									aok = 0;
+									break;
 								}
-								splitted_toks[splitted_toks_num++] = tok;
 							}
 							else
 							{
@@ -585,7 +582,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							tok = strtok_r(NULL,splittok,&auxchar);
 						} /* while(tok) */
 
-						// Last token reached. Have we an operation to do?
+						// Last token reached. Do we have an operation to do?
 						if(NULL!=splitop){
 							if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
 							{
@@ -637,35 +634,138 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						Log(worker_info,LOG_ERR,"Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){
-				/* @TODO buffer this! */
-				char * operation = (char *)json_object_get_string(val);
+				const char * operation = (char *)json_object_get_string(val);
 				int op_ok=1;
 				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
 				{
 					if(strstr(bad_names[i],operation)){
-						Log(worker_info,LOG_NOTICE,"OP %s Uses a previously bad marked value (%s). Skipping\n",
+						Log(worker_info,LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping\n",
 							operation,bad_names[i]);
-						kafka=0;
-						op_ok=0;
+						kafka=op_ok=0;
 					}
 				}
 				if(op_ok)
 				{
-					void *f = evaluator_create (operation); /*really it has to do (void *). See libmatheval doc. */
-					number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
-						(char **) libmatheval_variables->names,	libmatheval_variables->values);
-					number_setted = 1;
-					evaluator_destroy (f);
-					Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
-					if(number == 0 && nonzero)
-						Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
-					if(number == INFINITY|| number == -INFINITY|| number == NAN)
-						Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
-					/* op will send by default, so we ignore kafka param */
-					libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, name,number);
-					snprintf(value_buf,1024,"%lf",number);
-				}
+					char * str_op = strdup(operation);
+					char *auxchar;
+					char * tok = strtok_r(str_op,OPERATIONS,&auxchar);
+					char * vector_variables[MAX_VECTOR_OP_VARIABLES]  = {NULL};
+					int vector_variables_pos[MAX_VECTOR_OP_VARIABLES] = {0}; /* pos of vv in libmatheval_array */
+					size_t vector_variables_count = 0;
+					size_t vectors_len = 0;
+					while(tok) /* searching if some variable is a vector */
+					{
+						for(unsigned int i=0;i<libmatheval_variables->variables_pos;++i)
+						{
+							if(strcmp(libmatheval_variables->names[i],tok)==0){
+								if(i>0 && strncmp(tok,libmatheval_variables->names[i-1],strlen(tok))==0){
+									if(likely(vector_variables_count < MAX_VECTOR_OP_VARIABLES))
+									{
+										vector_variables[vector_variables_count] = tok;
+										vector_variables_pos[vector_variables_count++] = i;
+									}
+									else
+									{
+										Log(worker_info,LOG_ERR,
+										  "Maximum number of vector variables in a operation reached.\n");
+										op_ok=kafka=0;	
+									}
+									break; /* for */
+								}
+							}
+						}
+						tok = strtok_r(NULL,OPERATIONS,&auxchar);
+					} 
+					
 
+					/* Vector op. Let's search how many values has each vector and see if
+					 * all vectors has the same lenght (Sanity check).
+					 */
+					for(size_t j=0;aok && j<vector_variables_count;++j)
+					{
+						assert(vector_variables_pos[j]>0);
+						const char * prop_vector_lenght_str = 
+							libmatheval_variables->names[vector_variables_pos[j]-1] + strlen(vector_variables[j])+1;
+						const size_t prop_vector_lenght = atoi(prop_vector_lenght_str)+1;
+						if(vectors_len==0)
+							vectors_len=prop_vector_lenght;
+						if(vectors_len!=prop_vector_lenght)
+						{
+							Log(worker_info,LOG_ERR,"Different lenghts in vectors. Skipping.");
+							aok=0;
+							kafka=0;
+						}
+					}
+
+					for(size_t j=0;aok && j<vector_variables_count;++j){
+						// set vector_pos at the first position of vector
+						vector_variables_pos[j]-=vectors_len;
+						assert(vector_variables_pos[j]>=0);
+					}
+
+
+					/* j<vectors_len operation: operation with vectors members (if any) */
+					/* j==vectors_len operation: operation with vectors result or non-vector value (if any) */
+					for(size_t j=0;aok && j<=vectors_len;++j) /* foreach member of vector */
+					{ 
+						const size_t namelen = strlen(name); // @TODO make the suffix append in libmatheval_append
+						char * mathname = calloc(namelen+6,sizeof(char)); /* space enough to save _60000 */
+						strcpy(mathname,name);
+						mathname[namelen] = '\0';
+						void * const f = evaluator_create ((char *)operation); /* really it has to do (void *). See libmatheval doc. */
+						                                                       /* also, we have to create a new one for each iteration */
+						/* We change vector's name position instead of modify operation string.
+						 * At this moment, the vector is:
+						 * 
+						 * names:  [a1 a2 a3  a b1 b2 b3  b]
+						 * values: [v1 v2 v3 v4 v5 v6 v7 v8]
+						 */ 
+						if(j<vectors_len)
+						{
+							char buffer[7];
+							buffer[0] = '_';
+							sprintf(&buffer[1],"%lu",j);
+							strcat(mathname,buffer);
+							for(size_t k=0;k<vector_variables_count;++k){ /* foreach vector variable */
+								/* swap names, so evaluate will pass the vector element */
+								swap((void **)&libmatheval_variables->names[vector_variables_pos[k]+j],
+									 (void **)&libmatheval_variables->names[vector_variables_pos[k]+vectors_len]);
+							}
+						}
+
+						/*
+						 * names:  [a1  a a3 a2 b1  b b3 b2] (if change needed)
+						 * values: [v1 v2 v3 v4 v5 v6 v7 v8]
+						 *              ^           ^
+						 */ 
+						/* @TODO buffer this! */
+						number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
+							(char **) libmatheval_variables->names,	libmatheval_variables->values);
+						number_setted = 1;
+						Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
+						if(number == 0 && nonzero)
+							Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
+						if(number == INFINITY|| number == -INFINITY|| number == NAN)
+							Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+						/* op will send by default, so we ignore kafka param */
+						libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, mathname,number);
+						snprintf(value_buf,1024,"%lf",number);
+
+						
+						/*
+						 * names:  [a1 a2 a3  a b1 b2 b3  b]
+						 * values: [v1 v2 v3 v4 v5 v6 v7 v8]
+						 */
+						if(j<vectors_len)
+						{
+							for(size_t k=0;k<vector_variables_count;++k){ /* foreach vector variable */
+								swap((void **)&libmatheval_variables->names[vector_variables_pos[k]+j],
+									 (void **)&libmatheval_variables->names[vector_variables_pos[k]+vectors_len]);
+							}
+						}
+						evaluator_destroy (f);
+					}
+				}
 			}else{
 				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
 			}
@@ -677,15 +777,13 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		} /* foreach */
 
 		if(kafka){
-			if(splittok==NULL) /* non-splitted response. Forced adaption. */
+			if(0==rb_stringlist_count(&valueslist)) /* non-splitted response. Forced adaption. */
 			{
-				splitted_toks = calloc(1,sizeof(char *));
-				splitted_toks[0] = value_buf;
-				splitted_toks_num = 1;
+				rb_stringlist_add(&valueslist,value_buf);
 			}
-			for(size_t i=0;i<=splitted_toks_num;++i) /* i==splitted_toks_num => splitop destinated iteration */
+			for(size_t i=0;i<=rb_stringlist_count(&valueslist);++i) /* i==rb_stringlist_count(&valueslist) => splitop destinated iteration */
 			{
-				if(i==splitted_toks_num && !split_op_result)
+				if(i==rb_stringlist_count(&valueslist) && !split_op_result)
 					continue;
 				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
@@ -694,14 +792,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
 					sprintbuf(printbuf, "\"sensor_id\":%lu,",sensor_data->sensor_id);
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
-					if(splittok && name_split_suffix && i<splitted_toks_num)
+					if(splittok && name_split_suffix && i<rb_stringlist_count(&valueslist))
 						sprintbuf(printbuf, "\"monitor\":\"%s%s\",",name,name_split_suffix);
 					else
 						sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
-					if(splittok && instance_prefix && i<splitted_toks_num)
+					if(splittok && instance_prefix && i<rb_stringlist_count(&valueslist))
 						sprintbuf(printbuf, "\"instance\":\"%s%d\",",instance_prefix,i);
 					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					sprintbuf(printbuf, "\"value\":\"%s\",", i<splitted_toks_num ? splitted_toks[i] : split_op_result);
+					sprintbuf(printbuf, "\"value\":\"%s\",", 
+						i<rb_stringlist_count(&valueslist) ? rb_stringlist_at(&valueslist,i) : split_op_result);
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					sprintbuf(printbuf, "}");
 
@@ -771,8 +870,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* if kafka */
 
-		if(splitted_toks) 
-			free(splitted_toks);
+		/* rb_stringlist_freeall(&stringlist); // NOPE! strings are tokenized from value_buf */
 		if(split_op_result)
 			free(split_op_result);
 	}
