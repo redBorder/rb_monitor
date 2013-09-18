@@ -510,6 +510,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		
 		rd_lru_t * valueslist    = rd_lru_new();
 		rd_lru_t * instance_list = rd_lru_new();
+		rd_lru_t * gc_tofree     = rd_lru_new(); // garbage collector
 		
 		
 		/* First pass: get attributes except op: and oid:*/
@@ -619,9 +620,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								*nexttok = '\0';
 								nexttok++;
 							}
-							char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
 							if(*tok)
 							{
+								char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
+								rd_lru_push(gc_tofree,tok_name);
 								strcpy(tok_name,name);
 								snprintf(tok_name+name_len,7,"_%u",count);
 								if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
@@ -649,10 +651,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							{
 								Log(worker_info,LOG_WARNING,"Not seeing value %d\n",count);
 							}
-							free(tok_name);
-							count++; /* always count */
 
 							tok = nexttok;
+							count++;
 						} /* while(tok) */
 						free(value_buf); /* Don't needed anymore */
 						value_buf=0;
@@ -932,7 +933,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								 * msg_opaque. */
 								NULL))){
 							printbuf->buf=NULL; // rdkafka will free it
-
 						}
 
 						#else /* KAFKA_07 */
@@ -972,6 +972,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		free(split_op_result);
 		rd_lru_destroy(valueslist);
 		rd_lru_destroy(instance_list);
+		void * garbage;
+		while((garbage = rd_lru_pop(gc_tofree)))
+			free(garbage);
+		rd_lru_destroy(gc_tofree);
 	}
 	snmp_sess_close(sessp);
 
@@ -1123,7 +1127,6 @@ void * worker(void *_info){
 
 void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,struct _worker_info *worker_info){
 	for(int i=0;i<json_object_array_length(sensors);++i){
-		// @TODO There is an increment in reference counter with this get????
 		json_object *value = json_object_array_get_idx(sensors, i);
 		Log(worker_info,LOG_DEBUG,"Push element %p\n",value);
 		rd_fifoq_add(queue,value);

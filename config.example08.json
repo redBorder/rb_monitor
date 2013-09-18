@@ -1,6 +1,6 @@
 {
   "conf": {
-    "debug": 7, /* See syslog error levels */
+    "debug": 8, /* See syslog error levels */
     "syslog": 0,
     "stdout": 1,
     "threads": 1,
