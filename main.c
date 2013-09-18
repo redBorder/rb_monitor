@@ -39,6 +39,19 @@ void swap(void **a,void **b){
 	void * temp=*b;*b=*a; *a=temp;
 }
 
+#ifndef SIMPLEQ_FOREACH_SAFE
+/*
+* SIMPLEQ_FOREACH_SAFE() provides a traversal where the current iterated element
+* may be freed or unlinked.
+* It does not allow freeing or modifying any other element in the list,
+* at least not the next element.
+*/
+#define SIMPLEQ_FOREACH_SAFE(elm,tmpelm,head,field)   \
+for ((elm) = SIMPLEQ_FIRST(head) ;                    \
+(elm) && ((tmpelm) = SIMPLEQ_NEXT((elm), field), 1) ; \
+(elm) = (tmpelm))
+#endif
+
 /// Fallback config in json format
 const char * str_default_config = /* "conf:" */ "{"
     "\"debug\": 100,"
@@ -708,7 +721,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				if(op_ok)
 				{
-					struct vector_variables_s{
+					struct vector_variables_s{ // @TODO extract in it's own file.
 						char *name;size_t name_len;unsigned int pos;
 						SIMPLEQ_ENTRY(vector_variables_s) entry;
 					};
@@ -800,6 +813,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						}
 						
 						
+
 						void * const f = evaluator_create ((char *)str_op); /* really it has to do (void *). See libmatheval doc. */
 					                                                       /* also, we have to create a new one for each iteration */
 						number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
@@ -824,6 +838,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							sum+=number;
 							count++;
 						}
+						free(mathname);
 
 					} /* foreach member of vector */
 					if(splitop)
@@ -840,6 +855,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							sprintf(split_op_result,"%lf",number);
 						}
 					}
+
+					struct vector_variables_s *vector_iterator,*tmp_vector_iterator;
+					SIMPLEQ_FOREACH_SAFE(vector_iterator,tmp_vector_iterator,&head,entry)
+					{
+						free(vector_iterator);
+					}
+					if(vector_variables_count>0) // @TODO: make it more simple
+						free(str_op);
 					free(str_op_variables);
 				}
 			}else{
@@ -1059,7 +1082,8 @@ void * worker(void *_info){
 		pt_worker_info.thread_ok=0;
 	}
 	#endif
-	
+
+	Log(worker_info,LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
@@ -1184,6 +1208,7 @@ int main(int argc, char  *argv[])
 		if(NULL==pd_thread){
 			Log(&worker_info,LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.\n");
 		}else{
+			Log(&worker_info,LOG_INFO,"Main thread started successfuly. Starting workers threads.\n");
 			worker_info.queue = &queue;
 			for(int i=0;i<main_info.threads;++i){
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
