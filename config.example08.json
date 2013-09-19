@@ -31,7 +31,7 @@
         {"name": "load_15", "oid": "UCD-SNMP-MIB::laLoad.3", "unit": "%", "kafka": 1},
         {"name": "cpu_idle", "oid":"UCD-SNMP-MIB::ssCpuIdle.0", "unit":"%"},
 
-        {"name": "cpu_use", "op":"100-cpu_idle", "unit":"%", "kafka":1},
+        {"name": "cpu", "op":"100-cpu_idle", "unit":"%", "kafka":1},
 
         
         {"name": "memory_total", "nonzero":1, "oid": "UCD-SNMP-MIB::memTotalReal.0" },

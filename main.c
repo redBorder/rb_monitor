@@ -22,7 +22,7 @@
 #include <ctype.h>
 #endif
 
-#include "rb_stringlist.h"
+#include "rb_libmatheval.h"
 
 #define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */
@@ -30,6 +30,7 @@
                                    /* @TODO make dynamic */
                                    /* @TODO test low values */
 
+#define VECTOR_SEP "&"
 const char * OPERATIONS = "+-*/";
 
 #define DEBUG_STDOUT 0x1
@@ -92,13 +93,6 @@ struct _sensor_data{
 	const char * sensor_name;
 	uint64_t sensor_id;
 	const char * community;
-};
-
-struct libmatheval_stuffs{
-	const char ** names;
-	double *values;
-	unsigned int variables_pos;
-	unsigned int total_lenght;
 };
 
 struct _perthread_worker_info{
@@ -177,6 +171,14 @@ static inline void Log(const struct _worker_info *worker_info, const int level,c
 	}
 }
 
+/*
+ * Add a variable to a libmatheval_stuffs.
+ * @param matheval struct to add the variable.
+ * @param name     variable name
+ * @param val      value to add
+ * @return         1 in exit. 0 in other case (malloc error).
+ */
+
 static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
 	Log(worker_info,LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
 						                                         name,val);
@@ -204,39 +206,6 @@ static int libmatheval_append(struct _worker_info *worker_info, struct libmathev
 	matheval->names[matheval->variables_pos] = name;
 	matheval->values[matheval->variables_pos++] = val;
 	return 1;
-}
-
-static int libmatheval_search_vector(const char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size)
-{
-	int state = 0; /* 0: searching; 1: counting length; 2:finished */
-	int ret = 0;
-	*pos =0;
-	*size=0;
-	const size_t strlen_vector = strlen(vector);
-	for(unsigned int i=0;state<2 && i<variables_count;++i)
-	{
-		switch(state)
-		{
-			case 0:
-				if(strncmp(variables[i],vector,strlen_vector)==0)
-				{
-					state++;
-					(*size)++;
-					(*pos) = i;
-					ret=1;
-				}
-				break;
-			case 1:
-				if(strncmp(variables[i],vector,strlen_vector)==0)
-					(*size)++;
-				else
-					state++;
-				break;
-			default:
-				break;
-		};
-	}
-	return ret;
 }
 
 void printHelp(const char * progName){
@@ -625,7 +594,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
 								rd_lru_push(gc_tofree,tok_name);
 								strcpy(tok_name,name);
-								snprintf(tok_name+name_len,7,"_%u",count);
+								snprintf(tok_name+name_len,7,VECTOR_SEP "%u",count);
 								if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
 								{
 									if(kafka)
@@ -831,9 +800,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							char *buf = calloc(64,sizeof(char));
 							sprintf(buf,"%lf",number);
-							rd_lru_push(valueslist,buf);								
-							const unsigned long suffix_l = atol(strrchr(mathname,'_') + 1);
-							rd_lru_push(instance_list,(void *)(unsigned long)suffix_l);
+							if(vectors_len>1)
+							{
+								rd_lru_push(valueslist,buf);
+								const unsigned long suffix_l = atol(strrchr(mathname,'_') + 1);
+								rd_lru_push(instance_list,(void *)(unsigned long)suffix_l);
+							}
+							else
+							{
+								split_op_result = buf;
+							}
 						}
 						if(splitop){
 							sum+=number;
