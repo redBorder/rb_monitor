@@ -344,8 +344,9 @@ static inline int snmp_solve_response(const struct _worker_info *worker_info,
 
 	switch(response->variables->type) // See in /usr/include/net-snmp/types.h
 	{ 
+		case ASN_GAUGE:
 		case ASN_INTEGER:
-			snprintf(value_buf,sizeof(value_buf),"%ld",*response->variables->val.integer);
+			snprintf(value_buf,value_buf_len,"%ld",*response->variables->val.integer);
 			*number = *response->variables->val.integer;
 			ret = 1;		
 			break;
