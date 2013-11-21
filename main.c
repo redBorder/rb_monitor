@@ -382,9 +382,7 @@ static inline int snmp_solve_response(const struct _worker_info *worker_info,
 		default:
 			Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
 	};
-
 	return ret;
-
 }
 
 /** @note our way to save a SNMP string vector in libmatheval_array is:
@@ -565,7 +563,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ // @TODO refactor all this block. Search for repeated code.
 					number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,response);
 					Log(worker_info,LOG_DEBUG,"SNMP OID %s response: %s\n",json_object_get_string(val),value_buf);
-					if(!splittok)
+					if(unlikely(strlen(value_buf)==0))
+					{
+						Log(worker_info,LOG_WARNING,"Not seeing %s value", name);
+					}
+					else if(!splittok)
 					{
 						if(likely(libmatheval_append(worker_info,libmatheval_variables,name,number)))
 						{
