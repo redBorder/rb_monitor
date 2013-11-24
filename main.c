@@ -473,7 +473,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		struct timeval tv;
 		gettimeofday(&tv,NULL);
 
-		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL;
+		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
 		int kafka=0,nonzero=0;
 		const char * splittok=NULL,*splitop=NULL;
@@ -503,6 +503,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				instance_prefix = json_object_get_string(val2);
 			}else if(0==strncmp(key2,"unit",strlen("unit"))){
 				unit = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"group_name",strlen("group_name"))){
+				group_name = json_object_get_string(val2);
+			}else if(0==strncmp(key2,"group_id",strlen("group_name"))){
+				group_id = json_object_get_string(val2);
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
@@ -647,10 +651,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								}else if(0==strcmp("mean",splitop)){
 									result = sum/mean_count;
 								}
-								
 								if(splitop_is_valid)
 								{
-									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",sum);
+									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
 									if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
 									{
 										Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
@@ -893,6 +896,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						split_op_result = NULL;
 					}
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
+					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
+					if(group_id)   sprintbuf(printbuf, ",\"group_id\":%s", group_id);
 					sprintbuf(printbuf, "}");
 
 					//char * str_to_kafka = printbuf->buf;
