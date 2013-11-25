@@ -33,6 +33,7 @@
 #include <librd/rdqueue.h>
 #include <librd/rdthread.h>
 #include <librd/rdlru.h>
+#include <librd/rdmem.h>
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <librdkafka/rdkafka.h>
@@ -555,7 +556,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					break /*foreach*/;
 				}
 
-				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */
+				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ 
+				            /* TODO: move all value_buf free() to end of function, and set it to NULL when sended to kafka */
 				struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
 				struct snmp_pdu *response=NULL;
 				oid entry_oid[MAX_OID_LEN];
@@ -569,7 +571,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					Log(worker_info,LOG_DEBUG,"SNMP OID %s response: %s\n",json_object_get_string(val),value_buf);
 					if(unlikely(strlen(value_buf)==0))
 					{
-						Log(worker_info,LOG_WARNING,"Not seeing %s value", name);
+						Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
+						free(value_buf);
 					}
 					else if(!splittok)
 					{
@@ -645,12 +648,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
 							{
 								double result = 0;
-								int splitop_is_valid = 1;
 								if(0==strcmp("sum",splitop)){
 									result = sum;
 								}else if(0==strcmp("mean",splitop)){
 									result = sum/mean_count;
 								}
+								
+								int splitop_is_valid = isfinite(result);
+
 								if(splitop_is_valid)
 								{
 									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
