@@ -32,8 +32,8 @@
 #include <signal.h>
 #include <librd/rdqueue.h>
 #include <librd/rdthread.h>
-#include <librd/rdlru.h>
 #include <librd/rdmem.h>
+#include <librd/rdlru.h>
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <librdkafka/rdkafka.h>
@@ -401,7 +401,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	size_t libmatheval_start_pos;
 	void * sessp=NULL;
 	struct snmp_session *ss;
-	rd_lru_t * gc_tofree=NULL; // @TODO: switch to a rd_memctx_t
+	rd_memctx_t memctx;
+	memset(&memctx,0,sizeof(memctx));
+	rd_memctx_init(&memctx,"process_sensor_monitors",RD_MEMCTX_F_TRACK);
+
 
 	libmatheval_variables->variables_pos = 0;
 	const char *bad_names[json_object_array_length(monitors)]; /* ops cannot be added to libmatheval array.*/
@@ -458,16 +461,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			ss->flags = worker_info->default_session.flags;
 		}
 		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
-	}
-
-	if(aok)
-	{
-		gc_tofree     = rd_lru_new(); // garbage collector
-		if(NULL==gc_tofree)
-		{
-			Log(worker_info, LOG_CRIT, "Unable to malloc. Exiting.\n");
-			aok=0;
-		}
 	}
 
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
@@ -607,8 +600,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							if(*tok)
 							{
-								char * tok_name = calloc(name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
-								rd_lru_push(gc_tofree,tok_name);
+								char * tok_name = rd_memctx_calloc(&memctx,name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
 								strcpy(tok_name,name);
 								snprintf(tok_name+name_len,7,VECTOR_SEP "%u",count);
 								if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
@@ -955,12 +947,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	snmp_sess_close(sessp);
 
 	if(aok)
-	{
-		void * garbage;
-		while((garbage = rd_lru_pop(gc_tofree)))
-			free(garbage);
-		rd_lru_destroy(gc_tofree);
-	}
+		rd_memctx_freeall(&memctx);
 	return aok;
 } 
 
