@@ -470,7 +470,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		int kafka=0,nonzero=0;
+		uint64_t kafka=1,nonzero=0;
 		const char * splittok=NULL,*splitop=NULL;
 		char *split_op_result=NULL;
 		const char * unit=NULL;
@@ -505,7 +505,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
-				kafka = 1;
+				kafka = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
 				// will be resolved in the next foreach
 			}else{
@@ -633,7 +633,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							else
 							{
-								Log(worker_info,LOG_WARNING,"Not seeing value %d\n",count);
+								Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
 							}
 
 							tok = nexttok;
@@ -647,22 +647,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
 							{
 								double result = 0;
-								if(0==strcmp("sum",splitop)){
-									result = sum;
-								}else if(0==strcmp("mean",splitop)){
-									result = sum/mean_count;
-								}
-								
-								int splitop_is_valid = isfinite(result);
-
-								if(splitop_is_valid)
+								if(0==strcmp("sum",splitop))
 								{
-									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
-									if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
-									{
-										Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
-											name,split_op_result);
-									}
+									result = sum;
+								}
+								else if(0==strcmp("mean",splitop)){
+									result = sum/mean_count;
 								}
 								else
 								{
@@ -670,6 +660,29 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 									free(split_op_result);
 									split_op_result=NULL;
 								}
+
+								if(split_op_result)
+								{
+									int splitop_is_valid = isfinite(result);
+
+									if(splitop_is_valid)
+									{
+										snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
+										if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
+										{
+											Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+												name,split_op_result);
+										}
+									}
+									else
+									{
+										if(sum!=0)
+											Log(worker_info,LOG_ERR,"%s Gives a non finite value: sum=%lf;count=%lf\n",name,sum,mean_count);
+										free(split_op_result);
+										split_op_result=NULL;
+									}
+								}
+								
 							}
 							else
 							{
@@ -795,6 +808,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							const int mathpos = SIMPLEQ_FIRST(&head)->pos + j;
 							const char * suffix = strrchr(libmatheval_variables->names[mathpos],'_');
+							assert(suffix);
 							strcpy(mathname+namelen,suffix);
 						}
 						
@@ -1026,8 +1040,8 @@ void * worker(void *_info){
 
 	rd_kafka_defaultconf_set(&conf);
 	#if !defined(NDEBUG)
-	conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
-	conf.producer.dr_cb = msg_delivered;
+	// conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
+	// conf.producer.dr_cb = msg_delivered;
 	#endif
 
 	rd_kafka_topic_defaultconf_set(&topic_conf);
