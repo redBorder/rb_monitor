@@ -53,6 +53,7 @@
                                    /* @TODO test low values */
 
 #define VECTOR_SEP "_pos_"
+#define GROUP_SEP  "_gid_"
 const char * OPERATIONS = "+-*/&^|";
 
 #define DEBUG_STDOUT 0x1
@@ -536,6 +537,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// already resolved
 			}else if(0==strncmp(key,"unit",strlen("unit"))){
 				// already resolved
+			}else if(0==strncmp(key,"group_name",strlen("group_name"))){
+				// already resolved
+			}else if(0==strncmp(key,"group_id",strlen("group_name"))){
+				// already resolved
 			}else if(0==strcmp(key,"nonzero")){
 				// already resolved
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
@@ -549,8 +554,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					break /*foreach*/;
 				}
 
-				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ 
-				            /* TODO: move all value_buf free() to end of function, and set it to NULL when sended to kafka */
+				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ /* @TODO make managed by by memctx */
 				struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
 				struct snmp_pdu *response=NULL;
 				oid entry_oid[MAX_OID_LEN];
@@ -600,9 +604,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							if(*tok)
 							{
-								char * tok_name = rd_memctx_calloc(&memctx,name_len+7,sizeof(char)); /* +7: space to allocate _65535 */
-								strcpy(tok_name,name);
-								snprintf(tok_name+name_len,7,VECTOR_SEP "%u",count);
+								char * tok_name = rd_memctx_calloc(&memctx,name_len+7+7,sizeof(char)); /* +7: space to allocate _65535 */
+								// strcpy(tok_name,name);
+								if(group_id)
+									snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+								else
+									snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
 								if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
 								{
 									if(kafka)
@@ -797,20 +804,33 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					                                                       /* also, we have to create a new one for each iteration */
 						if(NULL==f)
 						{
-							Log(worker_info,LOG_ERR,"Operation not valid: %s",str_op);
+							Log(worker_info,LOG_ERR,"Operation not valid: %s\n",str_op);
 							op_ok = 0;
 						}
-						number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
-							(char **) libmatheval_variables->names,	libmatheval_variables->values);
-						evaluator_destroy (f);
-						number_setted = 1;
-						Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
-						if(number == 0 && nonzero)
-							Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
-						if(number == INFINITY|| number == -INFINITY|| number == NAN)
-							Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
-						/* op will send by default, so we ignore kafka param */
-						if(libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, mathname,number))
+						
+						if(op_ok){
+							char ** evaluator_variables;int evaluator_variables_count,vars_pos;
+							evaluator_get_variables(f,&evaluator_variables,&evaluator_variables_count);
+							op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
+							if(!op_ok)
+								Log(worker_info,LOG_ERR,"Variable not found: %s\n",evaluator_variables[vars_pos]);
+						}
+
+						if(op_ok && NULL!=f)
+						{
+							number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
+								(char **) libmatheval_variables->names,	libmatheval_variables->values);
+							evaluator_destroy (f);
+							number_setted = 1;
+							Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
+							if(number == 0 && nonzero)
+								Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
+							if(number == INFINITY|| number == -INFINITY|| number == NAN)
+								Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+							/* op will send by default, so we ignore kafka param */
+						}
+
+						if(op_ok && libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, mathname,number))
 						{
 							char *buf = calloc(64,sizeof(char));
 							sprintf(buf,"%lf",number);
@@ -825,7 +845,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								split_op_result = buf;
 							}
 						}
-						if(splitop){
+						if(op_ok && splitop){
 							sum+=number;
 							count++;
 						}

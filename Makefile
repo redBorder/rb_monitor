@@ -20,7 +20,7 @@ LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 clean: 
 	-rm -rf $(PROGNAME)
 
-$(PROGNAME): main.c
+$(PROGNAME): main.c rb_libmatheval.h
 	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:
