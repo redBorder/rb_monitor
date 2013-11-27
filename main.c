@@ -57,9 +57,21 @@
 #define GROUP_SEP  "_gid_"
 const char * OPERATIONS = "+-*/&^|";
 
-void swap(void **a,void **b){
+static inline void swap(void **a,void **b){
 	void * temp=*b;*b=*a; *a=temp;
 }
+
+/* do strtod conversion plut EINVAL errno  if no possible conversion */
+double toDouble(const char * str)
+{
+	char * endPtr;
+	double d = strtod(str,&endPtr);
+	if(errno==0 && endPtr==str)
+		errno = EINVAL;
+	return d;
+}
+
+
 
 #ifndef SIMPLEQ_FOREACH_SAFE
 /*
@@ -385,7 +397,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		char *split_op_result=NULL;
 		const char * unit=NULL;
 		double number; // <- @TODO merge with split_op_result */
-		int number_setted = 0;
 
 		
 		rd_lru_t * valueslist    = rd_lru_new();
@@ -469,9 +480,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ /* @TODO make managed by by memctx */
 				if(0==strncmp(key,"oid",strlen("oid")))
-					number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
-					number_setted = system_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					system_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				if(unlikely(strlen(value_buf)==0))
 				{
 					Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
@@ -735,7 +746,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
 								(char **) libmatheval_variables->names,	libmatheval_variables->values);
 							evaluator_destroy (f);
-							number_setted = 1;
 							Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
 							if(number == 0 && nonzero)
 								Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
@@ -806,6 +816,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			{
 				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
+					int double_errno=0;
 					// @TODO use printbuf_memappend_fast instead! */
 					sprintbuf(printbuf, "{");
 					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
@@ -820,11 +831,17 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					sprintbuf(printbuf, "\"type\":\"monitor\",");
 					if(vector_value){
 						sprintbuf(printbuf, "\"value\":\"%s\",", vector_value);
+						errno=0;
+						toDouble(vector_value);
+						double_errno = errno;
 						free(vector_value);
 					}else{
 						sprintbuf(printbuf, "\"value\":\"%s\",", split_op_result);
-						free(split_op_result);
+						errno=0;
+						toDouble(split_op_result);
+						double_errno = errno;
 						split_op_result = NULL;
+						free(split_op_result);
 					}
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
@@ -833,31 +850,35 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 					//char * str_to_kafka = printbuf->buf;
 					//printbuf->buf=NULL;
-					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community)){
-						Log(worker_info,LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
+					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
+					{
 
-						#ifndef NDEBUG
-						int i=0;
-						for(i=0;printbuf && i<printbuf->bpos;++i)
-							assert(isprint(printbuf->buf[i] ));
-						#endif
-							
-						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
-								RD_KAFKA_MSG_F_FREE,
-								/* Payload and length */
-								printbuf->buf, printbuf->bpos,
-								/* Optional key and its length */
-								NULL, 0,
-								/* Message opaque, provided in
-								 * delivery report callback as
-								 * msg_opaque. */
-								NULL))){
-							printbuf->buf=NULL; // rdkafka will free it
+						if(0==double_errno)
+						{	
+							Log(worker_info,LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
+							if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
+									RD_KAFKA_MSG_F_FREE,
+									/* Payload and length */
+									printbuf->buf, printbuf->bpos,
+									/* Optional key and its length */
+									NULL, 0,
+									/* Message opaque, provided in
+									 * delivery report callback as
+									 * msg_opaque. */
+									NULL))){
+								printbuf->buf=NULL; // rdkafka will free it
+							}
+	
+							else
+							{
+								Log(worker_info,LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
+							}
 						}
-
 						else
 						{
-							Log(worker_info,LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
+							char buf[1024];
+							strerror_r(double_errno,buf,sizeof(buf));
+							Log(worker_info,LOG_ERR,"EIVAL Value of [%s] is not a valid double(%s). Skipping\n",printbuf->buf,buf);
 						}
 					}
 					printbuf_free(printbuf);

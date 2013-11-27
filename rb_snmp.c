@@ -68,9 +68,12 @@ int snmp_solve_response(const struct _worker_info *worker_info,
 	int ret = 0;
 	assert(value_buf);
 	assert(number);
-	assert(response);
-
-	if (status != STAT_SUCCESS)
+	
+	if(NULL==response)
+	{
+		Log(worker_info,LOG_ERR,"No SNMP response given.\n");
+	}
+	else if (status != STAT_SUCCESS)
 	{
 		Log(worker_info,LOG_ERR,"Snmp error: %s\n", 
 			snmp_api_errstring(snmp_sess_session(session->sessp)->s_snmp_errno));
@@ -101,7 +104,8 @@ int snmp_solve_response(const struct _worker_info *worker_info,
 		};
 	}
 	
-	snmp_free_pdu(response);
+	if(response)
+		snmp_free_pdu(response);
 	return ret;
 }
 
