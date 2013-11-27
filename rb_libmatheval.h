@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <string.h>
+
 struct libmatheval_stuffs{
 	const char ** names;
 	double *values;

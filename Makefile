@@ -20,8 +20,11 @@ LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 clean: 
 	-rm -rf $(PROGNAME)
 
-$(PROGNAME): main.c rb_libmatheval.h
-	$(CC) $(CFLAGS) -o $@ $< $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
+rb_snmp.o:rb_snmp.c rb_snmp.h
+	$(CC) $(CFLAGS) -o $@ $< -c 
+
+$(PROGNAME): main.c rb_libmatheval.h rb_snmp.o
+	$(CC) $(CFLAGS) -o $@ main.c rb_snmp.o $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:
 	install -t $(PREFIX)/bin $(PROGNAME)

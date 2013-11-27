@@ -34,8 +34,6 @@
 #include <librd/rdthread.h>
 #include <librd/rdmem.h>
 #include <librd/rdlru.h>
-#include <net-snmp/net-snmp-config.h>
-#include <net-snmp/net-snmp-includes.h>
 #include <librdkafka/rdkafka.h>
 #include <math.h>
 #include <matheval.h>
@@ -45,6 +43,8 @@
 #endif
 
 #include "rb_libmatheval.h"
+#include "rb_log.h"
+#include "rb_snmp.h"
 
 #define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */
@@ -55,9 +55,6 @@
 #define VECTOR_SEP "_pos_"
 #define GROUP_SEP  "_gid_"
 const char * OPERATIONS = "+-*/&^|";
-
-#define DEBUG_STDOUT 0x1
-#define DEBUG_SYSLOG 0x2
 
 void swap(void **a,void **b){
 	void * temp=*b;*b=*a; *a=temp;
@@ -102,6 +99,16 @@ struct _worker_info{
 	rd_fifoq_t *queue;
 };
 
+// Return the current debug level of worker_info
+int worker_info_debug_level(const struct _worker_info *worker_info){
+	return worker_info->debug;
+}
+
+// Return the debug output flags from worker info
+int worker_info_output_flags(const struct _worker_info *worker_info){
+	return worker_info->debug_output_flags;
+}
+
 struct _sensor_data{
 	int timeout;
 	const char * peername; 
@@ -132,57 +139,6 @@ void sigproc(int sig) {
   (void)sig;
 }
 
-#if 0
-#define LOG_EMERG       0       /* system is unusable */
-#define LOG_ALERT       1       /* action must be taken immediately */
-#define LOG_CRIT        2       /* critical conditions */
-#define LOG_ERR         3       /* error conditions */
-#define LOG_WARNING     4       /* warning conditions */
-#define LOG_NOTICE      5       /* normal but significant condition */
-#define LOG_INFO        6       /* informational */
-#define LOG_DEBUG       7       /* debug-level messages */
-#endif
-
-
-/** @WARNING worker_info->syslog_session_mutex locked and unlocked in this call! 
-    be aware: performance, race conditions...
-    */
-static inline void Log(const struct _worker_info *worker_info, const int level,char *fmt,...){
-	assert(worker_info);
-
-	if(level >= worker_info->debug)
-		return;
-
-	if(worker_info->debug_output_flags != 0){
-		va_list ap;
-		if(worker_info->debug_output_flags & DEBUG_STDOUT)
-		{
-			va_start(ap, fmt);
-			switch(level){
-				case LOG_EMERG:
-				case LOG_ALERT:
-				case LOG_CRIT:
-				case LOG_ERR:
-				case LOG_WARNING:
-	    			vfprintf(stderr, fmt, ap);
-	    			break;					
-				case LOG_NOTICE:
-				case LOG_INFO:
-				case LOG_DEBUG:
-					vfprintf(stdout, fmt, ap);
-					break;
-			};
-			va_end(ap);
-		}
-
-		if(worker_info->debug_output_flags & DEBUG_SYSLOG)
-		{
-			va_start(ap, fmt);
-			vsyslog(level, fmt, ap);
-		    va_end(ap);
-		}
-	}
-}
 
 /*
  * Add a variable to a libmatheval_stuffs.
@@ -313,6 +269,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 	return ret;
 }
 
+#if 0
 #ifndef NDEBUG
 /**
  * Message delivery report callback.
@@ -332,6 +289,7 @@ static void msg_delivered (rd_kafka_t *rk,
 }
 
 #endif /* NDEBUG */
+#endif
 
 static inline void check_setted(const void *ptr,struct _worker_info *worker_info,
 	int *aok,const char *errmsg,const char *sensor_name)
@@ -341,50 +299,6 @@ static inline void check_setted(const void *ptr,struct _worker_info *worker_info
 		*aok = 0;
 		Log(worker_info,LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
 	}
-}
-
-/** 
-	Adapt the snmp response in string and double responses.
-	@param value_buf  Return buffer where the response will be saved (text format)
-	@param number     If possible, the response will be saved in double format here
-	@param response   SNMP response
-	@return           0 if number was not setted; non 0 otherwise.
- */
-static inline int snmp_solve_response(const struct _worker_info *worker_info, 
-	char * value_buf,const size_t value_buf_len,double * number,struct snmp_pdu *response)
-{
-	/* A lot of variables. Just if we pass SNMPV3 someday.
-	struct variable_list *vars;
-	for(vars=response->variables; vars; vars=vars->next_variable)
-		print_variable(vars->name,vars->name_length,vars);
-	*/
-	int ret = 0;
-	assert(value_buf);
-	assert(number);
-	assert(response);
-	
-	//Log(worker_info,LOG_DEBUG,"response type: %d\n",response->variables->type);
-
-	switch(response->variables->type) // See in /usr/include/net-snmp/types.h
-	{ 
-		case ASN_GAUGE:
-		case ASN_INTEGER:
-			snprintf(value_buf,value_buf_len,"%ld",*response->variables->val.integer);
-			*number = *response->variables->val.integer;
-			ret = 1;		
-			break;
-		case ASN_OCTET_STR:
-			/* We don't know if it's a double inside a string; We try to convert and save */
-			strncpy(value_buf,(const char *)response->variables->val.string,value_buf_len);
-			// @TODO check val_len before copy string.
-			value_buf[response->variables->val_len] = '\0';
-			*number = strtod((const char *)response->variables->val.string,NULL);
-			ret = 1;
-			break;
-		default:
-			Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
-	};
-	return ret;
 }
 
 /** @note our way to save a SNMP string vector in libmatheval_array is:
@@ -400,8 +314,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = &pt_worker_info->libmatheval_variables;
 	size_t libmatheval_start_pos;
-	void * sessp=NULL;
-	struct snmp_session *ss;
+	struct monitor_snmp_session * snmp_sessp=NULL;
 	rd_memctx_t memctx;
 	memset(&memctx,0,sizeof(memctx));
 	rd_memctx_init(&memctx,"process_sensor_monitors",RD_MEMCTX_F_TRACK);
@@ -447,19 +360,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		pthread_mutex_lock(&worker_info->snmp_session_mutex);
 		/* @TODO: You can do it later, see session_api.h */
 		worker_info->default_session.peername = (char *)sensor_data->peername;
-		sessp = snmp_sess_open(&worker_info->default_session);
-		if(NULL== sessp || NULL == (ss = snmp_sess_session(sessp))){
+		const struct monitor_snmp_new_session_config config = {
+			sensor_data->community,
+			sensor_data->timeout,
+			worker_info->default_session.flags
+		};
+		snmp_sessp = new_snmp_session(&worker_info->default_session,&config);
+		if(NULL== snmp_sessp){
 			Log(worker_info,LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
 			aok=0;
-		}else{
-			/*memcpy(ss,&worker_info->default_session,sizeof(*ss)); Much pointers!*/
-			/*if (ss->community) free(ss->community);*/
-			ss->community = (u_char *)strdup(sensor_data->community);
-			ss->community_len = strlen(sensor_data->community);
-			/*if (ss->peername) free(ss->peername);*/
-			ss->timeout = sensor_data->timeout;
-
-			ss->flags = worker_info->default_session.flags;
 		}
 		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
 	}
@@ -547,6 +456,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// already resolved
 			}else if(0==strncmp(key,"oid",strlen("oid"))){
 				/* @TODO extract in it's own SNMPget function */
+				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
 					Log(worker_info,LOG_WARNING,"name of param not set in %s. Skipping\n",
@@ -555,157 +465,138 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 
 				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ /* @TODO make managed by by memctx */
-				struct snmp_pdu *pdu=snmp_pdu_create(SNMP_MSG_GET);
-				struct snmp_pdu *response=NULL;
-				oid entry_oid[MAX_OID_LEN];
-				size_t entry_oid_len = MAX_OID_LEN;
-				read_objid(json_object_get_string(val),entry_oid,&entry_oid_len);
-				snmp_add_null_var(pdu,entry_oid,entry_oid_len);
-				int status = snmp_sess_synch_response(sessp,pdu,&response);
-				if(likely(status==STAT_SUCCESS && response->errstat == SNMP_ERR_NOERROR))
-				{ // @TODO refactor all this block. Search for repeated code.
-					number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,response);
-					Log(worker_info,LOG_DEBUG,"SNMP OID %s response: %s\n",json_object_get_string(val),value_buf);
-					if(unlikely(strlen(value_buf)==0))
+				number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+				if(unlikely(strlen(value_buf)==0))
+				{
+					Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
+					free(value_buf);
+				}
+				else if(!splittok)
+				{
+					if(likely(libmatheval_append(worker_info,libmatheval_variables,name,number)))
 					{
-						Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
-						free(value_buf);
+						if(kafka)
+							rd_lru_push(valueslist,value_buf);
+						else
+							free(value_buf);
 					}
-					else if(!splittok)
+					else
 					{
-						if(likely(libmatheval_append(worker_info,libmatheval_variables,name,number)))
+						Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+						aok = 0;
+						free(value_buf);
+						value_buf=NULL;
+					}
+				}
+				else
+				{ /* adding suffix if vector. @TODO: implement in libmatheval_append? One char* suffix param? */
+					char * tok = value_buf;
+					unsigned int count = 0,mean_count=0;
+					double sum=0;
+					libmatheval_start_pos = libmatheval_variables->variables_pos;
+					const size_t name_len = strlen(name);
+					while(tok){
+						char * nexttok = strstr(tok,splittok);
+						if(nexttok != '\0')
 						{
-							if(kafka)
-								rd_lru_push(valueslist,value_buf);
+							*nexttok = '\0';
+							nexttok++;
+						}
+						if(*tok)
+						{
+							char * tok_name = rd_memctx_calloc(&memctx,name_len+7+7,sizeof(char)); /* +7: space to allocate _65535 */
+							// strcpy(tok_name,name);
+							if(group_id)
+								snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
 							else
-								free(value_buf);
+								snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+							if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+							{
+								if(kafka)
+								{
+									char * cptoken = malloc(sizeof(char)*strlen(tok));
+									strcpy(cptoken,tok);
+									rd_lru_push(valueslist,cptoken);
+									rd_lru_push(instance_list,(void *)(unsigned long)count);
+								}
+							}
+							else
+							{
+								Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+								aok = 0;
+							}
+							if(NULL!=splitop)
+							{
+								sum += atof(tok);
+								mean_count++;
+							}
 						}
 						else
 						{
-							Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-							aok = 0;
-							free(value_buf);
-							value_buf=NULL;
+							Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
 						}
-					}
-					else
-					{ /* adding suffix if vector. @TODO: implement in libmatheval_append? One char* suffix param? */
-						char * tok = value_buf;
-						unsigned int count = 0,mean_count=0;
-						double sum=0;
-						libmatheval_start_pos = libmatheval_variables->variables_pos;
-						const size_t name_len = strlen(name);
-						while(tok){
-							char * nexttok = strstr(tok,splittok);
-							if(nexttok != '\0')
+
+						tok = nexttok;
+						count++;
+					} /* while(tok) */
+					free(value_buf); /* Don't needed anymore */
+					value_buf=0;
+
+					// Last token reached. Do we have an operation to do?
+					if(NULL!=splitop){
+						if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
+						{
+							double result = 0;
+							if(0==strcmp("sum",splitop))
 							{
-								*nexttok = '\0';
-								nexttok++;
+								result = sum;
 							}
-							if(*tok)
+							else if(0==strcmp("mean",splitop)){
+								result = sum/mean_count;
+							}
+							else
 							{
-								char * tok_name = rd_memctx_calloc(&memctx,name_len+7+7,sizeof(char)); /* +7: space to allocate _65535 */
-								// strcpy(tok_name,name);
-								if(group_id)
-									snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-								else
-									snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-								if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+								Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+								free(split_op_result);
+								split_op_result=NULL;
+							}
+
+							if(split_op_result)
+							{
+								int splitop_is_valid = isfinite(result);
+
+								if(splitop_is_valid)
 								{
-									if(kafka)
+									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
+									if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
 									{
-										char * cptoken = malloc(sizeof(char)*strlen(tok));
-										strcpy(cptoken,tok);
-										rd_lru_push(valueslist,cptoken);
-										rd_lru_push(instance_list,(void *)(unsigned long)count);
+										Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+											name,split_op_result);
 									}
 								}
 								else
 								{
-									Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-									aok = 0;
-								}
-								if(NULL!=splitop)
-								{
-									sum += atof(tok);
-									mean_count++;
-								}
-							}
-							else
-							{
-								Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
-							}
-
-							tok = nexttok;
-							count++;
-						} /* while(tok) */
-						free(value_buf); /* Don't needed anymore */
-						value_buf=0;
-
-						// Last token reached. Do we have an operation to do?
-						if(NULL!=splitop){
-							if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
-							{
-								double result = 0;
-								if(0==strcmp("sum",splitop))
-								{
-									result = sum;
-								}
-								else if(0==strcmp("mean",splitop)){
-									result = sum/mean_count;
-								}
-								else
-								{
-									Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+									if(sum!=0)
+										Log(worker_info,LOG_ERR,"%s Gives a non finite value: sum=%lf;count=%lf\n",name,sum,mean_count);
 									free(split_op_result);
 									split_op_result=NULL;
 								}
-
-								if(split_op_result)
-								{
-									int splitop_is_valid = isfinite(result);
-
-									if(splitop_is_valid)
-									{
-										snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
-										if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
-										{
-											Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
-												name,split_op_result);
-										}
-									}
-									else
-									{
-										if(sum!=0)
-											Log(worker_info,LOG_ERR,"%s Gives a non finite value: sum=%lf;count=%lf\n",name,sum,mean_count);
-										free(split_op_result);
-										split_op_result=NULL;
-									}
-								}
-								
 							}
-							else
-							{
-								Log(worker_info,LOG_CRIT,"Memory error.\n");
-								break; /* foreach */
-							}
+							
+						}
+						else
+						{
+							Log(worker_info,LOG_CRIT,"Memory error.\n");
+							break; /* foreach */
 						}
 					}
-
-					if(nonzero && 0 == number)
-					{
-						Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
-						bad_names[bad_names_pos++] = name;
-						kafka=0;
-					}
-					snmp_free_pdu(response);
 				}
-				else
+
+				if(nonzero && 0 == number)
 				{
-					if (status == STAT_SUCCESS)
-						Log(worker_info,LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
-					else
-						Log(worker_info,LOG_ERR,"Snmp error: %s\n", snmp_api_errstring(ss->s_snmp_errno));
+					Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+					bad_names[bad_names_pos++] = name;
+					kafka=0;
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){
 				const char * operation = (char *)json_object_get_string(val);
@@ -827,7 +718,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							evaluator_get_variables(f,&evaluator_variables,&evaluator_variables_count);
 							op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
 							if(!op_ok)
+							{
 								Log(worker_info,LOG_ERR,"Variable not found: %s\n",evaluator_variables[vars_pos]);
+								evaluator_destroy(f);
+							}
 						}
 
 						if(op_ok && NULL!=f)
@@ -978,7 +872,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		rd_lru_destroy(valueslist);
 		rd_lru_destroy(instance_list);
 	} /* foreach monitor parameter */
-	snmp_sess_close(sessp);
+	destroy_snmp_session(snmp_sessp);
 
 	if(aok)
 		rd_memctx_freeall(&memctx);
