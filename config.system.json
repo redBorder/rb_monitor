@@ -1,0 +1,36 @@
+/* Basic config file: system command */
+
+{
+  "conf": {
+    "debug": 8, /* See syslog error levels */
+    "syslog": 0,
+    "stdout": 1,
+    "threads": 1,
+    "timeout": 1,
+    "max_snmp_fails": 2,
+    "max_kafka_fails": 2,
+    "sleep_main_thread": 1,
+    "sleep_worker_thread": 1,
+    "kafka_broker": "192.168.101.206",
+    "kafka_topic": "rb_monitor",
+    "kafka_timeout": 2,
+  }
+  ,
+  "sensors":
+  
+  [
+    {
+      "sensor_id":1,
+      "timeout":2000,
+      "sensor_name": "sensor-arriba",
+      "sensor_ip": "192.168.101.157", /* This field is better after sensor_name, so we can debug it */
+      "community" : "redBorder",
+      "monitors": /* this field MUST be the last! */
+      [
+        /* just a simple shell command */
+        
+        {"name": "current_dir", "system": "pwd"},
+      ]
+    },
+  ]
+}

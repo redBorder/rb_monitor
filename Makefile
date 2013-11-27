@@ -23,7 +23,7 @@ clean:
 rb_snmp.o:rb_snmp.c rb_snmp.h
 	$(CC) $(CFLAGS) -o $@ $< -c 
 
-$(PROGNAME): main.c rb_libmatheval.h rb_snmp.o
+$(PROGNAME): main.c rb_snmp.o rb_libmatheval.h rb_system.h
 	$(CC) $(CFLAGS) -o $@ main.c rb_snmp.o $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:

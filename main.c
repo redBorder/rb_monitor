@@ -42,6 +42,7 @@
 #include <ctype.h>
 #endif
 
+#include "rb_system.h"
 #include "rb_libmatheval.h"
 #include "rb_log.h"
 #include "rb_snmp.h"
@@ -417,6 +418,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				kafka = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
 				// will be resolved in the next foreach
+			}else if(0==strncmp(key2,"system",strlen("system"))){
+				// will be resolved in the next foreach
 			}else{
 				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key2,__LINE__);
 			}
@@ -454,7 +457,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// already resolved
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				// already resolved
-			}else if(0==strncmp(key,"oid",strlen("oid"))){
+			}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
 				/* @TODO extract in it's own SNMPget function */
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
@@ -465,7 +468,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 
 				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ /* @TODO make managed by by memctx */
-				number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+				if(0==strncmp(key,"oid",strlen("oid")))
+					number_setted = snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+				else
+					number_setted = system_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				if(unlikely(strlen(value_buf)==0))
 				{
 					Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
