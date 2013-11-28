@@ -324,11 +324,25 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 // @todo pass just a monitor_value with all precached possible.
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * splitop,int kafka,rd_memctx_t *memctx)
+	const char * instance_prefix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx)
 {
 	int aok=1;
+	time_t aux_timestamp=timestamp_given?0:time(NULL);
 	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
 					                        // i.e., just many splittok.
+
+	struct monitor_value monitor_value;
+	memset(&monitor_value,0,sizeof(monitor_value));
+	#ifdef MONITOR_VALUE_MAGIC
+	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+	#endif
+	monitor_value.sensor_name = sensor_data->sensor_name;
+	monitor_value.bad_value = 0;
+	monitor_value.unit=unit;
+	monitor_value.group_name=group_name;
+	monitor_value.group_id=group_id;
+
+
 	unsigned int count = 0,mean_count=0;
 	double sum=0;
 	const size_t name_len = strlen(name);
@@ -348,53 +362,60 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				Log(worker_info,LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
 				continue;
 			}
-			if(group_id)
-				snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-			else
-				snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-			if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+			
+			if(timestamp_given && 0==aux_timestamp) // current data is a timestamp
 			{
-				struct monitor_value monitor_value;
-				memset(&monitor_value,0,sizeof(monitor_value));
-				#ifdef MONITOR_VALUE_MAGIC
-				monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
-				#endif
-				monitor_value.timestamp = time(NULL);
-				monitor_value.sensor_name = sensor_data->sensor_name;
-				monitor_value.name = tok_name;
-				monitor_value.instance = count;
-				monitor_value.instance_prefix = instance_prefix;
-				monitor_value.instance_valid = 1;
-				monitor_value.bad_value = 0;
-				monitor_value.value=tok_f;
-				monitor_value.string_value=tok;
-				monitor_value.unit=unit;
-				monitor_value.group_name=group_name;
-				monitor_value.group_id=group_id;
-	
-				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+				aux_timestamp = toDouble(tok);
+				if(0!=errno)
+				{
+					char buf[1024];
+					Log(worker_info,LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
+					tok = nexttok;
+					aux_timestamp = time(NULL);
+				}
+			}
+			else // current data is a vector value
+			{
+				if(group_id)
+					snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+				else
+					snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+				if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+				{
+					monitor_value.timestamp = aux_timestamp;
+					monitor_value.name = tok_name;
+					monitor_value.instance = count;
+					monitor_value.instance_prefix = instance_prefix;
+					monitor_value.instance_valid = 1;
+					monitor_value.value=tok_f;
+					monitor_value.string_value=tok;
+		
+					const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-				if(kafka && new_mv)
-					rd_lru_push(valueslist,(void *)new_mv);
-			}
-			else
-			{
-				Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-				aok = 0;
-			}
-			if(NULL!=splitop)
-			{
-				sum += atof(tok);
-				mean_count++;
+					if(kafka && new_mv)
+						rd_lru_push(valueslist,(void *)new_mv);
+				}
+				else
+				{
+					Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+					aok = 0;
+				}
+
+				if(NULL!=splitop)
+				{
+					sum += atof(tok);
+					mean_count++;
+				}
+				count++;
+				aux_timestamp=0;
 			}
 		}
-		else
+		else /* *tok==0 */
 		{
 			Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
 		}
 	
 		tok = nexttok;
-		count++;
 	} /* while(tok) */
 
 	// Last token reached. Do we have an operation to do?
@@ -424,6 +445,20 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			{
 				Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
 					name,split_op_result);
+			}
+			else
+			{
+				monitor_value.timestamp = time(NULL);
+				monitor_value.name = name;
+				monitor_value.instance = 0;
+				monitor_value.instance_prefix = NULL;
+				monitor_value.instance_valid = 0;
+				monitor_value.value=result;
+				monitor_value.string_value=split_op_result;
+				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+				if(kafka && new_mv)
+					rd_lru_push(valueslist,(void *)new_mv);
 			}
 		}
 		else
@@ -543,7 +578,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
 			}else if(0==strcmp(key2,"timestamp_given")){
-				timestamp_given=1;
+				timestamp_given=json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
 				kafka = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
@@ -613,7 +648,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				else /* We have a vector here */
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
-					splittok, valueslist,unit,group_id,group_name,instance_prefix,splitop,kafka,&memctx);
+					splittok, valueslist,unit,group_id,group_name,instance_prefix,splitop,kafka,timestamp_given,&memctx);
 				}
 
 				if(nonzero && 0 == number)
