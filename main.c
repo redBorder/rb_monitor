@@ -622,6 +622,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// already resolved
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				// already resolved
+			}else if(0==strncmp(key,"timestamp_given",strlen("timestamp_given"))){
+				// already resolved
 			}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
@@ -1045,24 +1047,21 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	rd_kafka_conf_t conf;
-	rd_kafka_topic_conf_t topic_conf;
+	rd_kafka_conf_t * conf = rd_kafka_conf_new();
+	rd_kafka_topic_conf_t * topic_conf = rd_kafka_topic_conf_new();
 	char errstr[256];
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
 
 	memset(&pt_worker_info.libmatheval_variables,0,sizeof(pt_worker_info.libmatheval_variables));
 
-	rd_kafka_defaultconf_set(&conf);
 	#if !defined(NDEBUG)
 	// conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
 	// conf.producer.dr_cb = msg_delivered;
 	#endif
 
-	rd_kafka_topic_defaultconf_set(&topic_conf);
-
 	const rd_kafka_conf_res_t confset = 
-		rd_kafka_conf_set (&conf,"message.send.max.retries",worker_info->max_kafka_fails,
+		rd_kafka_conf_set (conf,"message.send.max.retries",worker_info->max_kafka_fails,
 		errstr, sizeof errstr);
 
 	switch(confset)
@@ -1077,7 +1076,7 @@ void * worker(void *_info){
 			break; /* AOK */
 	}
 
-	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, &conf,errstr, sizeof(errstr)))) {
+	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
 		Log(worker_info,LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
 		pt_worker_info.thread_ok=0;
 	}
@@ -1089,8 +1088,7 @@ void * worker(void *_info){
 		Log(worker_info,LOG_ERR,"No valid brokers specified\n");
 		pt_worker_info.thread_ok=0;
 	}
-	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, &topic_conf);
-	rd_kafka_topic_defaultconf_set(&topic_conf);
+	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
 
 	Log(worker_info,LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
