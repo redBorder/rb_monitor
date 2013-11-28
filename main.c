@@ -113,16 +113,6 @@ struct _worker_info{
 	struct monitor_values_tree * monitor_values_tree;
 };
 
-// Return the current debug level of worker_info
-int worker_info_debug_level(const struct _worker_info *worker_info){
-	return worker_info->debug;
-}
-
-// Return the debug output flags from worker info
-int worker_info_output_flags(const struct _worker_info *worker_info){
-	return worker_info->debug_output_flags;
-}
-
 struct _sensor_data{
 	int timeout;
 	const char * peername; 
@@ -223,7 +213,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition"))
 			 || 0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
 		{
-			Log(worker_info,LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
+			Log(LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
 		}
 		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
 		{
@@ -233,12 +223,12 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->sleep_worker = json_object_get_int64(val);
 		}else{
-			Log(worker_info,LOG_ERR,"Don't know what config.%s key means.\n",key);
+			Log(LOG_ERR,"Don't know what config.%s key means.\n",key);
 		}
 		
 		if(errno!=0)
 		{
-			Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+			Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			ret=FALSE;
 		}
 	}
@@ -267,13 +257,12 @@ static void msg_delivered (rd_kafka_t *rk,
 #endif /* NDEBUG */
 #endif
 
-static inline void check_setted(const void *ptr,struct _worker_info *worker_info,
-	int *aok,const char *errmsg,const char *sensor_name)
+static inline void check_setted(const void *ptr,int *aok,const char *errmsg,const char *sensor_name)
 {
 	assert(aok);
 	if(*aok && ptr == NULL){
 		*aok = 0;
-		Log(worker_info,LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
+		Log(LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
 	}
 }
 
@@ -313,7 +302,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 	}
 	else
 	{
-		Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+		Log(LOG_ERR,"Error adding libmatheval value\n");
 		aok = 0;
 	}
 
@@ -359,7 +348,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			double tok_f = toDouble(tok);
 			if(errno!=0)
 			{
-				Log(worker_info,LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
+				Log(LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
 				continue;
 			}
 			
@@ -369,7 +358,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				if(0!=errno)
 				{
 					char buf[1024];
-					Log(worker_info,LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
+					Log(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
 					tok = nexttok;
 					aux_timestamp = time(NULL);
 				}
@@ -397,7 +386,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				}
 				else
 				{
-					Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+					Log(LOG_ERR,"Error adding libmatheval value\n");
 					aok = 0;
 				}
 
@@ -412,7 +401,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		else /* *tok==0 */
 		{
-			Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
+			Log(LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
 		}
 	
 		tok = nexttok;
@@ -432,7 +421,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		else
 		{
-			Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+			Log(LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
 		}
 
 		
@@ -443,7 +432,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
 			if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
 			{
-				Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+				Log(LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
 					name,split_op_result);
 			}
 			else
@@ -464,13 +453,13 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		else
 		{
 			if(sum!=0)
-				Log(worker_info,LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)\n",name,sum,mean_count);
+				Log(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)\n",name,sum,mean_count);
 		}
 		
 	}
 	else
 	{
-		Log(worker_info,LOG_CRIT,"Memory error.\n");
+		Log(LOG_CRIT,"Memory error.\n");
 		aok=0;
 	}
 	return aok;
@@ -496,9 +485,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	size_t bad_names_pos = 0;
 
 	assert(sensor_data->sensor_name);
-	check_setted(sensor_data->peername,worker_info,&aok,
+	check_setted(sensor_data->peername,&aok,
 		"Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
-	check_setted(sensor_data->community,worker_info,&aok,
+	check_setted(sensor_data->community,&aok,
 		"Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
 
 	if(libmatheval_variables->names == NULL) /* starting allocate */
@@ -508,7 +497,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			calloc(new_size,sizeof(char *));
 		if(NULL==libmatheval_variables->names)
 		{
-			Log(worker_info,LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
 			aok = 0;
 		}
 		else
@@ -517,7 +506,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				calloc(new_size,sizeof(double));
 			if(NULL==libmatheval_variables->values)
 			{
-				Log(worker_info,LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+				Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
 				aok = 0;
 			}
 			else
@@ -538,7 +527,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		};
 		snmp_sessp = new_snmp_session(&worker_info->default_session,&config);
 		if(NULL== snmp_sessp){
-			Log(worker_info,LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
+			Log(LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
 			aok=0;
 		}
 		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
@@ -586,17 +575,17 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key2,"system",strlen("system"))){
 				// will be resolved in the next foreach
 			}else{
-				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key2,__LINE__);
+				Log(LOG_ERR,"Cannot parse %s argument (line %d)\n",key2,__LINE__);
 			}
 
 			if(errno!=0){
-				Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key2,strerror(errno));
+				Log(LOG_ERR,"Could not parse %s value: %s",key2,strerror(errno));
 			}
 
 		} /* foreach */
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
-			Log(worker_info,LOG_ERR,"sensor name not setted. Skipping.\n");
+			Log(LOG_ERR,"sensor name not setted. Skipping.\n");
 			break;
 		}
 
@@ -628,19 +617,19 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
-					Log(worker_info,LOG_WARNING,"name of param not set in %s. Skipping\n",
+					Log(LOG_WARNING,"name of param not set in %s. Skipping\n",
 						sensor_data->sensor_name);
 					break /*foreach*/;
 				}
 
 				char value_buf[1024] = {'\0'};
 				if(0==strncmp(key,"oid",strlen("oid")))
-					snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
-					system_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					system_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				if(unlikely(strlen(value_buf)==0))
 				{
-					Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
+					Log(LOG_WARNING,"Not seeing %s value.\n", name);
 				}
 				else if(!splittok)
 				{
@@ -655,7 +644,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 				if(nonzero && 0 == number)
 				{
-					Log(worker_info,LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+					Log(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
 					bad_names[bad_names_pos++] = name;
 					kafka=0;
 				}
@@ -665,7 +654,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
 				{
 					if(strstr(bad_names[i],operation)){
-						Log(worker_info,LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping\n",
+						Log(LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping\n",
 							operation,bad_names[i]);
 						kafka=op_ok=0;
 					}
@@ -705,7 +694,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							else if(vectors_len!=size)
 							{
-								Log(worker_info,LOG_ERR,"vector dimension mismatch\n");
+								Log(LOG_ERR,"vector dimension mismatch\n");
 								op_ok=0;
 							}
 						}
@@ -767,7 +756,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							operation_iterator += unchanged_size + vector_iterator->name_len;
 
 						}
-						Log(worker_info,LOG_DEBUG,"vector operation string result: %s\n",str_op);
+						Log(LOG_DEBUG,"vector operation string result: %s\n",str_op);
 
 						/* extracting suffix */
 						if(vectors_len>1)
@@ -784,7 +773,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					                                                       /* also, we have to create a new one for each iteration */
 						if(NULL==f)
 						{
-							Log(worker_info,LOG_ERR,"Operation not valid: %s\n",str_op);
+							Log(LOG_ERR,"Operation not valid: %s\n",str_op);
 							op_ok = 0;
 						}
 						
@@ -794,7 +783,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
 							if(!op_ok)
 							{
-								Log(worker_info,LOG_ERR,"Variable not found: %s\n",evaluator_variables[vars_pos]);
+								Log(LOG_ERR,"Variable not found: %s\n",evaluator_variables[vars_pos]);
 								evaluator_destroy(f);
 							}
 						}
@@ -804,11 +793,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
 								(char **) libmatheval_variables->names,	libmatheval_variables->values);
 							evaluator_destroy (f);
-							Log(worker_info,LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
+							Log(LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
 							if(number == 0 && nonzero)
-								Log(worker_info,LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
+								Log(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
 							if(number == INFINITY|| number == -INFINITY|| number == NAN)
-								Log(worker_info,LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+								Log(LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
 							/* op will send by default, so we ignore kafka param */
 						}
 
@@ -881,12 +870,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					free(str_op_variables);
 				}
 			}else{
-				Log(worker_info,LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
+				Log(LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
 			}
 
 			if(errno!=0)
 			{
-				Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+				Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			}
 		} /* foreach monitor attribute */
 
@@ -953,7 +942,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 						if(0==double_errno)
 						{	
-							Log(worker_info,LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
+							Log(LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
 							if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
 									RD_KAFKA_MSG_F_FREE,
 									/* Payload and length */
@@ -969,20 +958,20 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	
 							else
 							{
-								Log(worker_info,LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
+								Log(LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
 							}
 						}
 						else
 						{
 							char buf[1024];
 							strerror_r(double_errno,buf,sizeof(buf));
-							Log(worker_info,LOG_ERR,"EIVAL Value of [%s] is not a valid double(%s). Skipping\n",printbuf->buf,buf);
+							Log(LOG_ERR,"EIVAL Value of [%s] is not a valid double(%s). Skipping\n",printbuf->buf,buf);
 						}
 					}
 					printbuf_free(printbuf);
 					printbuf = NULL;
 				}else{ /* if(printbuf) after malloc */
-					Log(worker_info,LOG_ALERT,"Cannot allocate memory for printbuf. Skipping\n");
+					Log(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping\n");
 				}
 			} /* for i in splittoks */
 
@@ -1023,18 +1012,18 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
 			monitors = val;
 		}else {
-			Log(worker_info,LOG_ERR,"Cannot parse %s argument\n",key);
+			Log(LOG_ERR,"Cannot parse %s argument\n",key);
 		}
 	}
 
 
-	check_setted(pt_worker_info->sensor_data.sensor_name,worker_info,&aok,
+	check_setted(pt_worker_info->sensor_data.sensor_name,&aok,
 		"[CONFIG] Sensor_name not setted in ",NULL);
-	check_setted(pt_worker_info->sensor_data.peername,worker_info,&aok,
+	check_setted(pt_worker_info->sensor_data.peername,&aok,
 		"[CONFIG] Peername not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
-	check_setted(pt_worker_info->sensor_data.community,worker_info,&aok,
+	check_setted(pt_worker_info->sensor_data.community,&aok,
 		"[CONFIG] Community not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
-	check_setted(monitors,worker_info,&aok,
+	check_setted(monitors,&aok,
 		"[CONFIG] Monitors not setted in sensor ",pt_worker_info->sensor_data.sensor_name);
 	
 	if(aok)
@@ -1067,17 +1056,17 @@ void * worker(void *_info){
 	switch(confset)
 	{
 		case RD_KAFKA_CONF_UNKNOWN: /* Unknown configuration name. */
-			Log(worker_info,LOG_EMERG,"Error in line %d, invalid name. FIX\n",__LINE__);
+			Log(LOG_EMERG,"Error in line %d, invalid name. FIX\n",__LINE__);
 			break;
 		case RD_KAFKA_CONF_INVALID:
-			Log(worker_info,LOG_ERR,"Error in configuration file. Value not valid in max_kafka_fails.\n");
+			Log(LOG_ERR,"Error in configuration file. Value not valid in max_kafka_fails.\n");
 			break;
 		case RD_KAFKA_CONF_OK:
 			break; /* AOK */
 	}
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
-		Log(worker_info,LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
+		Log(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
 		pt_worker_info.thread_ok=0;
 	}
 
@@ -1085,16 +1074,16 @@ void * worker(void *_info){
 		rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
 
 	if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
-		Log(worker_info,LOG_ERR,"No valid brokers specified\n");
+		Log(LOG_ERR,"No valid brokers specified\n");
 		pt_worker_info.thread_ok=0;
 	}
 	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
 
-	Log(worker_info,LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
+	Log(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
-			Log(worker_info,LOG_DEBUG,"Pop element %p\n",elm->rfqe_ptr);
+			Log(LOG_DEBUG,"Pop element %p\n",elm->rfqe_ptr);
 			json_object * sensor_info = elm->rfqe_ptr;
 			process_sensor(worker_info,&pt_worker_info,sensor_info);
 			rd_fifoq_elm_release(worker_info->queue,elm);
@@ -1112,7 +1101,7 @@ void * worker(void *_info){
 			throw_msg_count--;
 		else
 			throw_msg_count = atoi(worker_info->max_kafka_fails);
-		Log(worker_info,LOG_INFO,
+		Log(LOG_INFO,
 			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
 			pthread_self(),msg_left,throw_msg_count);
 		prev_msg_left = msg_left;
@@ -1128,10 +1117,10 @@ void * worker(void *_info){
 	return _info; // just avoiding warning.
 }
 
-void queueSensors(struct json_object * sensors,rd_fifoq_t *queue,struct _worker_info *worker_info){
+void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
-		Log(worker_info,LOG_DEBUG,"Push element %p\n",value);
+		Log(LOG_DEBUG,"Push element %p\n",value);
 		rd_fifoq_add(queue,value);
 	}
 }
@@ -1180,22 +1169,25 @@ int main(int argc, char  *argv[])
 		MC_SET_DEBUG(1);
 
 	if(configPath == NULL){
-		Log(&worker_info,LOG_ERR,"Config path not set. Exiting\n");
+		Log(LOG_ERR,"Config path not set. Exiting\n");
 		exit(1);
 	}
 
 	config_file = json_object_from_file(configPath);
 	if(!config_file){
-		Log(&worker_info,LOG_CRIT,"[EE] Could not open config file %s. Exiting\n",configPath);
+		Log(LOG_CRIT,"[EE] Could not open config file %s. Exiting\n",configPath);
 		exit(1);
 	}
 
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
 
+	debug_set_debug_level(worker_info.debug);
+	debug_set_output_flags(worker_info.debug_output_flags);
+
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
-		Log(&worker_info,LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
+		Log(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
@@ -1208,25 +1200,25 @@ int main(int argc, char  *argv[])
 	openlog(main_info.syslog_indent, 0, LOG_USER);
 
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
-		Log(&worker_info,LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
+		Log(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
 	}else{
 		rd_fifoq_init(&queue);
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
-			Log(&worker_info,LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.\n");
+			Log(LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.\n");
 		}else{
-			Log(&worker_info,LOG_INFO,"Main thread started successfuly. Starting workers threads.\n");
+			Log(LOG_INFO,"Main thread started successfuly. Starting workers threads.\n");
 			worker_info.queue = &queue;
 			for(int i=0;i<main_info.threads;++i){
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
 			}
 
 			while(run){
-				queueSensors(sensors,&queue,&worker_info);
+				queueSensors(sensors,&queue);
 				sleep(main_info.sleep_main);
 			}
-			Log(&worker_info,LOG_INFO,"Leaving, wait 1sec for workers...\n");
+			Log(LOG_INFO,"Leaving, wait 1sec for workers...\n");
 
 			for(int i=0;i<main_info.threads;++i){
 				pthread_join(pd_thread[i], NULL);

@@ -14,10 +14,13 @@ LIBRD_LIBRARIES ?= /opt/rb/lib
 CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
 LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 
-OBJECTS=rb_snmp.o rb_values_list.o
+OBJECTS=rb_snmp.o rb_values_list.o rb_log.o
 
 clean: 
 	-rm -rf $(PROGNAME) $(OBJECTS)
+
+rb_log.o:rb_log.c rb_log.h
+	$(CC) $(CFLAGS) -o $@ $< -c
 
 rb_snmp.o:rb_snmp.c rb_snmp.h
 	$(CC) $(CFLAGS) -o $@ $< -c

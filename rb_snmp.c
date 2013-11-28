@@ -44,8 +44,7 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 	return session;
 }
 
-int snmp_solve_response(const struct _worker_info *worker_info, 
-	char * value_buf,const size_t value_buf_len,double * number,
+int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * number,
 	struct monitor_snmp_session * session,const char *oid_string)
 {
 	#ifdef SNMP_SESS_MAGIC
@@ -71,17 +70,17 @@ int snmp_solve_response(const struct _worker_info *worker_info,
 	
 	if(NULL==response)
 	{
-		Log(worker_info,LOG_ERR,"No SNMP response given.\n");
+		Log(LOG_ERR,"No SNMP response given.\n");
 	}
 	else if (status != STAT_SUCCESS)
 	{
-		Log(worker_info,LOG_ERR,"Snmp error: %s\n", 
+		Log(LOG_ERR,"Snmp error: %s\n", 
 			snmp_api_errstring(snmp_sess_session(session->sessp)->s_snmp_errno));
-		//Log(worker_info,LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
+		//Log(LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
 	}
 	else
 	{
-		Log(worker_info,LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
+		Log(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
 	
 		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
 		{ 
@@ -100,7 +99,7 @@ int snmp_solve_response(const struct _worker_info *worker_info,
 				ret = 1;
 				break;
 			default:
-				Log(worker_info,LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
+				Log(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
 		};
 	}
 	

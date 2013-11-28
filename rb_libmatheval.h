@@ -24,7 +24,7 @@ struct _worker_info;
 
 static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
 	assert(worker_info);
-	Log(worker_info,LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
+	Log(LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
 						                                         name,val);
 
 	if(matheval->variables_pos<matheval->total_lenght){
@@ -39,7 +39,7 @@ static int libmatheval_append(struct _worker_info *worker_info, struct libmathev
 		}
 		else
 		{
-			Log(worker_info,LOG_CRIT,"Memory error. \n",__LINE__);
+			Log(LOG_CRIT,"Memory error. \n",__LINE__);
 			if(matheval->names) free(matheval->names);
 			matheval->total_lenght = 0;
 			return 0;

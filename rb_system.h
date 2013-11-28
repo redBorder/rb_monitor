@@ -31,8 +31,7 @@ static inline char * trim_end(char * buf)
  @todo see if we can join with snmp_solve_response somehow
  @return               1 if success. 0 ioc.
  */
-int system_solve_response(const struct _worker_info *worker_info, 
-	char * buff,const size_t buff_size,
+int system_solve_response(char * buff,const size_t buff_size,
 	double * number,
 	__attribute__((unused)) void * unused,const char *command)
 {
@@ -40,13 +39,13 @@ int system_solve_response(const struct _worker_info *worker_info,
 	FILE * fp = popen(command, "r");
 	if(NULL==fp)
 	{
-		Log(worker_info,LOG_ERR,"Cannot get system command.");
+		Log(LOG_ERR,"Cannot get system command.");
 	}
 	else
 	{
 		if(NULL==fgets(buff, buff_size, fp))
 		{
-			Log(worker_info,LOG_ERR,"Cannot get buffer information");
+			Log(LOG_ERR,"Cannot get buffer information");
 		}
 		else
 		{

@@ -25,8 +25,7 @@ struct _worker_info; /* FW declaration */
  */
 
 struct monitor_snmp_session * new_snmp_session(struct snmp_session *ss,const struct monitor_snmp_new_session_config *config);
-int snmp_solve_response(const struct _worker_info *worker_info, 
-	char * value_buf,const size_t value_buf_len,
+int snmp_solve_response(char * value_buf,const size_t value_buf_len,
 	double * number,struct monitor_snmp_session * session,const char *oid_string);
 void destroy_snmp_session(struct monitor_snmp_session *);
 
