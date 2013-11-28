@@ -3,6 +3,9 @@
 #pragma once
 
 #include <assert.h>
+#include <syslog.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #define DEBUG_STDOUT 0x1
 #define DEBUG_SYSLOG 0x2

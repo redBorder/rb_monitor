@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "rb_log.h"
 #include <string.h>
 
 struct libmatheval_stuffs{
@@ -10,6 +11,45 @@ struct libmatheval_stuffs{
 	unsigned int variables_pos;
 	unsigned int total_lenght;
 };
+
+
+struct _worker_info;
+/*
+ * Add a variable to a libmatheval_stuffs.
+ * @param matheval struct to add the variable.
+ * @param name     variable name
+ * @param val      value to add
+ * @return         1 in exit. 0 in other case (malloc error).
+ */
+
+static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
+	assert(worker_info);
+	Log(worker_info,LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
+						                                         name,val);
+
+	if(matheval->variables_pos<matheval->total_lenght){
+		assert(matheval);
+		assert(matheval->names);
+		assert(matheval->values);
+	}else{
+		if (NULL != (matheval->names = realloc(matheval->names,matheval->total_lenght*2*sizeof(char *)))
+			&& NULL != (matheval->values = realloc(matheval->values,matheval->total_lenght*2*sizeof(double))))
+		{
+			matheval->total_lenght*=2;
+		}
+		else
+		{
+			Log(worker_info,LOG_CRIT,"Memory error. \n",__LINE__);
+			if(matheval->names) free(matheval->names);
+			matheval->total_lenght = 0;
+			return 0;
+		}
+	}
+
+	matheval->names[matheval->variables_pos] = name;
+	matheval->values[matheval->variables_pos++] = val;
+	return 1;
+}
 
 static int libmatheval_search_vector(const char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size)
 {
@@ -32,7 +72,7 @@ static int libmatheval_search_vector(const char ** variables,size_t variables_co
 				}
 				break;
 			case 1:
-				if(strncmp(variables[i],vector,strlen_vector)==0)
+				if(strncmp(variables[i],vector,strlen_vector)==0 && (strlen(variables[i])>strlen(vector)))
 					(*size)++;
 				else
 					state++;

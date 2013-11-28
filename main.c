@@ -19,13 +19,16 @@
 ** Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#include "rb_system.h"
+#include "rb_libmatheval.h"
+#include "rb_log.h"
+#include "rb_snmp.h"
+#include "rb_values_list.h"
+
 #include <stdlib.h>
-#include <stdio.h>
 #include <json/json.h>
 #include <json/printbuf.h>
 #include <unistd.h>
-#include <syslog.h>
-#include <stdarg.h>
 #include <errno.h>
 #include <assert.h>
 #include <pthread.h>
@@ -42,10 +45,6 @@
 #include <ctype.h>
 #endif
 
-#include "rb_system.h"
-#include "rb_libmatheval.h"
-#include "rb_log.h"
-#include "rb_snmp.h"
 
 #define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */
@@ -61,10 +60,11 @@ static inline void swap(void **a,void **b){
 	void * temp=*b;*b=*a; *a=temp;
 }
 
-/* do strtod conversion plut EINVAL errno  if no possible conversion */
+/* do strtod conversion plus set errno=EINVAL if no possible conversion */
 double toDouble(const char * str)
 {
 	char * endPtr;
+	errno=0;
 	double d = strtod(str,&endPtr);
 	if(errno==0 && endPtr==str)
 		errno = EINVAL;
@@ -110,6 +110,7 @@ struct _worker_info{
 	int64_t sleep_worker,max_snmp_fails,timeout,debug,debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
+	struct monitor_values_tree * monitor_values_tree;
 };
 
 // Return the current debug level of worker_info
@@ -150,44 +151,6 @@ void sigproc(int sig) {
   if(called++) return;
   run = 0;
   (void)sig;
-}
-
-
-/*
- * Add a variable to a libmatheval_stuffs.
- * @param matheval struct to add the variable.
- * @param name     variable name
- * @param val      value to add
- * @return         1 in exit. 0 in other case (malloc error).
- */
-
-static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
-	Log(worker_info,LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
-						                                         name,val);
-
-	if(matheval->variables_pos<matheval->total_lenght){
-		assert(worker_info);
-		assert(matheval);
-		assert(matheval->names);
-		assert(matheval->values);
-	}else{
-		if (NULL != (matheval->names = realloc(matheval->names,matheval->total_lenght*2*sizeof(char *)))
-			&& NULL != (matheval->values = realloc(matheval->values,matheval->total_lenght*2*sizeof(double))))
-		{
-			matheval->total_lenght*=2;
-		}
-		else
-		{
-			Log(worker_info,LOG_CRIT,"Memory error. \n",__LINE__);
-			if(matheval->names) free(matheval->names);
-			matheval->total_lenght = 0;
-			return 0;
-		}
-	}
-
-	matheval->names[matheval->variables_pos] = name;
-	matheval->values[matheval->variables_pos++] = val;
-	return 1;
 }
 
 void printHelp(const char * progName){
@@ -319,6 +282,167 @@ static inline void check_setted(const void *ptr,struct _worker_info *worker_info
     values: [ ...     number0    ...    number(N)      split_op_result ... ]
 */
 
+// @todo pass just a monitor_value with all precached possible.
+int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
+	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,int kafka)
+{
+	int aok = 1;
+	if(likely(libmatheval_append(worker_info,libmatheval_variables,name,value)))
+	{
+		struct monitor_value monitor_value;
+		memset(&monitor_value,0,sizeof(monitor_value));
+		#ifdef MONITOR_VALUE_MAGIC
+		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+		#endif
+		monitor_value.timestamp = time(NULL);
+		monitor_value.sensor_name = sensor_data->sensor_name;
+		monitor_value.name = name;
+		monitor_value.instance = 0;
+		monitor_value.instance_valid = 0;
+		monitor_value.bad_value = 0;
+		monitor_value.value=value;
+		monitor_value.string_value=value_buf;
+		monitor_value.unit=unit;
+		monitor_value.group_name=group_name;
+		monitor_value.group_id=group_id;
+		
+		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+		if(kafka && new_mv)
+			rd_lru_push(valueslist,(void *)new_mv);
+	}
+	else
+	{
+		Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+		aok = 0;
+	}
+
+	return aok;
+}
+
+
+// @todo pass just a monitor_value with all precached possible.
+int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
+	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
+	const char * instance_prefix,const char * splitop,int kafka,rd_memctx_t *memctx)
+{
+	int aok=1;
+	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
+					                        // i.e., just many splittok.
+	unsigned int count = 0,mean_count=0;
+	double sum=0;
+	const size_t name_len = strlen(name);
+	while(tok){
+		char * nexttok = strstr(tok,splittok);
+		if(nexttok != '\0')
+		{
+			*nexttok = '\0';
+			nexttok++;
+		}
+		if(*tok)
+		{
+			char * tok_name = rd_memctx_calloc(memctx,name_len+strlen(GROUP_SEP)+7+strlen(VECTOR_SEP)+7,sizeof(char)); /* +7: space to allocate _65535 */
+			double tok_f = toDouble(tok);
+			if(errno!=0)
+			{
+				Log(worker_info,LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
+				continue;
+			}
+			if(group_id)
+				snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+			else
+				snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+			if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+			{
+				struct monitor_value monitor_value;
+				memset(&monitor_value,0,sizeof(monitor_value));
+				#ifdef MONITOR_VALUE_MAGIC
+				monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+				#endif
+				monitor_value.timestamp = time(NULL);
+				monitor_value.sensor_name = sensor_data->sensor_name;
+				monitor_value.name = tok_name;
+				monitor_value.instance = count;
+				monitor_value.instance_prefix = instance_prefix;
+				monitor_value.instance_valid = 1;
+				monitor_value.bad_value = 0;
+				monitor_value.value=tok_f;
+				monitor_value.string_value=tok;
+				monitor_value.unit=unit;
+				monitor_value.group_name=group_name;
+				monitor_value.group_id=group_id;
+	
+				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+				if(kafka && new_mv)
+					rd_lru_push(valueslist,(void *)new_mv);
+			}
+			else
+			{
+				Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
+				aok = 0;
+			}
+			if(NULL!=splitop)
+			{
+				sum += atof(tok);
+				mean_count++;
+			}
+		}
+		else
+		{
+			Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
+		}
+	
+		tok = nexttok;
+		count++;
+	} /* while(tok) */
+
+	// Last token reached. Do we have an operation to do?
+	if(NULL!=splitop)
+	{
+		char split_op_result[1024];
+		double result = 0;
+		if(0==strcmp("sum",splitop))
+		{
+			result = sum;
+		}
+		else if(0==strcmp("mean",splitop)){
+			result = sum/mean_count;
+		}
+		else
+		{
+			Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+		}
+
+		
+		int splitop_is_valid = isfinite(result);
+
+		if(splitop_is_valid)
+		{
+			snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
+			if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
+			{
+				Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+					name,split_op_result);
+			}
+		}
+		else
+		{
+			if(sum!=0)
+				Log(worker_info,LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)\n",name,sum,mean_count);
+		}
+		
+	}
+	else
+	{
+		Log(worker_info,LOG_CRIT,"Memory error.\n");
+		aok=0;
+	}
+	return aok;
+}
+
+
+
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
 			json_object * monitors)
@@ -326,7 +450,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = &pt_worker_info->libmatheval_variables;
-	size_t libmatheval_start_pos;
 	struct monitor_snmp_session * snmp_sessp=NULL;
 	rd_memctx_t memctx;
 	memset(&memctx,0,sizeof(memctx));
@@ -387,20 +510,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	}
 
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
-		struct timeval tv;
-		gettimeofday(&tv,NULL);
-
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		uint64_t kafka=1,nonzero=0;
+		uint64_t kafka=1,nonzero=0,timestamp_given=0;
 		const char * splittok=NULL,*splitop=NULL;
-		char *split_op_result=NULL;
 		const char * unit=NULL;
-		double number; // <- @TODO merge with split_op_result */
+		double number;
 
-		
 		rd_lru_t * valueslist    = rd_lru_new();
-		rd_lru_t * instance_list = rd_lru_new();
 		
 		
 		/* First pass: get attributes except op: and oid:*/
@@ -425,6 +542,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				group_id = json_object_get_string(val2);
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
+			}else if(0==strcmp(key2,"timestamp_given")){
+				timestamp_given=1;
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
 				kafka = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
@@ -469,7 +588,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
 				// already resolved
 			}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
-				/* @TODO extract in it's own SNMPget function */
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
@@ -478,7 +596,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					break /*foreach*/;
 				}
 
-				char * value_buf = calloc(1024,sizeof(char)); /* @TODO make flexible */ /* @TODO make managed by by memctx */
+				char value_buf[1024] = {'\0'};
 				if(0==strncmp(key,"oid",strlen("oid")))
 					snmp_solve_response(worker_info,value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
@@ -486,127 +604,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(unlikely(strlen(value_buf)==0))
 				{
 					Log(worker_info,LOG_WARNING,"Not seeing %s value.\n", name);
-					free(value_buf);
 				}
 				else if(!splittok)
 				{
-					if(likely(libmatheval_append(worker_info,libmatheval_variables,name,number)))
-					{
-						if(kafka)
-							rd_lru_push(valueslist,value_buf);
-						else
-							free(value_buf);
-					}
-					else
-					{
-						Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-						aok = 0;
-						free(value_buf);
-						value_buf=NULL;
-					}
+					process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
+					name,value_buf,number, valueslist,unit,group_name,group_id,kafka);
 				}
-				else
-				{ /* adding suffix if vector. @TODO: implement in libmatheval_append? One char* suffix param? */
-					char * tok = value_buf;
-					unsigned int count = 0,mean_count=0;
-					double sum=0;
-					libmatheval_start_pos = libmatheval_variables->variables_pos;
-					const size_t name_len = strlen(name);
-					while(tok){
-						char * nexttok = strstr(tok,splittok);
-						if(nexttok != '\0')
-						{
-							*nexttok = '\0';
-							nexttok++;
-						}
-						if(*tok)
-						{
-							char * tok_name = rd_memctx_calloc(&memctx,name_len+7+7,sizeof(char)); /* +7: space to allocate _65535 */
-							// strcpy(tok_name,name);
-							if(group_id)
-								snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-							else
-								snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-							if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
-							{
-								if(kafka)
-								{
-									char * cptoken = malloc(sizeof(char)*strlen(tok));
-									strcpy(cptoken,tok);
-									rd_lru_push(valueslist,cptoken);
-									rd_lru_push(instance_list,(void *)(unsigned long)count);
-								}
-							}
-							else
-							{
-								Log(worker_info,LOG_ERR,"Error adding libmatheval value\n");
-								aok = 0;
-							}
-							if(NULL!=splitop)
-							{
-								sum += atof(tok);
-								mean_count++;
-							}
-						}
-						else
-						{
-							Log(worker_info,LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
-						}
-
-						tok = nexttok;
-						count++;
-					} /* while(tok) */
-					free(value_buf); /* Don't needed anymore */
-					value_buf=0;
-
-					// Last token reached. Do we have an operation to do?
-					if(NULL!=splitop){
-						if((split_op_result = calloc(SPLITOP_RESULT_LEN,sizeof(char))))
-						{
-							double result = 0;
-							if(0==strcmp("sum",splitop))
-							{
-								result = sum;
-							}
-							else if(0==strcmp("mean",splitop)){
-								result = sum/mean_count;
-							}
-							else
-							{
-								Log(worker_info,LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
-								free(split_op_result);
-								split_op_result=NULL;
-							}
-
-							if(split_op_result)
-							{
-								int splitop_is_valid = isfinite(result);
-
-								if(splitop_is_valid)
-								{
-									snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
-									if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
-									{
-										Log(worker_info,LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
-											name,split_op_result);
-									}
-								}
-								else
-								{
-									if(sum!=0)
-										Log(worker_info,LOG_ERR,"%s Gives a non finite value: sum=%lf;count=%lf\n",name,sum,mean_count);
-									free(split_op_result);
-									split_op_result=NULL;
-								}
-							}
-							
-						}
-						else
-						{
-							Log(worker_info,LOG_CRIT,"Memory error.\n");
-							break; /* foreach */
-						}
-					}
+				else /* We have a vector here */
+				{ 
+					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
+					splittok, valueslist,unit,group_id,group_name,instance_prefix,splitop,kafka,&memctx);
 				}
 
 				if(nonzero && 0 == number)
@@ -615,7 +622,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					bad_names[bad_names_pos++] = name;
 					kafka=0;
 				}
-			}else if(0==strncmp(key,"op",strlen("op"))){
+			}else if(0==strncmp(key,"op",strlen("op"))){ // @TODO sepparate in it's own function
 				const char * operation = (char *)json_object_get_string(val);
 				int op_ok=1;
 				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
@@ -628,7 +635,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				if(op_ok)
 				{
-					struct vector_variables_s{ // @TODO extract in it's own file.
+					struct vector_variables_s{ // @TODO Integrate in struct monitor_value
 						char *name;size_t name_len;unsigned int pos;
 						SIMPLEQ_ENTRY(vector_variables_s) entry;
 					};
@@ -679,6 +686,20 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					}
 
 					double sum=0;unsigned count=0;
+
+					struct monitor_value monitor_value; // ready-to-go struct
+					memset(&monitor_value,0,sizeof(monitor_value));
+					#ifdef MONITOR_VALUE_MAGIC
+					monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+					#endif
+					monitor_value.timestamp = time(NULL);
+					monitor_value.sensor_name = sensor_data->sensor_name;
+					monitor_value.instance_prefix = instance_prefix;
+					monitor_value.bad_value = 0;
+					monitor_value.unit=unit;
+					monitor_value.group_name=group_name;
+					monitor_value.group_id=group_id;
+
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
 						const size_t namelen = strlen(name); // @TODO make the suffix append in libmatheval_append
@@ -716,8 +737,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							const int mathpos = SIMPLEQ_FIRST(&head)->pos + j;
 							const char * suffix = strrchr(libmatheval_variables->names[mathpos],'_');
-							assert(suffix);
-							strcpy(mathname+namelen,suffix);
+							if(suffix)
+								strcpy(mathname+namelen,suffix);
 						}
 						
 						
@@ -756,18 +777,31 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 						if(op_ok && libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, mathname,number))
 						{
-							char *buf = calloc(64,sizeof(char));
-							sprintf(buf,"%lf",number);
+							char val_buf[64];
+							sprintf(val_buf,"%lf",number);
+
+							
 							if(vectors_len>1)
 							{
-								rd_lru_push(valueslist,buf);
-								const unsigned long suffix_l = atol(strrchr(mathname,'_') + 1);
-								rd_lru_push(instance_list,(void *)(unsigned long)suffix_l);
+								char name_buf[1024];
+								sprintf(name_buf,"%s%s",name,name_split_suffix);
+								monitor_value.name = name_buf;
+								monitor_value.instance_valid = 1;
+								monitor_value.instance = count;
+								monitor_value.value=number;
+								monitor_value.string_value=val_buf;
 							}
 							else
 							{
-								split_op_result = buf;
+								monitor_value.name = name;
+								monitor_value.value=number;
+								monitor_value.instance_valid = 0;
+								monitor_value.string_value=val_buf;
 							}
+							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+							if(kafka && new_mv)
+								rd_lru_push(valueslist,(void *)new_mv);
 						}
 						if(op_ok && splitop){
 							sum+=number;
@@ -786,13 +820,22 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							op_ok=0;
 
 						if(op_ok){
-							split_op_result = calloc(64,sizeof(char));
+							char split_op_result[64];
 							sprintf(split_op_result,"%lf",number);
+							monitor_value.name = name;
+							monitor_value.value=number;
+							monitor_value.instance_valid = 0;							
+							monitor_value.string_value=split_op_result;
+
+							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+							if(kafka && new_mv)
+								rd_lru_push(valueslist,(void *)new_mv);
 						}
 					}
 
 					struct vector_variables_s *vector_iterator,*tmp_vector_iterator;
-					SIMPLEQ_FOREACH_SAFE(vector_iterator,tmp_vector_iterator,&head,entry)
+					SIMPLEQ_FOREACH_SAFE(vector_iterator,&head,entry,tmp_vector_iterator)
 					{
 						free(vector_iterator);
 					}
@@ -808,17 +851,24 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			{
 				Log(worker_info,LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			}
-		} /* foreach */
+		} /* foreach monitor attribute */
 
 		if(kafka){
-			char * vector_value = NULL; 
-			while((vector_value = rd_lru_pop(valueslist)) || split_op_result)
+			//char * vector_value = NULL; 
+			//while((vector_value = rd_lru_pop(valueslist)) || split_op_result)
+			const struct monitor_value * monitor_value = NULL; 
+			while((monitor_value = rd_lru_pop(valueslist)))
 			{
 				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
 					int double_errno=0;
+					struct timeval tv;
+					gettimeofday(&tv,NULL);
+
+
 					// @TODO use printbuf_memappend_fast instead! */
 					sprintbuf(printbuf, "{");
+					#if 0
 					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
 					sprintbuf(printbuf, "\"sensor_id\":%lu,",sensor_data->sensor_id);
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
@@ -843,10 +893,21 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						split_op_result = NULL;
 						free(split_op_result);
 					}
+					#endif
+					sprintbuf(printbuf,"\"timestamp\":%lu\",",monitor_value->timestamp);
+					sprintbuf(printbuf, "\"sensor_id\":%lu,",monitor_value->sensor_id);
+					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",monitor_value->sensor_name);
+					sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
+					if(monitor_value->instance_valid && monitor_value->instance_prefix)
+						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
+					sprintbuf(printbuf, "\"value\":\"%s\",", monitor_value->string_value);
+
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
 					if(group_id)   sprintbuf(printbuf, ",\"group_id\":%s", group_id);
 					sprintbuf(printbuf, "}");
+
+
 
 					//char * str_to_kafka = printbuf->buf;
 					//printbuf->buf=NULL;
@@ -895,9 +956,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* if kafka */
 
-		free(split_op_result);
 		rd_lru_destroy(valueslist);
-		rd_lru_destroy(instance_list);
 	} /* foreach monitor parameter */
 	destroy_snmp_session(snmp_sessp);
 
@@ -1062,6 +1121,7 @@ int main(int argc, char  *argv[])
 	assert(NULL==strstr(VECTOR_SEP,OPERATIONS));
 	ret = parse_json_config(default_config,&worker_info,&main_info);
 	assert(ret==TRUE);
+	worker_info.monitor_values_tree = new_monitor_values_tree();
 
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {

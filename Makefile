@@ -14,17 +14,19 @@ LIBRD_LIBRARIES ?= /opt/rb/lib
 CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
 LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 
-#0.7 supp
-#CFLAGS+= -DKAFKA_07
+OBJECTS=rb_snmp.o rb_values_list.o
 
 clean: 
-	-rm -rf $(PROGNAME)
+	-rm -rf $(PROGNAME) $(OBJECTS)
 
 rb_snmp.o:rb_snmp.c rb_snmp.h
-	$(CC) $(CFLAGS) -o $@ $< -c 
+	$(CC) $(CFLAGS) -o $@ $< -c
 
-$(PROGNAME): main.c rb_snmp.o rb_libmatheval.h rb_system.h
-	$(CC) $(CFLAGS) -o $@ main.c rb_snmp.o $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
+rb_values_list.o:rb_values_list.c rb_values_list.h
+	$(CC) $(CFLAGS) -o $@ $< -c
+
+$(PROGNAME): main.c $(OBJECTS) rb_libmatheval.h rb_system.h 
+	$(CC) $(CFLAGS) -o $@ main.c $(OBJECTS) $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval -std=gnu99
 
 install:
 	install -t $(PREFIX)/bin $(PROGNAME)

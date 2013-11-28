@@ -81,7 +81,7 @@ int snmp_solve_response(const struct _worker_info *worker_info,
 	}
 	else
 	{
-		Log(worker_info,LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,value_buf);
+		Log(worker_info,LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
 	
 		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
 		{ 
