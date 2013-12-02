@@ -313,12 +313,24 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 // @todo pass just a monitor_value with all precached possible.
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx)
+	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx)
 {
+	assert(worker_info);
+	assert(sensor_data);
+	assert(libmatheval_variables);
+
+	assert(name);
+	assert(value_buf);
+	assert(splittok);
+	// assert(valueslist);
+	// assert(instance_prefix);
+	// assert(name_split_suffix);
+	assert(splitop);
+	assert(memctx);
+	
 	int aok=1;
-	time_t aux_timestamp=timestamp_given?0:time(NULL);
 	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
-					                        // i.e., just many splittok.
+					        // i.e., just many splittok.
 
 	struct monitor_value monitor_value;
 	memset(&monitor_value,0,sizeof(monitor_value));
@@ -331,11 +343,16 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.group_name=group_name;
 	monitor_value.group_id=group_id;
 
+	const size_t per_instance_name_len = strlen(name) + (name_split_suffix?strlen(name_split_suffix):0) + 1;
+	char per_instance_name[per_instance_name_len];
+	snprintf(per_instance_name,per_instance_name_len,"%s%s",name,name_split_suffix);
+
 
 	unsigned int count = 0,mean_count=0;
 	double sum=0;
 	const size_t name_len = strlen(name);
 	while(tok){
+		time_t timestamp = 0;
 		char * nexttok = strstr(tok,splittok);
 		if(nexttok != '\0')
 		{
@@ -345,6 +362,26 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		if(*tok)
 		{
 			char * tok_name = rd_memctx_calloc(memctx,name_len+strlen(GROUP_SEP)+7+strlen(VECTOR_SEP)+7,sizeof(char)); /* +7: space to allocate _65535 */
+			
+			if(timestamp_given)
+			{
+				char * aux;
+				const char * ts_tok = strtok_r(tok,":",&aux);
+				tok = strtok_r(NULL,":",&aux);
+				timestamp = toDouble(ts_tok);
+				if(0!=errno)
+				{
+					char buf[1024];
+					Log(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
+					tok = nexttok;
+					timestamp = time(NULL);
+				}
+			}
+			else // current data is a vector value
+			{
+				timestamp = time(NULL);
+			}
+			
 			double tok_f = toDouble(tok);
 			if(errno!=0)
 			{
@@ -352,52 +389,38 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				continue;
 			}
 			
-			if(timestamp_given && 0==aux_timestamp) // current data is a timestamp
+			if(group_id)
+				snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+			else
+				snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+			if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
 			{
-				aux_timestamp = toDouble(tok);
-				if(0!=errno)
-				{
-					char buf[1024];
-					Log(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
-					tok = nexttok;
-					aux_timestamp = time(NULL);
-				}
+				monitor_value.timestamp = timestamp;
+				monitor_value.name = tok_name;
+				monitor_value.send_name = per_instance_name;
+				monitor_value.instance = count;
+				monitor_value.instance_prefix = instance_prefix;
+				monitor_value.instance_valid = 1;
+				monitor_value.value=tok_f;
+				monitor_value.string_value=tok;
+	
+				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+				if(kafka && new_mv)
+					rd_lru_push(valueslist,(void *)new_mv);
 			}
-			else // current data is a vector value
+			else
 			{
-				if(group_id)
-					snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-				else
-					snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-				if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
-				{
-					monitor_value.timestamp = aux_timestamp;
-					monitor_value.name = tok_name;
-					monitor_value.instance = count;
-					monitor_value.instance_prefix = instance_prefix;
-					monitor_value.instance_valid = 1;
-					monitor_value.value=tok_f;
-					monitor_value.string_value=tok;
-		
-					const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-
-					if(kafka && new_mv)
-						rd_lru_push(valueslist,(void *)new_mv);
-				}
-				else
-				{
-					Log(LOG_ERR,"Error adding libmatheval value\n");
-					aok = 0;
-				}
-
-				if(NULL!=splitop)
-				{
-					sum += atof(tok);
-					mean_count++;
-				}
-				count++;
-				aux_timestamp=0;
+				Log(LOG_ERR,"Error adding libmatheval value\n");
+				aok = 0;
 			}
+
+			if(NULL!=splitop)
+			{
+				sum += atof(tok);
+				mean_count++;
+			}
+			count++;
 		}
 		else /* *tok==0 */
 		{
@@ -639,7 +662,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				else /* We have a vector here */
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
-					splittok, valueslist,unit,group_id,group_name,instance_prefix,splitop,kafka,timestamp_given,&memctx);
+					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
+					kafka,timestamp_given,&memctx);
 				}
 
 				if(nonzero && 0 == number)
@@ -923,7 +947,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					sprintbuf(printbuf,"\"timestamp\":%lu\",",monitor_value->timestamp);
 					sprintbuf(printbuf, "\"sensor_id\":%lu,",monitor_value->sensor_id);
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",monitor_value->sensor_name);
-					sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
+					if(monitor_value->send_name)
+						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->send_name);
+					else
+						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
 					if(monitor_value->instance_valid && monitor_value->instance_prefix)
 						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
 					sprintbuf(printbuf, "\"value\":\"%s\",", monitor_value->string_value);

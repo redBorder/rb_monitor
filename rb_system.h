@@ -29,7 +29,7 @@ static inline char * trim_end(char * buf)
  @param unused         Just for snmp_solve_response compatibility
  @param command        Command to execute
  @todo see if we can join with snmp_solve_response somehow
- @return               1 if success. 0 ioc.
+ @return               1 if number. 0 ioc.
  */
 int system_solve_response(char * buff,const size_t buff_size,
 	double * number,
@@ -49,6 +49,7 @@ int system_solve_response(char * buff,const size_t buff_size,
 		}
 		else
 		{
+			Log(LOG_DEBUG,"System response: %s",buff);
 			trim_end(buff);
 			char * endPtr;
 			*number = strtod(buff,&endPtr);
