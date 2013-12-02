@@ -385,50 +385,53 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			{
 				timestamp = time(NULL);
 			}
-			
+
+			errno=0;			
 			double tok_f = toDouble(tok);
-			if(errno!=0)
+			if(errno==0)
+			{
+				if(group_id)
+					snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+				else
+					snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+				
+				if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+				{
+					monitor_value.timestamp = timestamp;
+					monitor_value.name = tok_name;
+					monitor_value.send_name = per_instance_name;
+					monitor_value.instance = count;
+					monitor_value.instance_prefix = instance_prefix;
+					monitor_value.instance_valid = 1;
+					monitor_value.value=tok_f;
+					monitor_value.string_value=tok;
+		
+						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+	
+						if(new_mv)
+						{
+							last_valid_timestamp = timestamp;
+							if(kafka)
+								rd_lru_push(valueslist,(void *)new_mv);
+						}
+					}
+					else
+					{
+						Log(LOG_ERR,"Error adding libmatheval value\n");
+						aok = 0;
+					}
+	
+					if(NULL!=splitop)
+					{
+						sum += atof(tok);
+						mean_count++;
+					}
+				count++;
+			}
+			else
 			{
 				Log(LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
-				continue;
-			}
-			
-			if(group_id)
-				snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-			else
-				snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-			if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
-			{
-				monitor_value.timestamp = timestamp;
-				monitor_value.name = tok_name;
-				monitor_value.send_name = per_instance_name;
-				monitor_value.instance = count;
-				monitor_value.instance_prefix = instance_prefix;
-				monitor_value.instance_valid = 1;
-				monitor_value.value=tok_f;
-				monitor_value.string_value=tok;
-	
-				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-
-				if(new_mv)
-				{
-					last_valid_timestamp = timestamp;
-					if(kafka)
-						rd_lru_push(valueslist,(void *)new_mv);
-				}
-			}
-			else
-			{
-				Log(LOG_ERR,"Error adding libmatheval value\n");
-				aok = 0;
-			}
-
-			if(NULL!=splitop)
-			{
-				sum += atof(tok);
-				mean_count++;
-			}
-			count++;
+			} /* valid double */
 		}
 		else /* *tok==0 */
 		{
@@ -439,7 +442,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	} /* while(tok) */
 
 	// Last token reached. Do we have an operation to do?
-	if(NULL!=splitop)
+	if(NULL!=splitop && count>0)
 	{
 		char split_op_result[1024];
 		double result = 0;
@@ -489,11 +492,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		
 	}
-	else
-	{
-		Log(LOG_CRIT,"Memory error.\n");
-		aok=0;
-	}
+
 	return aok;
 }
 
@@ -571,7 +570,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		uint64_t kafka=1,nonzero=0,timestamp_given=0;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
-		double number;
+		double number;int valid_double;
+		const int need_double=1; // maybe you don't want a double
 
 		rd_lru_t * valueslist    = rd_lru_new();
 		
@@ -655,18 +655,25 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 
 				char value_buf[1024] = {'\0'};
-				if(0==strncmp(key,"oid",strlen("oid")))
-					snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+				if(0==strcmp(key,"oid"))
+					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
-					system_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					valid_double = system_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				if(unlikely(strlen(value_buf)==0))
 				{
 					Log(LOG_WARNING,"Not seeing %s value.\n", name);
 				}
 				else if(!splittok)
 				{
-					process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-					name,value_buf,number, valueslist,unit,group_name,group_id,kafka);
+					if(!need_double || valid_double)
+					{
+						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
+						name,value_buf,number, valueslist,unit,group_name,group_id,kafka);
+					}
+					else
+					{
+						Log(LOG_WARNING,"Value of %s is not a number");
+					}
 				}
 				else /* We have a vector here */
 				{ 
@@ -921,11 +928,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			{
 				struct printbuf* printbuf= printbuf_new();
 				if(likely(NULL!=printbuf)){
-					int double_errno=0;
-					struct timeval tv;
-					gettimeofday(&tv,NULL);
-
-
 					// @TODO use printbuf_memappend_fast instead! */
 					sprintbuf(printbuf, "{");
 					#if 0
@@ -963,7 +965,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
 					if(monitor_value->instance_valid && monitor_value->instance_prefix)
 						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
-					sprintbuf(printbuf, "\"value\":\"%s\",", monitor_value->string_value);
+					sprintbuf(printbuf, "\"value\":\"%lf\",", monitor_value->value);
 
 					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
@@ -976,33 +978,23 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					//printbuf->buf=NULL;
 					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
 					{
-
-						if(0==double_errno)
-						{	
-							Log(LOG_DEBUG,"[Kafka:random] %s\n",printbuf->buf);
-							if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
-									RD_KAFKA_MSG_F_FREE,
-									/* Payload and length */
-									printbuf->buf, printbuf->bpos,
-									/* Optional key and its length */
-									NULL, 0,
-									/* Message opaque, provided in
-									 * delivery report callback as
-									 * msg_opaque. */
-									NULL))){
-								printbuf->buf=NULL; // rdkafka will free it
-							}
-	
-							else
-							{
-								Log(LOG_ERR,"[Errkafka] Cannot produce kafka message\n");
-							}
+						Log(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf);
+						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
+								RD_KAFKA_MSG_F_FREE,
+								/* Payload and length */
+								printbuf->buf, printbuf->bpos,
+								/* Optional key and its length */
+								NULL, 0,
+								/* Message opaque, provided in
+								 * delivery report callback as
+								 * msg_opaque. */
+								NULL))){
+							printbuf->buf=NULL; // rdkafka will free it
 						}
+
 						else
 						{
-							char buf[1024];
-							strerror_r(double_errno,buf,sizeof(buf));
-							Log(LOG_ERR,"EIVAL Value of [%s] is not a valid double(%s). Skipping\n",printbuf->buf,buf);
+							Log(LOG_ERR,"[Kafka] Cannot produce kafka message\n");
 						}
 					}
 					printbuf_free(printbuf);
@@ -1132,6 +1124,8 @@ void * worker(void *_info){
 	free(pt_worker_info.libmatheval_variables.values);
 
 	throw_msg_count = atoi(worker_info->max_kafka_fails);
+
+
 	while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) ))
 	{
 		if(prev_msg_left == msg_left) /* Send no messages in a second? probably, the broker has fall down */
