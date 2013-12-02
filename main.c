@@ -1172,6 +1172,9 @@ int main(int argc, char  *argv[])
 	assert(ret==TRUE);
 	worker_info.monitor_values_tree = new_monitor_values_tree();
 
+	debug_set_debug_level(worker_info.debug);
+	debug_set_output_flags(worker_info.debug_output_flags);
+
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {
 		case 'h':
