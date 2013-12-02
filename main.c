@@ -285,6 +285,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		#endif
 		monitor_value.timestamp = time(NULL);
 		monitor_value.sensor_name = sensor_data->sensor_name;
+		monitor_value.sensor_id = sensor_data->sensor_id;
 		monitor_value.name = name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
@@ -327,6 +328,8 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	// assert(name_split_suffix);
 	assert(splitop);
 	assert(memctx);
+
+	time_t last_valid_timestamp=0;
 	
 	int aok=1;
 	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
@@ -338,6 +341,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
 	monitor_value.sensor_name = sensor_data->sensor_name;
+	monitor_value.sensor_id = sensor_data->sensor_id;
 	monitor_value.bad_value = 0;
 	monitor_value.unit=unit;
 	monitor_value.group_name=group_name;
@@ -406,8 +410,12 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-				if(kafka && new_mv)
-					rd_lru_push(valueslist,(void *)new_mv);
+				if(new_mv)
+				{
+					last_valid_timestamp = timestamp;
+					if(kafka)
+						rd_lru_push(valueslist,(void *)new_mv);
+				}
 			}
 			else
 			{
@@ -460,8 +468,9 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			}
 			else
 			{
-				monitor_value.timestamp = time(NULL);
+				monitor_value.timestamp = last_valid_timestamp;
 				monitor_value.name = name;
+				monitor_value.send_name = NULL;
 				monitor_value.instance = 0;
 				monitor_value.instance_prefix = NULL;
 				monitor_value.instance_valid = 0;
@@ -743,6 +752,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 					#endif
 					monitor_value.timestamp = time(NULL);
+					monitor_value.sensor_id = sensor_data->sensor_id;
 					monitor_value.sensor_name = sensor_data->sensor_name;
 					monitor_value.instance_prefix = instance_prefix;
 					monitor_value.bad_value = 0;
@@ -944,7 +954,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						free(split_op_result);
 					}
 					#endif
-					sprintbuf(printbuf,"\"timestamp\":%lu\",",monitor_value->timestamp);
+					sprintbuf(printbuf,"\"timestamp\":%lu,",monitor_value->timestamp);
 					sprintbuf(printbuf, "\"sensor_id\":%lu,",monitor_value->sensor_id);
 					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",monitor_value->sensor_name);
 					if(monitor_value->send_name)

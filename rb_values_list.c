@@ -116,6 +116,7 @@ const struct monitor_value * update_monitor_value(struct monitor_values_tree *tr
 		if(src->timestamp != current_value->timestamp)
 		{
 			// monitor_value_copy(current_value,src); <- Not possible because strings
+			current_value->timestamp = src->timestamp;
 			current_value->value = src->value;
 		}
 		else
