@@ -1111,12 +1111,14 @@ void * worker(void *_info){
 	Log(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
+		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
 			Log(LOG_DEBUG,"Pop element %p\n",elm->rfqe_ptr);
 			json_object * sensor_info = elm->rfqe_ptr;
 			process_sensor(worker_info,&pt_worker_info,sensor_info);
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}
+		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
 		sleep(worker_info->sleep_worker);
 	}
 
@@ -1252,9 +1254,10 @@ int main(int argc, char  *argv[])
 				queueSensors(sensors,&queue);
 				sleep(main_info.sleep_main);
 			}
-			Log(LOG_INFO,"Leaving, wait 1sec for workers...\n");
+			Log(LOG_INFO,"Leaving, wait for workers...\n");
 
 			for(int i=0;i<main_info.threads;++i){
+				pthread_cancel(pd_thread[i]);
 				pthread_join(pd_thread[i], NULL);
 			}
 			free(pd_thread);
