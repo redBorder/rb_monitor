@@ -429,7 +429,6 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 						sum += atof(tok);
 						mean_count++;
 					}
-					count++;
 				}
 				else
 				{
@@ -442,6 +441,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			Log(LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
 		}
 	
+		count++;
 		tok = nexttok;
 	} /* while(tok) */
 
@@ -774,7 +774,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
 						const size_t namelen = strlen(name); // @TODO make the suffix append in libmatheval_append
-						char * mathname = calloc(namelen+6,sizeof(char)); /* space enough to save _60000 */
+						char * mathname = calloc(namelen+strlen(VECTOR_SEP)+6,sizeof(char)); /* space enough to save _60000 */
 						strcpy(mathname,name);
 						mathname[namelen] = '\0';
 
@@ -809,12 +809,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							const int mathpos = SIMPLEQ_FIRST(&head)->pos + j;
 							const char * suffix = strrchr(libmatheval_variables->names[mathpos],'_');
 							if(suffix)
-								strcpy(mathname+namelen,suffix);
+							{
+								strcpy(mathname+namelen,VECTOR_SEP);
+								strcpy(mathname+namelen+strlen(VECTOR_SEP),suffix+1);
+							}
 						}
 						
 						
 
-						void * const f = evaluator_create ((char *)str_op); /* really it has to do (void *). See libmatheval doc. */
+						void * const f = evaluator_create ((char *)str_op); /* really it has to be (void *). See libmatheval doc. */
 					                                                       /* also, we have to create a new one for each iteration */
 						if(NULL==f)
 						{
@@ -855,10 +858,19 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							if(vectors_len>1)
 							{
 								char name_buf[1024];
+								char * vector_pos = NULL;
 								sprintf(name_buf,"%s%s",name,name_split_suffix);
 								monitor_value.name = name_buf;
-								monitor_value.instance_valid = 1;
-								monitor_value.instance = count;
+								if((vector_pos = strstr(mathname,VECTOR_SEP)))
+								{
+									monitor_value.instance_valid = 1;
+									monitor_value.instance = atoi(vector_pos + strlen(VECTOR_SEP));
+								}
+								else
+								{
+									monitor_value.instance_valid = 0;
+									monitor_value.instance = 0;
+								}
 								monitor_value.value=number;
 								monitor_value.string_value=val_buf;
 							}
