@@ -326,7 +326,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	// assert(valueslist);
 	// assert(instance_prefix);
 	// assert(name_split_suffix);
-	assert(splitop);
+	// assert(splitop); <- May be NULL
 	assert(memctx);
 
 	time_t last_valid_timestamp=0;
@@ -358,7 +358,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	while(tok){
 		time_t timestamp = 0;
 		char * nexttok = strstr(tok,splittok);
-		if(nexttok != '\0')
+		if(nexttok != NULL && *nexttok != '\0')
 		{
 			*nexttok = '\0';
 			nexttok++;
@@ -386,28 +386,31 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				timestamp = time(NULL);
 			}
 
-			errno=0;			
-			double tok_f = toDouble(tok);
-			if(errno==0)
+			if(tok && *tok)
 			{
-				if(group_id)
-					snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
-				else
-					snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-				
-				if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+
+				errno=0;			
+				double tok_f = toDouble(tok);
+				if(errno==0)
 				{
-					monitor_value.timestamp = timestamp;
-					monitor_value.name = tok_name;
-					monitor_value.send_name = per_instance_name;
-					monitor_value.instance = count;
-					monitor_value.instance_prefix = instance_prefix;
-					monitor_value.instance_valid = 1;
-					monitor_value.value=tok_f;
-					monitor_value.string_value=tok;
-		
+					if(group_id)
+						snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+					else
+						snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+					
+					if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+					{
+						monitor_value.timestamp = timestamp;
+						monitor_value.name = tok_name;
+						monitor_value.send_name = per_instance_name;
+						monitor_value.instance = count;
+						monitor_value.instance_prefix = instance_prefix;
+						monitor_value.instance_valid = 1;
+						monitor_value.value=tok_f;
+						monitor_value.string_value=tok;
+			
 						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-	
+
 						if(new_mv)
 						{
 							last_valid_timestamp = timestamp;
@@ -420,18 +423,19 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 						Log(LOG_ERR,"Error adding libmatheval value\n");
 						aok = 0;
 					}
-	
+
 					if(NULL!=splitop)
 					{
 						sum += atof(tok);
 						mean_count++;
 					}
-				count++;
+					count++;
+				}
+				else
+				{
+					Log(LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
+				} /* valid double */
 			}
-			else
-			{
-				Log(LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
-			} /* valid double */
 		}
 		else /* *tok==0 */
 		{

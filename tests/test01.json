@@ -1,0 +1,37 @@
+/* very basic test */
+
+{
+  "conf": {
+    "debug": 8, /* See syslog error levels */
+    "syslog": 0,
+    "stdout": 1,
+    "threads": 1,
+    "timeout": 1,
+    "max_snmp_fails": 2,
+    "max_kafka_fails": 2,
+    "sleep_main_thread": 10,
+    "sleep_worker_thread": 1,
+    "kafka_broker": "192.168.101.201",
+    "kafka_topic": "rb_monitor",
+    "kafka_timeout": 20,
+  }
+  ,
+  "sensors":
+  
+  [
+    {
+      "sensor_id":1,
+      "timeout":2,
+      "sensor_name": "sensor-arriba",
+      "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
+      "community" : "public",
+      "monitors": /* this field MUST be the last! */
+      [        
+//        {"name": "load_5", "oid": "UCD-SNMP-MIB::laLoad.2", "unit": "%", "kafka": 1 },
+//        {"name": "load_15", "oid": "UCD-SNMP-MIB::laLoad.3", "unit": "%", "kafka": 1},
+        {"name": "load_5", "system":  "echo 3", "unit": "%", "kafka": 1 },
+        {"name": "load_15", "system": "echo 2", "unit": "%", "kafka": 1},
+      ]
+    }
+  ]
+}

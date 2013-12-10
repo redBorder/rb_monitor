@@ -16,6 +16,8 @@ LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 
 OBJECTS=rb_snmp.o rb_values_list.o rb_log.o main.o
 
+.PHONY: clean tests install
+
 clean: 
 	-rm -rf $(PROGNAME) $(OBJECTS)
 
@@ -36,4 +38,12 @@ $(PROGNAME): $(OBJECTS) rb_libmatheval.h rb_system.h
 
 install:
 	install -t $(PREFIX)/bin $(PROGNAME)
- 
+
+TESTS = tests/test01.json tests/test02.json tests/test03.json tests/test04.json \
+        tests/test05.json tests/test06.json tests/test07.json tests/test08.json \
+        tests/test09.json
+
+test: $(PROGNAME)
+	for test in ${TESTS}; do \
+	  sh test.sh ${PROGNAME} $$test; \
+        done
