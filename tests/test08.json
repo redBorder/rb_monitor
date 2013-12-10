@@ -1,0 +1,37 @@
+/* vector arithmetics. If a vector element is not returned, rb_monitor don't
+ send the proper kafka message. */
+
+{
+  "conf": {
+    "debug": 8, /* See syslog error levels */
+    "syslog": 0,
+    "stdout": 1,
+    "threads": 1,
+    "timeout": 1,
+    "max_snmp_fails": 2,
+    "max_kafka_fails": 2,
+    "sleep_main_thread": 10,
+    "sleep_worker_thread": 1,
+    "kafka_broker": "192.168.101.201",
+    "kafka_topic": "rb_monitor",
+    "kafka_timeout": 20,
+  }
+  ,
+  "sensors":
+  
+  [
+    {
+      "sensor_id":1,
+      "timeout":2,
+      "sensor_name": "sensor-arriba",
+      "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
+      "community" : "public",
+      "monitors": /* this field MUST be the last! */
+      [
+        {"name":"cpu_usr", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":0},
+        {"name":"cpu_sys", "system":"echo '10;20;;40;50;;;80'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":0},
+        {"name":"cpu", "op":"cpu_usr+cpu_sys", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "split_op":"mean", "instance_prefix":"snort-"},
+      ]
+    }
+  ]
+}

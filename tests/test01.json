@@ -9,8 +9,8 @@
     "timeout": 1,
     "max_snmp_fails": 2,
     "max_kafka_fails": 2,
-    "sleep_main_thread": 10,
-    "sleep_worker_thread": 1,
+    "sleep_main_thread": 100000000000000000,
+    "sleep_worker_thread": 1000000000000000000,
     "kafka_broker": "192.168.101.201",
     "kafka_topic": "rb_monitor",
     "kafka_timeout": 20,
@@ -21,7 +21,7 @@
   [
     {
       "sensor_id":1,
-      "timeout":2,
+      "timeout":100000000000000000000000,
       "sensor_name": "sensor-arriba",
       "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
       "community" : "public",
