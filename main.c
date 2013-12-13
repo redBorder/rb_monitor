@@ -982,8 +982,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(monitor_value->instance_valid && monitor_value->instance_prefix)
 						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
 					sprintbuf(printbuf, "\"value\":\"%lf\",", monitor_value->value);
-
-					sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
+					if(unit)
+						sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
 					if(group_id)   sprintbuf(printbuf, ",\"group_id\":%s", group_id);
 					sprintbuf(printbuf, "}");

@@ -49,13 +49,15 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
-static inline char * rd_memctx_strdup(rd_memctx_t *memctx,const char *src)
+// @todo use librd's one
+static inline char * _rd_memctx_strdup(rd_memctx_t *memctx,const char *src)
 {
-	const size_t len = strlen(src);
-	char * dst = rd_memctx_malloc(memctx,len+1);
-	memcpy(dst,src,len+1);
-	return dst;
+       const size_t len = strlen(src);
+       char * dst = rd_memctx_malloc(memctx,len+1);
+       memcpy(dst,src,len+1);
+       return dst;
 }
+
 
 /* Copy just the 'useful' data of the node, not list-related */
 static inline void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)
@@ -63,25 +65,25 @@ static inline void monitor_value_copy(struct monitor_value *dst,const struct mon
 	dst->timestamp       = src->timestamp;
 	dst->sensor_id       = src->sensor_id;
 	if(src->sensor_name)
-		dst->sensor_name     = rd_memctx_strdup(&memctx,src->sensor_name);
+		dst->sensor_name     = _rd_memctx_strdup(&memctx,src->sensor_name);
 	if(src->name)
-		dst->name            = rd_memctx_strdup(&memctx,src->name);
+		dst->name            = _rd_memctx_strdup(&memctx,src->name);
 	if(src->send_name)
-		dst->send_name       = rd_memctx_strdup(&memctx,src->send_name);
+		dst->send_name       = _rd_memctx_strdup(&memctx,src->send_name);
 	if(src->instance_prefix)
-		dst->instance_prefix = rd_memctx_strdup(&memctx,src->instance_prefix);
+		dst->instance_prefix = _rd_memctx_strdup(&memctx,src->instance_prefix);
 	dst->instance        = src->instance;
 	dst->instance_valid  = src->instance_valid;
 	dst->bad_value       = src->bad_value;
 	dst->value           = src->value;
 	if(src->string_value) 
-		dst->string_value    = rd_memctx_strdup(&memctx,src->string_value);
+		dst->string_value    = _rd_memctx_strdup(&memctx,src->string_value);
 	if(src->unit) 
-		dst->unit            = rd_memctx_strdup(&memctx,src->unit);
+		dst->unit            = _rd_memctx_strdup(&memctx,src->unit);
 	if(src->group_name) 
-		dst->group_name      = rd_memctx_strdup(&memctx,src->group_name);
+		dst->group_name      = _rd_memctx_strdup(&memctx,src->group_name);
 	if(src->group_id) 
-		dst->group_id        = rd_memctx_strdup(&memctx,src->group_id);
+		dst->group_id        = _rd_memctx_strdup(&memctx,src->group_id);
 }
 
 /**
