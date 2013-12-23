@@ -117,6 +117,7 @@ struct _sensor_data{
 	int timeout;
 	const char * peername; 
 	const char * sensor_name;
+	bool sensor_id_valid;
 	uint64_t sensor_id;
 	const char * community;
 };
@@ -286,6 +287,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.timestamp = time(NULL);
 		monitor_value.sensor_name = sensor_data->sensor_name;
 		monitor_value.sensor_id = sensor_data->sensor_id;
+		monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 		monitor_value.name = name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
@@ -910,7 +912,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					free(str_op_variables);
 				}
 			}
-			
+
 			if(errno!=0)
 			{
 				Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
@@ -953,21 +955,21 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						free(split_op_result);
 					}
 					#endif
-					sprintbuf(printbuf,"\"timestamp\":%lu,",monitor_value->timestamp);
-					sprintbuf(printbuf, "\"sensor_id\":%lu,",monitor_value->sensor_id);
-					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",monitor_value->sensor_name);
+					sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
+					sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
+					sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
 					if(monitor_value->send_name)
-						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->send_name);
+						sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->send_name);
 					else
-						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
+						sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->name);
 					if(monitor_value->instance_valid && monitor_value->instance_prefix)
-						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
+						sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
 					if(monitor_value->integer)
-						sprintbuf(printbuf, "\"value\":\"%d\",", (int)monitor_value->value);
+						sprintbuf(printbuf, ",\"value\":%d", (int)monitor_value->value);
 					else
-						sprintbuf(printbuf, "\"value\":\"%lf\",", monitor_value->value);
+						sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
 					if(unit)
-						sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
+						sprintbuf(printbuf, ",\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
 					if(group_id)   sprintbuf(printbuf, ",\"group_id\":%s", group_id);
 					sprintbuf(printbuf, "}");
@@ -1034,6 +1036,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 			pt_worker_info->sensor_data.sensor_name = json_object_get_string(val);
 		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
 			pt_worker_info->sensor_data.sensor_id = json_object_get_int64(val);
+			pt_worker_info->sensor_data.sensor_id_valid = json_object_get_int64(val);
 		}else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip"))){
 			pt_worker_info->sensor_data.peername = json_object_get_string(val);
 		}else if(0==strncmp(key,"community",sizeof "community"-1)){

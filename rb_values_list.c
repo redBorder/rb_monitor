@@ -64,6 +64,7 @@ static inline void monitor_value_copy(struct monitor_value *dst,const struct mon
 {
 	dst->timestamp       = src->timestamp;
 	dst->sensor_id       = src->sensor_id;
+	dst->sensor_id_valid = src->sensor_id_valid;
 	if(src->sensor_name)
 		dst->sensor_name     = _rd_memctx_strdup(&memctx,src->sensor_name);
 	if(src->name)

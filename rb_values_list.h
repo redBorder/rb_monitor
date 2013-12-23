@@ -15,6 +15,8 @@ struct monitor_value{
 	#endif
 
 	time_t timestamp;
+
+	bool sensor_id_valid;
 	int sensor_id;
 	const char * sensor_name;
 	const char * name;            // Intern name: *__gid__*__pos__
