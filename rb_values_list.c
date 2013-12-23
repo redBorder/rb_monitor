@@ -76,6 +76,7 @@ static inline void monitor_value_copy(struct monitor_value *dst,const struct mon
 	dst->instance_valid  = src->instance_valid;
 	dst->bad_value       = src->bad_value;
 	dst->value           = src->value;
+	dst->integer         = src->integer;
 	if(src->string_value) 
 		dst->string_value    = _rd_memctx_strdup(&memctx,src->string_value);
 	if(src->unit) 

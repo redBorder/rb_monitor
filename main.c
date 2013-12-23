@@ -273,7 +273,7 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 
 // @todo pass just a monitor_value with all precached possible.
 int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,int kafka)
+	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,int kafka,int integer)
 {
 	int aok = 1;
 	if(likely(libmatheval_append(worker_info,libmatheval_variables,name,value)))
@@ -295,6 +295,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.unit=unit;
 		monitor_value.group_name=group_name;
 		monitor_value.group_id=group_id;
+		monitor_value.integer=integer;
 		
 		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
@@ -312,9 +313,10 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 
 
 // @todo pass just a monitor_value with all precached possible.
+// @todo make a call to process_novector_monitor
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx)
+	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx,int integer)
 {
 	assert(worker_info);
 	assert(sensor_data);
@@ -346,6 +348,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.unit=unit;
 	monitor_value.group_name=group_name;
 	monitor_value.group_id=group_id;
+	monitor_value.integer=integer;
 
 	const size_t per_instance_name_len = strlen(name) + (name_split_suffix?strlen(name_split_suffix):0) + 1;
 	char per_instance_name[per_instance_name_len];
@@ -571,7 +574,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		uint64_t kafka=1,nonzero=0,timestamp_given=0;
+		uint64_t kafka=1,nonzero=0,timestamp_given=0,integer=0;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
 		double number;int valid_double;
@@ -606,16 +609,18 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				timestamp_given=json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
 				kafka = json_object_get_int64(val2);
+			}else if(0==strcmp(key2,"integer")){
+				integer = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
 				// will be resolved in the next foreach
 			}else if(0==strncmp(key2,"system",strlen("system"))){
 				// will be resolved in the next foreach
 			}else{
-				Log(LOG_ERR,"Cannot parse %s argument (line %d)\n",key2,__LINE__);
+				Log(LOG_ERR,"Cannot parse %s argument\n",key2);
 			}
 
 			if(errno!=0){
-				Log(LOG_ERR,"Could not parse %s value: %s",key2,strerror(errno));
+				Log(LOG_ERR,"Could not parse %s value: %s\n",key2,strerror(errno));
 			}
 
 		} /* foreach */
@@ -627,29 +632,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		json_object_object_foreach(monitor_parameters_array,key,val){
 			errno=0;
-			if(0==strncmp(key,"split",strlen("split")+1)){
-				// already resolved
-			}else if(0==strcmp(key,"split_op")){
-				// already resolved
-			}else if(0==strcmp(key,"name")){ 
-				// already resolved
-			}else if(0==strcmp(key,"name_split_suffix")){
-				// already resolved
-			}else if(0==strcmp(key,"instance_prefix")){
-				// already resolved
-			}else if(0==strncmp(key,"unit",strlen("unit"))){
-				// already resolved
-			}else if(0==strncmp(key,"group_name",strlen("group_name"))){
-				// already resolved
-			}else if(0==strncmp(key,"group_id",strlen("group_name"))){
-				// already resolved
-			}else if(0==strcmp(key,"nonzero")){
-				// already resolved
-			}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
-				// already resolved
-			}else if(0==strncmp(key,"timestamp_given",strlen("timestamp_given"))){
-				// already resolved
-			}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
+			if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
@@ -672,7 +655,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(!need_double || valid_double)
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,kafka);
+						name,value_buf,number, valueslist,unit,group_name,group_id,kafka,integer);
 					}
 					else
 					{
@@ -683,7 +666,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					kafka,timestamp_given,&memctx);
+					kafka,timestamp_given,&memctx,integer);
 				}
 
 				if(nonzero && 0 == number)
@@ -926,10 +909,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						free(str_op);
 					free(str_op_variables);
 				}
-			}else{
-				Log(LOG_ERR,"Cannot parse %s argument (line %d)\n",key,__LINE__);
 			}
-
+			
 			if(errno!=0)
 			{
 				Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
@@ -981,7 +962,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						sprintbuf(printbuf, "\"monitor\":\"%s\",",monitor_value->name);
 					if(monitor_value->instance_valid && monitor_value->instance_prefix)
 						sprintbuf(printbuf, "\"instance\":\"%s%u\",",monitor_value->instance_prefix,monitor_value->instance);
-					sprintbuf(printbuf, "\"value\":\"%lf\",", monitor_value->value);
+					if(monitor_value->integer)
+						sprintbuf(printbuf, "\"value\":\"%d\",", (int)monitor_value->value);
+					else
+						sprintbuf(printbuf, "\"value\":\"%lf\",", monitor_value->value);
 					if(unit)
 						sprintbuf(printbuf, "\"unit\":\"%s\"", unit);
 					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);

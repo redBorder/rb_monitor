@@ -2,9 +2,10 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include "librd/rdlru.h"
 #include "librd/rdavl.h"
-#define MONITOR_VALUE_MAGIC 0x12345678
+// #define MONITOR_VALUE_MAGIC 0x12345678
 
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
@@ -21,10 +22,11 @@ struct monitor_value{
 	                              // @todo make a function name() for do the last.
 	const char * instance_prefix;
 	unsigned int instance;
-	int instance_valid;
+	bool instance_valid;
 	double value;
 	const char * string_value;
-	int bad_value;
+	bool bad_value;
+	bool integer;
 	const char * unit;
 	const char * group_name;
 	const char * group_id;
