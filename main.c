@@ -443,7 +443,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		else /* *tok==0 */
 		{
-			Log(LOG_WARNING,"Not seeing value %s(%d)\n",name,count);
+			Log(LOG_DEBUG,"Not seeing value %s(%d)\n",name,count);
 		}
 	
 		count++;
@@ -925,57 +925,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			const struct monitor_value * monitor_value = NULL; 
 			while((monitor_value = rd_lru_pop(valueslist)))
 			{
-				struct printbuf* printbuf= printbuf_new();
+				struct printbuf* printbuf= print_monitor_value(monitor_value);
 				if(likely(NULL!=printbuf)){
-					// @TODO use printbuf_memappend_fast instead! */
-					sprintbuf(printbuf, "{");
-					#if 0
-					sprintbuf(printbuf, "\"timestamp\":%lu,",tv.tv_sec);
-					sprintbuf(printbuf, "\"sensor_id\":%lu,",sensor_data->sensor_id);
-					sprintbuf(printbuf, "\"sensor_name\":\"%s\",",sensor_data->sensor_name);
-					if(splitop && name_split_suffix && vector_value) // @TODO order this if/else/if, they are the same approx
-						sprintbuf(printbuf, "\"monitor\":\"%s%s\",",name,name_split_suffix);
-					else
-						sprintbuf(printbuf, "\"monitor\":\"%s\",",name);
-					if(splittok && instance_prefix && vector_value)
-						sprintbuf(printbuf, "\"instance\":\"%s%lu\",",instance_prefix,(unsigned long)rd_lru_pop(instance_list));
-					sprintbuf(printbuf, "\"type\":\"monitor\",");
-					if(vector_value){
-						sprintbuf(printbuf, "\"value\":\"%s\",", vector_value);
-						errno=0;
-						toDouble(vector_value);
-						double_errno = errno;
-						free(vector_value);
-					}else{
-						sprintbuf(printbuf, "\"value\":\"%s\",", split_op_result);
-						errno=0;
-						toDouble(split_op_result);
-						double_errno = errno;
-						split_op_result = NULL;
-						free(split_op_result);
-					}
-					#endif
-					sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
-					sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
-					sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
-					if(monitor_value->send_name)
-						sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->send_name);
-					else
-						sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->name);
-					if(monitor_value->instance_valid && monitor_value->instance_prefix)
-						sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
-					if(monitor_value->integer)
-						sprintbuf(printbuf, ",\"value\":%d", (int)monitor_value->value);
-					else
-						sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
-					if(unit)
-						sprintbuf(printbuf, ",\"unit\":\"%s\"", unit);
-					if(group_name) sprintbuf(printbuf, ",\"group_name\":\"%s\"", group_name);
-					if(group_id)   sprintbuf(printbuf, ",\"group_id\":%s", group_id);
-					sprintbuf(printbuf, "}");
-
-
-
 					//char * str_to_kafka = printbuf->buf;
 					//printbuf->buf=NULL;
 					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))

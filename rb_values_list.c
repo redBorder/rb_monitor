@@ -146,3 +146,36 @@ void destroy_monitor_values_tree(struct monitor_values_tree*tree)
 	rd_avl_destroy (tree->avl);
 	rd_memctx_freeall(&memctx); // tree was in this memctx. No need for free it twice.
 }
+
+struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
+{
+	struct printbuf * printbuf = printbuf_new();
+	if(likely(NULL!=printbuf))
+	{
+		// @TODO use printbuf_memappend_fast instead! */
+		sprintbuf(printbuf, "{");
+		sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
+		sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
+		if(monitor_value->sensor_name)
+			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
+		if(monitor_value->send_name)
+			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->send_name);
+		else
+			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->name);
+		if(monitor_value->instance_valid && monitor_value->instance_prefix)
+			sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
+		if(monitor_value->integer)
+			sprintbuf(printbuf, ",\"value\":%ld", (long int)monitor_value->value);
+		else
+			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
+		if(monitor_value->unit)
+			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_value->unit);
+		if(monitor_value->group_name) 
+			sprintbuf(printbuf, ",\"group_name\":\"%s\"", monitor_value->group_name);
+		if(monitor_value->group_id)   
+			sprintbuf(printbuf, ",\"group_id\":%s", monitor_value->group_id);
+		sprintbuf(printbuf, "}");
+	}
+
+	return printbuf;
+}

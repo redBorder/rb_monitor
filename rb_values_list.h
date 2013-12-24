@@ -5,6 +5,9 @@
 #include <stdbool.h>
 #include "librd/rdlru.h"
 #include "librd/rdavl.h"
+#include <json/printbuf.h>
+
+
 // #define MONITOR_VALUE_MAGIC 0x12345678
 
 /// @todo make the vectors entry here.
@@ -44,6 +47,8 @@ struct monitor_values_tree * new_monitor_values_tree();
   @note src value will be copied.
  */
 const struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
+
+struct printbuf * print_monitor_value(const struct monitor_value *monitor_value);
 
 /**
   Destroy values tree
