@@ -345,6 +345,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
 	monitor_value.sensor_name = sensor_data->sensor_name;
+	monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 	monitor_value.sensor_id = sensor_data->sensor_id;
 	monitor_value.bad_value = 0;
 	monitor_value.unit=unit;
@@ -748,6 +749,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 					#endif
 					monitor_value.timestamp = time(NULL);
+					monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 					monitor_value.sensor_id = sensor_data->sensor_id;
 					monitor_value.sensor_name = sensor_data->sensor_name;
 					monitor_value.instance_prefix = instance_prefix;

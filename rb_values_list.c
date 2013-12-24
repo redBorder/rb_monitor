@@ -3,7 +3,7 @@
 #include "rb_values_list.h"
 #include "librd/rdmem.h"
 
-#define MONITOR_VALUES_TREE_MAGIC 0xABCDEF
+// #define MONITOR_VALUES_TREE_MAGIC 0xABCDEF
 
 static rd_memctx_t memctx;
 
@@ -155,7 +155,8 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 		// @TODO use printbuf_memappend_fast instead! */
 		sprintbuf(printbuf, "{");
 		sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
-		sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
+		if(monitor_value->sensor_id_valid)
+			sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
 		if(monitor_value->sensor_name)
 			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
 		if(monitor_value->send_name)
