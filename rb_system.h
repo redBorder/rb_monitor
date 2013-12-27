@@ -14,7 +14,7 @@ struct _worker_info;
 static inline char * trim_end(char * buf)
 {
 	char * end = buf + strlen(buf)-1;
-	while(end>buf && isspace(*end))
+	while(end>=buf && isspace(*end))
 		end--;
 	*(end+1)='\0';
 	return buf;
@@ -31,7 +31,7 @@ static inline char * trim_end(char * buf)
  @todo see if we can join with snmp_solve_response somehow
  @return               1 if number. 0 ioc.
  */
-int system_solve_response(char * buff,const size_t buff_size,
+static int system_solve_response(char * buff,const size_t buff_size,
 	double * number,
 	__attribute__((unused)) void * unused,const char *command)
 {

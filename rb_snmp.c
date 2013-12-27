@@ -2,6 +2,7 @@
 
 #include "rb_snmp.h"
 #include "rb_log.h"
+#include "librd/rd.h"
 #include <assert.h>
 
 #define SNMP_SESS_MAGIC 0x12345678
@@ -81,6 +82,7 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	else
 	{
 		Log(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
+		const size_t effective_len = RD_MIN(value_buf_len,response->variables->val_len);
 	
 		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
 		{ 
@@ -92,10 +94,10 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 				break;
 			case ASN_OCTET_STR:
 				/* We don't know if it's a double inside a string; We try to convert and save */
-				strncpy(value_buf,(const char *)response->variables->val.string,value_buf_len);
+				strncpy(value_buf,(const char *)response->variables->val.string,effective_len-1);
 				// @TODO check val_len before copy string.
-				value_buf[response->variables->val_len] = '\0';
-				*number = strtod((const char *)response->variables->val.string,NULL);
+				value_buf[effective_len] = '\0';
+				*number = strtod((const char *)value_buf,NULL);
 				ret = 1;
 				break;
 			default:

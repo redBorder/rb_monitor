@@ -22,8 +22,7 @@ struct _worker_info;
  * @return         1 in exit. 0 in other case (malloc error).
  */
 
-static int libmatheval_append(struct _worker_info *worker_info, struct libmatheval_stuffs *matheval,const char *name,double val){
-	assert(worker_info);
+static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
 	Log(LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
 						                                         name,val);
 
@@ -46,7 +45,7 @@ static int libmatheval_append(struct _worker_info *worker_info, struct libmathev
 		}
 	}
 
-	matheval->names[matheval->variables_pos] = name;
+	matheval->names[matheval->variables_pos] = strdup(name);
 	matheval->values[matheval->variables_pos++] = val;
 	return 1;
 }

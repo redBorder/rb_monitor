@@ -277,7 +277,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,int kafka,int integer)
 {
 	int aok = 1;
-	if(likely(libmatheval_append(worker_info,libmatheval_variables,name,value)))
+	if(likely(libmatheval_append(libmatheval_variables,name,value)))
 	{
 		struct monitor_value monitor_value;
 		memset(&monitor_value,0,sizeof(monitor_value));
@@ -387,7 +387,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 					timestamp = time(NULL);
 				}
 			}
-			else // current data is a vector value
+			else
 			{
 				timestamp = time(NULL);
 			}
@@ -404,7 +404,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 					else
 						snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
 					
-					if(likely(0!=libmatheval_append(worker_info,libmatheval_variables,tok_name,atof(tok))))
+					if(likely(0!=libmatheval_append(libmatheval_variables,tok_name,atof(tok))))
 					{
 						monitor_value.timestamp = timestamp;
 						monitor_value.name = tok_name;
@@ -474,7 +474,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		if(splitop_is_valid)
 		{
 			snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
-			if(0==libmatheval_append(worker_info,libmatheval_variables,name,result))
+			if(0==libmatheval_append(libmatheval_variables,name,result))
 			{
 				Log(LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
 					name,split_op_result);
@@ -535,7 +535,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	{
 		const size_t new_size = json_object_array_length(monitors)*10; /* Allocating enough memory */
 		libmatheval_variables->names = 
-			calloc(new_size,sizeof(char *));
+			rd_memctx_calloc(new_size,sizeof(char *));
 		if(NULL==libmatheval_variables->names)
 		{
 			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
@@ -544,7 +544,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		else
 		{
 			libmatheval_variables->values =
-				calloc(new_size,sizeof(double));
+				rd_memctx_calloc(new_size,sizeof(double));
 			if(NULL==libmatheval_variables->values)
 			{
 				Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
@@ -649,6 +649,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
 					valid_double = system_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+
 				if(unlikely(strlen(value_buf)==0))
 				{
 					Log(LOG_WARNING,"Not seeing %s value.\n", name);
@@ -761,7 +762,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
 						const size_t namelen = strlen(name); // @TODO make the suffix append in libmatheval_append
-						char * mathname = calloc(namelen+strlen(VECTOR_SEP)+6,sizeof(char)); /* space enough to save _60000 */
+						char * mathname = rd_memctx_calloc(namelen+strlen(VECTOR_SEP)+6,sizeof(char)); /* space enough to save _60000 */
 						strcpy(mathname,name);
 						mathname[namelen] = '\0';
 
@@ -836,7 +837,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							/* op will send by default, so we ignore kafka param */
 						}
 
-						if(op_ok && libmatheval_append(worker_info,&pt_worker_info->libmatheval_variables, mathname,number))
+						if(op_ok && libmatheval_append(&pt_worker_info->libmatheval_variables, mathname,number))
 						{
 							char val_buf[64];
 							sprintf(val_buf,"%lf",number);
@@ -878,6 +879,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							count++;
 						}
 						free(mathname);
+						mathname=NULL;
 
 					} /* foreach member of vector */
 					if(splitop)
@@ -917,7 +919,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 			if(errno!=0)
 			{
-				Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+				Log(LOG_ERR,"Could not parse %s value: %s\n",key,strerror(errno));
 			}
 		} /* foreach monitor attribute */
 
