@@ -13,8 +13,6 @@ struct monitor_snmp_new_session_config{
 
 struct monitor_snmp_session;
 
-struct _worker_info; /* FW declaration */
-
 /** 
 	Adapt the snmp response in string and double responses.
 	@param value_buf   Return buffer where the response will be saved (text format)

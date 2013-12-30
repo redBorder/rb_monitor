@@ -5,7 +5,7 @@
 #include "librd/rd.h"
 #include <assert.h>
 
-#define SNMP_SESS_MAGIC 0x12345678
+// #define SNMP_SESS_MAGIC 0x12345678
 
 struct monitor_snmp_session{
 	#ifdef SNMP_SESS_MAGIC
@@ -14,6 +14,7 @@ struct monitor_snmp_session{
 	void * sessp;
 };
 
+// @TODO include initial_session in config
 struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_session,
  const struct monitor_snmp_new_session_config *config)
 {
