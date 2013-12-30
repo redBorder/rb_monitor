@@ -39,7 +39,7 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 		}
 		else
 		{
-			// @TODO Logging not possible here. 
+			Log(LOG_ERR,"Failed to load SNMP session");
 		}
 	}
 	return session;

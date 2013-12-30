@@ -535,7 +535,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	{
 		const size_t new_size = json_object_array_length(monitors)*10; /* Allocating enough memory */
 		libmatheval_variables->names = 
-			rd_memctx_calloc(new_size,sizeof(char *));
+			rd_memctx_calloc(&memctx,new_size,sizeof(char *));
 		if(NULL==libmatheval_variables->names)
 		{
 			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
@@ -544,7 +544,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		else
 		{
 			libmatheval_variables->values =
-				rd_memctx_calloc(new_size,sizeof(double));
+				rd_memctx_calloc(&memctx,new_size,sizeof(double));
 			if(NULL==libmatheval_variables->values)
 			{
 				Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
@@ -762,7 +762,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
 						const size_t namelen = strlen(name); // @TODO make the suffix append in libmatheval_append
-						char * mathname = rd_memctx_calloc(namelen+strlen(VECTOR_SEP)+6,sizeof(char)); /* space enough to save _60000 */
+						char * mathname = rd_memctx_calloc(&memctx,namelen+strlen(VECTOR_SEP)+6,sizeof(char)); /* space enough to save _60000 */
 						strcpy(mathname,name);
 						mathname[namelen] = '\0';
 
