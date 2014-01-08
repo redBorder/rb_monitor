@@ -648,7 +648,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(0==strcmp(key,"oid"))
 					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				else
-					valid_double = system_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
 
 				if(unlikely(strlen(value_buf)==0))
 				{
@@ -878,7 +878,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							sum+=number;
 							count++;
 						}
-						free(mathname);
 						mathname=NULL;
 
 					} /* foreach member of vector */
