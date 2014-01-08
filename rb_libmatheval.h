@@ -13,7 +13,6 @@ struct libmatheval_stuffs{
 };
 
 
-struct _worker_info;
 /*
  * Add a variable to a libmatheval_stuffs.
  * @param matheval struct to add the variable.
