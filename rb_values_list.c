@@ -49,22 +49,21 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
-// @todo use librd's one
 static inline char * _rd_memctx_strdup(rd_memctx_t *memctx,const char *src)
 {
-       const size_t len = strlen(src);
-       char * dst = rd_memctx_malloc(memctx,len+1);
-       memcpy(dst,src,len+1);
-       return dst;
+    	const size_t len = strlen(src);
+    	char * dst = rd_memctx_malloc(memctx,len+1);
+    	memcpy(dst,src,len+1);
+    	return dst;
 }
 
 
 /* Copy just the 'useful' data of the node, not list-related */
 static inline void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)
 {
-	dst->timestamp       = src->timestamp;
-	dst->sensor_id       = src->sensor_id;
-	dst->sensor_id_valid = src->sensor_id_valid;
+	dst->timestamp           = src->timestamp;
+	dst->sensor_id           = src->sensor_id;
+	dst->sensor_id_valid     = src->sensor_id_valid;
 	if(src->sensor_name)
 		dst->sensor_name     = _rd_memctx_strdup(&memctx,src->sensor_name);
 	if(src->name)
@@ -73,11 +72,12 @@ static inline void monitor_value_copy(struct monitor_value *dst,const struct mon
 		dst->send_name       = _rd_memctx_strdup(&memctx,src->send_name);
 	if(src->instance_prefix)
 		dst->instance_prefix = _rd_memctx_strdup(&memctx,src->instance_prefix);
-	dst->instance        = src->instance;
-	dst->instance_valid  = src->instance_valid;
-	dst->bad_value       = src->bad_value;
-	dst->value           = src->value;
-	dst->integer         = src->integer;
+	dst->type                = src->type;
+	dst->instance            = src->instance;
+	dst->instance_valid      = src->instance_valid;
+	dst->bad_value           = src->bad_value;
+	dst->value               = src->value;
+	dst->integer             = src->integer;
 	if(src->string_value) 
 		dst->string_value    = _rd_memctx_strdup(&memctx,src->string_value);
 	if(src->unit) 
@@ -169,6 +169,8 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 			sprintbuf(printbuf, ",\"value\":%ld", (long int)monitor_value->value);
 		else
 			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
+		if(monitor_value->type)
+			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type());
 		if(monitor_value->unit)
 			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_value->unit);
 		if(monitor_value->group_name) 

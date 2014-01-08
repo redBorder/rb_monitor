@@ -30,6 +30,8 @@ struct monitor_value{
 	bool instance_valid;
 	double value;
 	const char * string_value;
+	/// type callback. Returns the way the value has been obtained.
+	const char * (*type)(void);
 	bool bad_value;
 	bool integer;
 	const char * unit;

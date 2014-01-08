@@ -1,6 +1,6 @@
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-0","value":"11.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-1","value":"22.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-3","value":"44.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-4","value":"55.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-7","value":"88.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu","value":"44.000000","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-0","value":"11.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-1","value":"22.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-3","value":"44.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-4","value":"55.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu_per_instance","instance":"snort-7","value":"88.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"cpu","value":"44.000000","type":"op","unit":"%"}

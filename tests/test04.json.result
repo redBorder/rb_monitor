@@ -1,4 +1,4 @@
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"load_1","value":"3.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"load_5","value":"2.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"100load_15","value":"200.000000","unit":"%"}
-"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"operation","value":"6.000000","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"load_1","value":"3.000000","type":"system","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"load_5","value":"2.000000","type":"system","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"100load_15","value":"200.000000","type":"op","unit":"%"}
+"sensor_id":1,"sensor_name":"sensor-arriba","monitor":"operation","value":"6.000000","type":"op","unit":"%"}

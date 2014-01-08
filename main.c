@@ -274,7 +274,8 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 
 // @todo pass just a monitor_value with all precached possible.
 int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,int kafka,int integer)
+	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,
+	const char *(*type)(void),int kafka,int integer)
 {
 	int aok = 1;
 	if(likely(libmatheval_append(libmatheval_variables,name,value)))
@@ -298,6 +299,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.group_name=group_name;
 		monitor_value.group_id=group_id;
 		monitor_value.integer=integer;
+		monitor_value.type = type;
 		
 		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
@@ -318,7 +320,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 // @todo make a call to process_novector_monitor
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,rd_memctx_t *memctx,int integer)
+	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
 {
 	assert(worker_info);
 	assert(sensor_data);
@@ -352,6 +354,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.group_name=group_name;
 	monitor_value.group_id=group_id;
 	monitor_value.integer=integer;
+	monitor_value.type = type;
 
 	const size_t per_instance_name_len = strlen(name) + (name_split_suffix?strlen(name_split_suffix):0) + 1;
 	char per_instance_name[per_instance_name_len];
@@ -489,6 +492,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				monitor_value.instance_valid = 0;
 				monitor_value.value=result;
 				monitor_value.string_value=split_op_result;
+//				monitor_value.type = type;
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 				if(kafka && new_mv)
@@ -645,10 +649,17 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 
 				char value_buf[1024] = {'\0'};
+				const char *(*type_cb)(void) = NULL;
 				if(0==strcmp(key,"oid"))
+				{
+					type_cb = snmp_type_cb;
 					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+				}
 				else
+				{
+					type_cb = system_type_cb;
 					valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
+				}
 
 				if(unlikely(strlen(value_buf)==0))
 				{
@@ -659,7 +670,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(!need_double || valid_double)
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,kafka,integer);
+						name,value_buf,number, valueslist,unit,group_name,group_id,type_cb,kafka,integer);
 					}
 					else
 					{
@@ -670,7 +681,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					kafka,timestamp_given,&memctx,integer);
+					kafka,timestamp_given,type_cb,&memctx,integer);
 				}
 
 				if(nonzero && 0 == number)
@@ -690,6 +701,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						kafka=op_ok=0;
 					}
 				}
+
 				if(op_ok)
 				{
 					struct vector_variables_s{ // @TODO Integrate in struct monitor_value
@@ -758,6 +770,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					monitor_value.unit=unit;
 					monitor_value.group_name=group_name;
 					monitor_value.group_id=group_id;
+					monitor_value.type = op_type;
 
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
@@ -923,8 +936,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		} /* foreach monitor attribute */
 
 		if(kafka){
-			//char * vector_value = NULL; 
-			//while((vector_value = rd_lru_pop(valueslist)) || split_op_result)
 			const struct monitor_value * monitor_value = NULL; 
 			while((monitor_value = rd_lru_pop(valueslist)))
 			{

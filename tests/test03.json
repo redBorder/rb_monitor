@@ -9,7 +9,7 @@
     "timeout": 1,
     "max_snmp_fails": 2,
     "max_kafka_fails": 2,
-    "sleep_main_thread": 10,
+    "sleep_main_thread": 1,
     "sleep_worker_thread": 1,
     "kafka_broker": "192.168.101.201",
     "kafka_topic": "rb_monitor",

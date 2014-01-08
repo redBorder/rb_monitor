@@ -8,9 +8,6 @@
 
 #pragma once
 
-// @TODO delete this FW declaration.
-struct _worker_info;
-
 static inline char * trim_end(char * buf)
 {
 	char * end = buf + strlen(buf)-1;
@@ -19,6 +16,8 @@ static inline char * trim_end(char * buf)
 	*(end+1)='\0';
 	return buf;
 }
+
+static inline const char *system_type_cb(void){return "system";}
 
 /**
  Exec a system command and puts the output in value_buf
