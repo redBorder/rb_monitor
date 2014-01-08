@@ -1,4 +1,5 @@
 /* vector requests. Please note the "name_split_suffix" and "split" arguments */
+/* @TODO add instance_prefix argument! */
 
 {
   "conf": {
