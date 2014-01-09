@@ -3,15 +3,58 @@
 #pragma once
 
 #include "rb_log.h"
+#include <stdlib.h>
 #include <string.h>
 
 struct libmatheval_stuffs{
-	const char ** names;
+	char ** names;
 	double *values;
 	unsigned int variables_pos;
 	unsigned int total_lenght;
 };
 
+struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
+{
+	struct libmatheval_stuffs * this = calloc(1,sizeof(struct libmatheval_stuffs));
+	if(this)
+	{
+		this->names = calloc(new_size,sizeof(char *));
+		if(NULL==this->names)
+		{
+			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			free(this);
+			this=NULL;
+		}
+	}
+
+	if(this)
+	{
+		this->values = calloc(new_size,sizeof(double));
+		if(NULL==this->values)
+		{
+			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			free(this->names);
+			free(this);
+			this=NULL;
+		}
+		else
+		{
+			this->total_lenght = new_size;
+		}
+	}
+
+	return this;
+}
+
+void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
+{
+	unsigned int i;
+	for(i=0;i<this->variables_pos;++i)
+		free(this->names[i]);
+	free(this->names);
+	free(this->values);
+	free(this);
+}
 
 /*
  * Add a variable to a libmatheval_stuffs.
@@ -49,7 +92,7 @@ static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *na
 	return 1;
 }
 
-static int libmatheval_search_vector(const char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size)
+static int libmatheval_search_vector(char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size)
 {
 	int state = 0; /* 0: searching; 1: counting length; 2:finished */
 	int ret = 0;

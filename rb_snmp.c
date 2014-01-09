@@ -114,4 +114,6 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 void destroy_snmp_session(struct monitor_snmp_session * s)
 {
 	snmp_sess_close(s->sessp);
+	free(s);
+
 }

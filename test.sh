@@ -11,7 +11,7 @@ TIME_TO_KILL=1
 . /etc/init.d/functions
 
 echo -n $PROGNAME -c ${CONFIG_FILE}
-./${PROGNAME} -c ${CONFIG_FILE} > ${PREPROC_RESULT} 2> ${PREPROC_ERROR} &  sleep 1 ; kill $!
+./${PROGNAME} -c ${CONFIG_FILE} > ${PREPROC_RESULT} 2> ${PREPROC_ERROR} &  sleep 2 ; kill $!
 grep timestamp ${PREPROC_RESULT} | cut -d',' -f2- > ${POSTPROC_RESULT}
 diff ${POSTPROC_RESULT} ${EXPECTED_RESULT} 2>&1 > ${TMP_DIFF}
 if [ $? -eq 0 ] 

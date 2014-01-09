@@ -127,7 +127,6 @@ struct _perthread_worker_info{
 	rd_kafka_topic_t *rkt;
 	int thread_ok;
 	struct _sensor_data sensor_data;
-	struct libmatheval_stuffs libmatheval_variables;
 };
 
 struct _main_info{
@@ -518,14 +517,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
-	struct libmatheval_stuffs *libmatheval_variables = &pt_worker_info->libmatheval_variables;
+	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
 	struct monitor_snmp_session * snmp_sessp=NULL;
 	rd_memctx_t memctx;
 	memset(&memctx,0,sizeof(memctx));
-	rd_memctx_init(&memctx,"process_sensor_monitors",RD_MEMCTX_F_TRACK);
+	rd_memctx_init(&memctx,NULL,RD_MEMCTX_F_TRACK);
 
-
-	libmatheval_variables->variables_pos = 0;
 	const char *bad_names[json_object_array_length(monitors)]; /* ops cannot be added to libmatheval array.*/
 	size_t bad_names_pos = 0;
 
@@ -535,31 +532,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	check_setted(sensor_data->community,&aok,
 		"Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
 
-	if(libmatheval_variables->names == NULL) /* starting allocate */
-	{
-		const size_t new_size = json_object_array_length(monitors)*10; /* Allocating enough memory */
-		libmatheval_variables->names = 
-			rd_memctx_calloc(&memctx,new_size,sizeof(char *));
-		if(NULL==libmatheval_variables->names)
-		{
-			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
-			aok = 0;
-		}
-		else
-		{
-			libmatheval_variables->values =
-				rd_memctx_calloc(&memctx,new_size,sizeof(double));
-			if(NULL==libmatheval_variables->values)
-			{
-				Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
-				aok = 0;
-			}
-			else
-			{
-				libmatheval_variables->total_lenght = new_size;
-			}
-		}
-	}
 
 	if(aok){
 		pthread_mutex_lock(&worker_info->snmp_session_mutex);
@@ -850,7 +822,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							/* op will send by default, so we ignore kafka param */
 						}
 
-						if(op_ok && libmatheval_append(&pt_worker_info->libmatheval_variables, mathname,number))
+						if(op_ok && libmatheval_append(libmatheval_variables, mathname,number))
 						{
 							char val_buf[64];
 							sprintf(val_buf,"%lf",number);
@@ -983,13 +955,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	destroy_snmp_session(snmp_sessp);
 
 	if(aok)
+	{
 		rd_memctx_freeall(&memctx);
+		delete_libmatheval_stuffs(libmatheval_variables);
+	}
 	return aok;
 } 
 
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
 	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
-	pt_worker_info->libmatheval_variables.variables_pos = 0;
 	pt_worker_info->sensor_data.timeout = worker_info->timeout;
 	json_object * monitors = NULL;
 	int aok = 1;
@@ -1039,8 +1013,6 @@ void * worker(void *_info){
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
 
-	memset(&pt_worker_info.libmatheval_variables,0,sizeof(pt_worker_info.libmatheval_variables));
-
 	#if !defined(NDEBUG)
 	// conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
 	// conf.producer.dr_cb = msg_delivered;
@@ -1089,9 +1061,6 @@ void * worker(void *_info){
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
 		sleep(worker_info->sleep_worker);
 	}
-
-	free(pt_worker_info.libmatheval_variables.names);
-	free(pt_worker_info.libmatheval_variables.values);
 
 	throw_msg_count = atoi(worker_info->max_kafka_fails);
 
