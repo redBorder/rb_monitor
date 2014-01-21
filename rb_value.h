@@ -20,14 +20,14 @@ struct monitor_value{
 	#endif
 
 	time_t timestamp;
-
+	double value;
+	
 	bool sensor_id_valid;
 	int sensor_id;
 	const char * sensor_name;
 	const char * name;            // Intern name: *__gid__*__pos__
 	const char * send_name;       // Extern name. If not __gid__ nor __pos__, it is NULL and you have to check name.
 	                              // @todo make a function name() for do the last.
-	double value;
 	const char * instance_prefix;
 	unsigned int instance;
 	bool instance_valid;
