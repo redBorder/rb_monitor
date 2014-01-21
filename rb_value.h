@@ -28,10 +28,17 @@ struct monitor_value{
 	const char * send_name;       // Extern name. If not __gid__ nor __pos__, it is NULL and you have to check name.
 	                              // @todo make a function name() for do the last.
 	const char * instance_prefix;
+	const char * name_split_suffix;
 	const char * unit;
 	const char * group_name;
 	const char * group_id;
+	const char * splittok;
+	const char * splitop;
+	bool nonzero;
 	bool integer;
+	bool timestamp_given;
+	bool kafka;
+	
 
 	/* response */
 	time_t timestamp;

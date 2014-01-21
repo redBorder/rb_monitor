@@ -272,12 +272,10 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 */
 
 // @todo pass just a monitor_value with all precached possible.
-int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,
-	const char *(*type)(void),int kafka,int integer)
+int process_novector_monitor(struct monitor_value * monitor_value,struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables)
 {
 	int aok = 1;
-	if(likely(libmatheval_append(libmatheval_variables,name,value)))
+	if(1 || likely(libmatheval_append(libmatheval_variables,monitor_value->name,monitor_value->value)))
 	{
 		struct monitor_value monitor_value;
 		memset(&monitor_value,0,sizeof(monitor_value));
@@ -288,22 +286,19 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.sensor_name = sensor_data->sensor_name;
 		monitor_value.sensor_id = sensor_data->sensor_id;
 		monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
-		monitor_value.name = name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
 		monitor_value.bad_value = 0;
-		monitor_value.value=value;
-		monitor_value.string_value=value_buf;
-		monitor_value.unit=unit;
-		monitor_value.group_name=group_name;
-		monitor_value.group_id=group_id;
-		monitor_value.integer=integer;
-		monitor_value.type = type;
 		
-		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+		// monitor_value.string_value=value_buf;
+		// monitor_value.value=value; //not set here
+		// monitor_value.integer=integer;
+		// monitor_value.type = type;
 
-		if(kafka && new_mv)
-			rd_lru_push(valueslist,(void *)new_mv);
+		// const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+
+		// if(kafka && new_mv)
+		//	rd_lru_push(valueslist,(void *)new_mv);
 	}
 	else
 	{
@@ -512,12 +507,57 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	return aok;
 }
 
+static inline void set_json_information(struct monitor_value *monitor_value,json_object *attributes_array)
+{
+	json_object_object_foreach(attributes_array,key,val)
+	{
+		errno=0;
+		if(0==strncmp(key,"split",strlen("split")+1)){
+			monitor_value->splittok = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"split_op",strlen("split_op"))){
+			monitor_value->splitop = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"name",strlen("name")+1)){ 
+			monitor_value->name = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
+			monitor_value->name_split_suffix = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strcmp(key,"instance_prefix")){
+			monitor_value->instance_prefix = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"unit",strlen("unit"))){
+			monitor_value->unit = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"group_name",strlen("group_name"))){
+			monitor_value->group_name = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strncmp(key,"group_id",strlen("group_id"))){
+			monitor_value->group_id = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+		}else if(0==strcmp(key,"nonzero")){
+			monitor_value->nonzero = 1;
+		}else if(0==strcmp(key,"timestamp_given")){
+			monitor_value->timestamp_given=json_object_get_int64(val);
+		}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
+			monitor_value->kafka = json_object_get_int64(val);
+		}else if(0==strcmp(key,"integer")){
+			monitor_value->integer = json_object_get_int64(val);
+		}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"op",strlen("op"))){
+			// not to be processed here
+		}else if(0==strncmp(key,"system",strlen("system"))){
+			// not to be processed here
+		}else{
+			Log(LOG_ERR,"Cannot parse %s argument\n",key);
+		}
+		if(errno!=0){
+			Log(LOG_ERR,"Could not parse %s value: %s\n",key,strerror(errno));
+		}
+
+	} /* foreach */
+}
+
 
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
 			json_object * monitors)
 {
+	struct monitor_value monitor_value;
+	memset(&monitor_value,0,sizeof(monitor_value));
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
@@ -564,48 +604,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		rd_lru_t * valueslist    = rd_lru_new();
 		
-		
-		/* First pass: get attributes except op: and oid:*/
-		json_object_object_foreach(monitor_parameters_array,key2,val2)
-		{
-			errno=0;
-			if(0==strncmp(key2,"split",strlen("split")+1)){
-				splittok = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"split_op",strlen("split_op"))){
-				splitop = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"name",strlen("name")+1)){ 
-				name = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"name_split_suffix",strlen("name_split_suffix"))){
-				name_split_suffix = json_object_get_string(val2);
-			}else if(0==strcmp(key2,"instance_prefix")){
-				instance_prefix = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"unit",strlen("unit"))){
-				unit = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"group_name",strlen("group_name"))){
-				group_name = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"group_id",strlen("group_id"))){
-				group_id = json_object_get_string(val2);
-			}else if(0==strcmp(key2,"nonzero")){
-				nonzero = 1;
-			}else if(0==strcmp(key2,"timestamp_given")){
-				timestamp_given=json_object_get_int64(val2);
-			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
-				kafka = json_object_get_int64(val2);
-			}else if(0==strcmp(key2,"integer")){
-				integer = json_object_get_int64(val2);
-			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
-				// will be resolved in the next foreach
-			}else if(0==strncmp(key2,"system",strlen("system"))){
-				// will be resolved in the next foreach
-			}else{
-				Log(LOG_ERR,"Cannot parse %s argument\n",key2);
-			}
-
-			if(errno!=0){
-				Log(LOG_ERR,"Could not parse %s value: %s\n",key2,strerror(errno));
-			}
-
-		} /* foreach */
+		set_json_information(&monitor_value,monitor_parameters_array);
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
 			Log(LOG_ERR,"sensor name not setted. Skipping.\n");
@@ -617,7 +616,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
-				if(unlikely(!name)){
+				if(unlikely(!name && !monitor_value.name)){
 					Log(LOG_WARNING,"name of param not set in %s. Skipping\n",
 						sensor_data->sensor_name);
 					break /*foreach*/;
@@ -644,8 +643,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(!need_double || valid_double)
 					{
-						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,kafka,integer);
+						process_novector_monitor(&monitor_value,worker_info,sensor_data, libmatheval_variables);
+						// @todo pass to another function
+						monitor_value.timestamp    = time(NULL);
+						monitor_value.value        = number;
+						monitor_value.string_value = strdup(value_buf);
+
+						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+						if(kafka && new_mv)
+							rd_lru_push(valueslist,(void *)new_mv);
 					}
 					else
 					{
@@ -731,21 +737,21 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 					double sum=0;unsigned count=0;
 
-					struct monitor_value monitor_value; // ready-to-go struct
-					memset(&monitor_value,0,sizeof(monitor_value));
+					struct monitor_value op_monitor_value; // ready-to-go struct
+					memset(&op_monitor_value,0,sizeof(op_monitor_value));
 					#ifdef MONITOR_VALUE_MAGIC
-					monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+					op_monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 					#endif
-					monitor_value.timestamp = time(NULL);
-					monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
-					monitor_value.sensor_id = sensor_data->sensor_id;
-					monitor_value.sensor_name = sensor_data->sensor_name;
-					monitor_value.instance_prefix = instance_prefix;
-					monitor_value.bad_value = 0;
-					monitor_value.unit=unit;
-					monitor_value.group_name=group_name;
-					monitor_value.group_id=group_id;
-					monitor_value.type = op_type;
+					op_monitor_value.timestamp = time(NULL);
+					op_monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
+					op_monitor_value.sensor_id = sensor_data->sensor_id;
+					op_monitor_value.sensor_name = sensor_data->sensor_name;
+					op_monitor_value.instance_prefix = instance_prefix;
+					op_monitor_value.bad_value = 0;
+					op_monitor_value.unit=unit;
+					op_monitor_value.group_name=group_name;
+					op_monitor_value.group_id=group_id;
+					op_monitor_value.type = op_type;
 
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
@@ -842,26 +848,26 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								char name_buf[1024];
 								char * vector_pos = NULL;
 								sprintf(name_buf,"%s%s",name,name_split_suffix);
-								monitor_value.name = name_buf;
+								op_monitor_value.name = name_buf;
 								if((vector_pos = strstr(mathname,VECTOR_SEP)))
 								{
-									monitor_value.instance_valid = 1;
-									monitor_value.instance = atoi(vector_pos + strlen(VECTOR_SEP));
+									op_monitor_value.instance_valid = 1;
+									op_monitor_value.instance = atoi(vector_pos + strlen(VECTOR_SEP));
 								}
 								else
 								{
-									monitor_value.instance_valid = 0;
-									monitor_value.instance = 0;
+									op_monitor_value.instance_valid = 0;
+									op_monitor_value.instance = 0;
 								}
-								monitor_value.value=number;
-								monitor_value.string_value=val_buf;
+								op_monitor_value.value=number;
+								op_monitor_value.string_value=val_buf;
 							}
 							else
 							{
-								monitor_value.name = name;
-								monitor_value.value=number;
-								monitor_value.instance_valid = 0;
-								monitor_value.string_value=val_buf;
+								op_monitor_value.name = name;
+								op_monitor_value.value=number;
+								op_monitor_value.instance_valid = 0;
+								op_monitor_value.string_value=val_buf;
 							}
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
@@ -887,10 +893,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						if(op_ok){
 							char split_op_result[64];
 							sprintf(split_op_result,"%lf",number);
-							monitor_value.name = name;
-							monitor_value.value=number;
-							monitor_value.instance_valid = 0;							
-							monitor_value.string_value=split_op_result;
+							op_monitor_value.name = name;
+							op_monitor_value.value=number;
+							op_monitor_value.instance_valid = 0;							
+							op_monitor_value.string_value=split_op_result;
 
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
