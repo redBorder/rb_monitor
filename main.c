@@ -471,7 +471,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 
 		
-		int splitop_is_valid = isfinite(result);
+		const int splitop_is_valid = isfinite(result);
 
 		if(splitop_is_valid)
 		{
@@ -491,7 +491,10 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				monitor_value.instance_valid = 0;
 				monitor_value.value=result;
 				monitor_value.string_value=split_op_result;
+				monitor_value.group_name=group_name;
+				monitor_value.group_id=group_id;
 //				monitor_value.type = type;
+
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 				if(kafka && new_mv)
