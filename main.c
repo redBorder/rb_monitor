@@ -580,7 +580,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				unit = json_object_get_string(val2);
 			}else if(0==strncmp(key2,"group_name",strlen("group_name"))){
 				group_name = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"group_id",strlen("group_name"))){
+			}else if(0==strncmp(key2,"group_id",strlen("group_id"))){
 				group_id = json_object_get_string(val2);
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
