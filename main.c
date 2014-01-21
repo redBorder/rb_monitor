@@ -816,9 +816,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							evaluator_destroy (f);
 							Log(LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
 							if(number == 0 && nonzero)
+							{
+								op_ok=false;
 								Log(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
-							if(number == INFINITY|| number == -INFINITY|| number == NAN)
+							}
+							if(!isnormal(number))
+							{
+								op_ok=false;
 								Log(LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+							}
 							/* op will send by default, so we ignore kafka param */
 						}
 
