@@ -558,6 +558,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 {
 	struct monitor_value monitor_value;
 	memset(&monitor_value,0,sizeof(monitor_value));
+	#ifdef MONITOR_VALUE_MAGIC
+	monitor_value.magic=MONITOR_VALUE_MAGIC;
+	#endif
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
@@ -644,6 +647,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(!need_double || valid_double)
 					{
 						process_novector_monitor(&monitor_value,worker_info,sensor_data, libmatheval_variables);
+
+						monitor_value.sensor_name = sensor_data->sensor_name;
 						// @todo pass to another function
 						monitor_value.timestamp    = time(NULL);
 						monitor_value.value        = number;

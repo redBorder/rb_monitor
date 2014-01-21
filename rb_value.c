@@ -13,7 +13,7 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 
 	#ifdef MONITOR_VALUE_MAGIC
 	assert(src->magic == MONITOR_VALUE_MAGIC);
-	assert(dst->magic == MONITOR_VALUE_MAGIC);
+	//assert(dst->magic == MONITOR_VALUE_MAGIC);
 	#endif
 
 	dst->timestamp           = src->timestamp;
