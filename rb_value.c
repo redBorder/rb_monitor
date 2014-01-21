@@ -10,6 +10,12 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 {
 	assert(src);
 	assert(dst);
+
+	#ifdef MONITOR_VALUE_MAGIC
+	assert(src->magic == MONITOR_VALUE_MAGIC);
+	assert(dst->magic == MONITOR_VALUE_MAGIC);
+	#endif
+
 	dst->timestamp           = src->timestamp;
 	dst->sensor_id           = src->sensor_id;
 	dst->sensor_id_valid     = src->sensor_id_valid;

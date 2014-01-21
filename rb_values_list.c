@@ -51,14 +51,6 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
-static inline char * _rd_memctx_strdup(rd_memctx_t *memctx,const char *src)
-{
-    	const size_t len = strlen(src);
-    	char * dst = rd_memctx_malloc(memctx,len+1);
-    	memcpy(dst,src,len+1);
-    	return dst;
-}
-
 /**
  Add a monitor value to the tree. 'src' will be copied and not changed.
  */

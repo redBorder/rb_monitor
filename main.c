@@ -513,21 +513,21 @@ static inline void set_json_information(struct monitor_value *monitor_value,json
 	{
 		errno=0;
 		if(0==strncmp(key,"split",strlen("split")+1)){
-			monitor_value->splittok = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->splittok = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"split_op",strlen("split_op"))){
-			monitor_value->splitop = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->splitop = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"name",strlen("name")+1)){ 
-			monitor_value->name = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->name = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
-			monitor_value->name_split_suffix = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->name_split_suffix = strdup(json_object_get_string(val));
 		}else if(0==strcmp(key,"instance_prefix")){
-			monitor_value->instance_prefix = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->instance_prefix = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"unit",strlen("unit"))){
-			monitor_value->unit = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->unit = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"group_name",strlen("group_name"))){
-			monitor_value->group_name = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->group_name = strdup(json_object_get_string(val));
 		}else if(0==strncmp(key,"group_id",strlen("group_id"))){
-			monitor_value->group_id = memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
+			monitor_value->group_id = strdup(json_object_get_string(val));
 		}else if(0==strcmp(key,"nonzero")){
 			monitor_value->nonzero = 1;
 		}else if(0==strcmp(key,"timestamp_given")){

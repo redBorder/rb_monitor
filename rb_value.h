@@ -8,7 +8,7 @@
 
 #include <stdbool.h>
 
-// #define MONITOR_VALUE_MAGIC 0x12345678
+#define MONITOR_VALUE_MAGIC 0x12345678
 
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
