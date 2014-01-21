@@ -30,6 +30,8 @@ static int monitor_value_cmp(const void *_v1,const void*_v2)
 	int ret = strcmp(v1->sensor_name,v2->sensor_name);
 	if(0==ret)
 		ret = strcmp(v1->name,v2->name);
+	if(0==ret && v1->group_id && v2->group_id)
+		ret = strcmp(v1->group_id,v2->group_id);
 	if(ret==0 && v1->instance_prefix && v2->instance_prefix) // @TODO force instance_prefix setted
 		ret = v1->instance-v2->instance;
 	return ret;
