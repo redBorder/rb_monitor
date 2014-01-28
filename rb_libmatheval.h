@@ -13,7 +13,7 @@ struct libmatheval_stuffs{
 	unsigned int total_lenght;
 };
 
-struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
+static struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 {
 	struct libmatheval_stuffs * this = calloc(1,sizeof(struct libmatheval_stuffs));
 	if(this)
@@ -46,7 +46,7 @@ struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 	return this;
 }
 
-void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
+static void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
 {
 	unsigned int i;
 	for(i=0;i<this->variables_pos;++i)
@@ -140,5 +140,3 @@ static inline int libmatheval_check_exists(char ** vars,int varcount,const struc
 	*vars_pos = j-1;
 	return aok;
 }
-
-static inline const char * op_type(void){return "op";}

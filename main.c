@@ -25,6 +25,7 @@
 #include "rb_log.h"
 #include "rb_snmp.h"
 #include "rb_values_list.h"
+#include "rb_operation.h"
 
 #include <stdlib.h>
 #include <json/json.h>

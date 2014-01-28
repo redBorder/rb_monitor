@@ -14,7 +14,7 @@ LIBRD_LIBRARIES ?= /opt/rb/lib
 CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
 LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 
-OBJECTS=rb_snmp.o rb_value.o rb_values_list.o rb_log.o main.o
+OBJECTS=rb_snmp.o rb_value.o rb_values_list.o rb_log.o main.o rb_operation.o
 
 .PHONY: clean tests install
 
@@ -24,16 +24,19 @@ clean:
 rb_log.o:rb_log.c rb_log.h
 	$(CC) $(CFLAGS) -o $@ $< -c
 
+rb_operation.o:rb_operation.c rb_operation.h rb_value.h rb_values_list.h
+	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99
+
 rb_snmp.o:rb_snmp.c rb_snmp.h
 	$(CC) $(CFLAGS) -o $@ $< -c
 
-main.o:main.c
+main.o:main.c rb_sensor_data.h rb_system.h rb_libmatheval.h rb_log.h rb_snmp.h rb_values_list.h rb_operation.h
 	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99
 
 rb_value.o:rb_value.c rb_value.h
 	$(CC) $(CFLAGS) -o $@ $< -c 
 
-rb_values_list.o:rb_values_list.c rb_values_list.h
+rb_values_list.o:rb_values_list.c rb_values_list.h rb_value.h
 	$(CC) $(CFLAGS) -o $@ $< -c 
 
 $(PROGNAME): $(OBJECTS) rb_libmatheval.h rb_system.h 
