@@ -12,6 +12,16 @@
 
 #define MONITOR_VALUE_MAGIC 0x12345678
 
+struct monitor_value; /* FW declaration */
+
+/** Function to get the network/system response.
+ @param mv monitor value to save response to
+ @param session network tecnology session (SNMP session, telnet session...)
+ @param request request (oid, telnet command...)
+ @return true if succeed. False ioc.
+ */
+typedef bool (*get_response_fn_t)(struct monitor_value *mv,void *session, const void *request);
+
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
 struct monitor_value{
@@ -43,9 +53,10 @@ struct monitor_value{
 	
 
 	/* response */
+	get_response_fn_t get_response_fn;
 	time_t timestamp;
 	double value;
-	const char * string_value;
+	char * string_value;
 	const char * (*type)(void); // way that the value has been obtained
 
 	/* vector response */

@@ -5,6 +5,8 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 
+#include "rb_value.h"
+
 struct monitor_snmp_new_session_config{
 	const char * community;
 	int timeout;

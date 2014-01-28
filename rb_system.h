@@ -1,5 +1,8 @@
 // rb_system.h
+#include "rb_value.h"
+
 #include "rb_log.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,4 +62,18 @@ static int system_solve_response(char * buff,const size_t buff_size,
 	}
 
 	return ret;
+}
+
+static bool system_get_response(struct monitor_value *mv,void *unused, const void *_command)
+{
+	(void *)unused;
+	const size_t bufsize = 1024;
+	double number; // FIXME: Delete it
+	assert(_command);
+	const char * command = _command;
+
+	mv->type = system_type_fn;
+
+	mv->string_value = rd_memctx_calloc(&mv->memctx, bufsize, sizeof(char));
+	return system_solve_response(mv->string_value,bufsize,&number,NULL,command);
 }

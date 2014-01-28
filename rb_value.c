@@ -1,5 +1,7 @@
 // rb_value.c
 
+#include "rb_log.h"
+
 #include "rb_value.h"
 
 #include "librd/rdmem.h"
@@ -84,4 +86,19 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 	}
 
 	return printbuf;
+}
+
+int process_monitor_value(struct monitor_value *monitor_value)
+{
+	if(monitor_value->string_value)
+	{
+		if(likely(strlen(monitor_value->string_value)!=0))
+			monitor_value->value = atof(monitor_value->string_value);
+		else
+			Log(LOG_WARNING,"Not seeing %s value.\n", monitor_value->name);
+	}
+	else
+	{
+		Log(LOG_WARNING,"NULL value in %s\n",monitor_value->name);
+	}
 }

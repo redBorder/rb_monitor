@@ -277,16 +277,6 @@ int process_novector_monitor(struct monitor_value * monitor_value,struct _worker
 		monitor_value->instance = 0;
 		monitor_value->instance_valid = 0;
 		monitor_value->bad_value = 0;
-		
-		// monitor_value.string_value=value_buf;
-		// monitor_value.value=value; //not set here
-		// monitor_value.integer=integer;
-		// monitor_value.type = type;
-
-		// const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-
-		// if(kafka && new_mv)
-		//	rd_lru_push(valueslist,(void *)new_mv);
 	}
 	else
 	{
@@ -622,11 +612,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else
 				{
-					type_fn = system_type_fn;
-					valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
+					monitor_value.get_response_fn = system_get_response;
+					// valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
 				}
 
-				if(unlikely(strlen(value_buf)==0))
+				if(unlikely(strlen(value_buf)==0) && 0)
 				{
 					Log(LOG_WARNING,"Not seeing %s value.\n", name);
 				}
@@ -643,8 +633,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						monitor_value.value        = number;
 						monitor_value.string_value = strdup(value_buf);
 
+						if(monitor_value.get_response_fn)
+							monitor_value.get_response_fn(&monitor_value,NULL,json_object_get_string(val));
+						else
+							Log(LOG_ERR,"monitor value does not have get_response_fn.");
+
+						process_monitor_value(&monitor_value);
+
 						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-						if(kafka && new_mv)
+						if(monitor_value.kafka && new_mv)
 							rd_lru_push(valueslist,(void *)new_mv);
 					}
 					else
