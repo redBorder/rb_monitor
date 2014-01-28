@@ -454,7 +454,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	} /* while(tok) */
 
 	// Last token reached. Do we have an operation to do?
-	if(NULL!=splitop && count>0)
+	if(NULL!=splitop && mean_count>0)
 	{
 		char split_op_result[1024];
 		double result = 0;

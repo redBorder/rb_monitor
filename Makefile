@@ -41,7 +41,7 @@ install:
 
 TESTS = tests/test01.json tests/test02.json tests/test03.json tests/test04.json \
         tests/test05.json tests/test06.json tests/test07.json tests/test08.json \
-        tests/test09.json tests/test10.json tests/test11.json
+        tests/test09.json tests/test10.json tests/test11.json tests/test12.json
 
 
 test: $(PROGNAME)
