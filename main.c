@@ -19,6 +19,7 @@
 ** Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#include "rb_sensor_data.h"
 #include "rb_system.h"
 #include "rb_libmatheval.h"
 #include "rb_log.h"
@@ -111,15 +112,6 @@ struct _worker_info{
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
 	struct monitor_values_tree * monitor_values_tree;
-};
-
-struct _sensor_data{
-	int timeout;
-	const char * peername; 
-	const char * sensor_name;
-	bool sensor_id_valid;
-	uint64_t sensor_id;
-	const char * community;
 };
 
 struct _perthread_worker_info{
@@ -272,23 +264,19 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 */
 
 // @todo pass just a monitor_value with all precached possible.
-int process_novector_monitor(struct monitor_value * monitor_value,struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables)
+int process_novector_monitor(struct monitor_value * monitor_value,struct _worker_info *worker_info,struct _sensor_data *sensor_data, struct libmatheval_stuffs *libmatheval_variables)
 {
 	int aok = 1;
 	if(1 || likely(libmatheval_append(libmatheval_variables,monitor_value->name,monitor_value->value)))
 	{
-		struct monitor_value monitor_value;
-		memset(&monitor_value,0,sizeof(monitor_value));
 		#ifdef MONITOR_VALUE_MAGIC
-		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+		monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
-		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_name = sensor_data->sensor_name;
-		monitor_value.sensor_id = sensor_data->sensor_id;
-		monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
-		monitor_value.instance = 0;
-		monitor_value.instance_valid = 0;
-		monitor_value.bad_value = 0;
+		add_sensor_data(monitor_value,sensor_data);
+		monitor_value->timestamp = time(NULL);
+		monitor_value->instance = 0;
+		monitor_value->instance_valid = 0;
+		monitor_value->bad_value = 0;
 		
 		// monitor_value.string_value=value_buf;
 		// monitor_value.value=value; //not set here
@@ -649,6 +637,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						process_novector_monitor(&monitor_value,worker_info,sensor_data, libmatheval_variables);
 
 						monitor_value.sensor_name = sensor_data->sensor_name;
+						monitor_value.sensor_id   = sensor_data->sensor_id;
 						// @todo pass to another function
 						monitor_value.timestamp    = time(NULL);
 						monitor_value.value        = number;
@@ -994,8 +983,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		}else if (0==strncmp(key,"sensor_name",strlen("sensor_name"))){
 			pt_worker_info->sensor_data.sensor_name = json_object_get_string(val);
 		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
-			pt_worker_info->sensor_data.sensor_id = json_object_get_int64(val);
-			pt_worker_info->sensor_data.sensor_id_valid = json_object_get_int64(val);
+			pt_worker_info->sensor_data.sensor_id = pt_worker_info->sensor_data.sensor_id_valid = json_object_get_int64(val);
 		}else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip"))){
 			pt_worker_info->sensor_data.peername = json_object_get_string(val);
 		}else if(0==strncmp(key,"community",sizeof "community"-1)){

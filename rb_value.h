@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "rb_sensor_data.h"
+
 #include "librd/rdlru.h"
 #include "librd/rdavl.h"
 #include "librd/rdmem.h"
@@ -53,6 +55,8 @@ struct monitor_value{
 };
 
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
+
+void add_sensor_data(struct monitor_value *dst,const struct _sensor_data *sensor_data);
 
 int process_monitor_value(struct monitor_value *monitor_value);
 
