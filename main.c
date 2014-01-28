@@ -471,7 +471,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 
 		
-		int splitop_is_valid = isfinite(result);
+		const int splitop_is_valid = isfinite(result);
 
 		if(splitop_is_valid)
 		{
@@ -491,7 +491,10 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				monitor_value.instance_valid = 0;
 				monitor_value.value=result;
 				monitor_value.string_value=split_op_result;
+				monitor_value.group_name=group_name;
+				monitor_value.group_id=group_id;
 //				monitor_value.type = type;
+
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 				if(kafka && new_mv)
@@ -580,7 +583,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				unit = json_object_get_string(val2);
 			}else if(0==strncmp(key2,"group_name",strlen("group_name"))){
 				group_name = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"group_id",strlen("group_name"))){
+			}else if(0==strncmp(key2,"group_id",strlen("group_id"))){
 				group_id = json_object_get_string(val2);
 			}else if(0==strcmp(key2,"nonzero")){
 				nonzero = 1;
@@ -621,15 +624,15 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 
 				char value_buf[1024] = {'\0'};
-				const char *(*type_cb)(void) = NULL;
+				const char *(*type_fn)(void) = NULL;
 				if(0==strcmp(key,"oid"))
 				{
-					type_cb = snmp_type_cb;
+					type_fn = snmp_type_fn;
 					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				}
 				else
 				{
-					type_cb = system_type_cb;
+					type_fn = system_type_fn;
 					valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
 				}
 
@@ -642,7 +645,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(!need_double || valid_double)
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,type_cb,kafka,integer);
+						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,kafka,integer);
 					}
 					else
 					{
@@ -653,7 +656,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					kafka,timestamp_given,type_cb,&memctx,integer);
+					kafka,timestamp_given,type_fn,&memctx,integer);
 				}
 
 				if(nonzero && 0 == number)

@@ -46,4 +46,4 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,
 	double * number,struct monitor_snmp_session * session,const char *oid_string);
 void destroy_snmp_session(struct monitor_snmp_session *);
 
-static inline const char * snmp_type_cb(void){return "snmp";}
+static inline const char * snmp_type_fn(void){return "snmp";}

@@ -14,7 +14,7 @@ LIBRD_LIBRARIES ?= /opt/rb/lib
 CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
 LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
 
-OBJECTS=rb_snmp.o rb_values_list.o rb_log.o main.o
+OBJECTS=rb_snmp.o rb_value.o rb_values_list.o rb_log.o main.o
 
 .PHONY: clean tests install
 
@@ -29,6 +29,9 @@ rb_snmp.o:rb_snmp.c rb_snmp.h
 
 main.o:main.c
 	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99
+
+rb_value.o:rb_value.c rb_value.h
+	$(CC) $(CFLAGS) -o $@ $< -c 
 
 rb_values_list.o:rb_values_list.c rb_values_list.h
 	$(CC) $(CFLAGS) -o $@ $< -c 
