@@ -264,27 +264,18 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 */
 
 // @todo pass just a monitor_value with all precached possible.
-int process_novector_monitor(struct monitor_value * monitor_value,struct _sensor_data *sensor_data, struct libmatheval_stuffs *libmatheval_variables)
+// @todo this must be in rb_value.c
+int process_novector_monitor(struct monitor_value * monitor_value)
 {
-	int aok = 1;
-	if(1 || likely(libmatheval_append(libmatheval_variables,monitor_value->name,monitor_value->value)))
-	{
-		#ifdef MONITOR_VALUE_MAGIC
-		monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
-		#endif
-		set_sensor_information(monitor_value,sensor_data);
-		monitor_value->timestamp = time(NULL);
-		monitor_value->instance = 0;
-		monitor_value->instance_valid = 0;
-		monitor_value->bad_value = 0;
-	}
-	else
-	{
-		Log(LOG_ERR,"Error adding libmatheval value\n");
-		aok = 0;
-	}
+	#ifdef MONITOR_VALUE_MAGIC
+	monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
+	#endif
+	monitor_value->timestamp = time(NULL);
+	monitor_value->instance = 0;
+	monitor_value->instance_valid = 0;
+	monitor_value->bad_value = 0;
 
-	return aok;
+	return 1;
 }
 
 
@@ -626,7 +617,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(!need_double || valid_double)
 					{
-						process_novector_monitor(&monitor_value,sensor_data, libmatheval_variables);
+						process_novector_monitor(&monitor_value);
 
 						monitor_value.sensor_name = sensor_data->sensor_name;
 						monitor_value.sensor_id   = sensor_data->sensor_id;
