@@ -55,6 +55,7 @@ struct monitor_value{
 	/* response */
 	get_response_fn_t get_response_fn;
 	time_t timestamp;
+	bool invalid_value;
 	double value;
 	char * string_value;
 	const char * (*type)(void); // way that the value has been obtained
@@ -72,6 +73,8 @@ static void set_sensor_information(struct monitor_value *this,const struct _sens
 	this->sensor_id = sensor_data->sensor_id;
 	this->sensor_id_valid = sensor_data->sensor_id_valid;
 }
+
+#define have_to_print(monitor_value) monitor_value->kafka
 
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
 

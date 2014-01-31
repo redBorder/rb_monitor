@@ -101,4 +101,5 @@ int process_monitor_value(struct monitor_value *monitor_value)
 		Log(LOG_WARNING,"NULL value in %s\n",monitor_value->name);
 		return 0;
 	}
+	return 0;
 }

@@ -275,7 +275,6 @@ int process_novector_monitor(struct monitor_value * monitor_value)
 	monitor_value->instance = 0;
 	monitor_value->instance_valid = 0;
 	monitor_value->bad_value = 0;
-
 	return 1;
 }
 
@@ -617,8 +616,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else if(!splittok)
 				{
-					// if(!need_double || valid_double)
-					// {
 						process_novector_monitor(monitor_value);
 
 						monitor_value->sensor_name = sensor_data->sensor_name;
@@ -643,11 +640,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							rd_memctx_freeall(&old_mv->memctx);
 							free(old_mv);
 						}
-					// }
-					// else
-					// {
-					// 	Log(LOG_WARNING,"Value of %s is not a number");
-					// }
 				}
 				else /* We have a vector here */
 				{ 
@@ -663,6 +655,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					kafka=0;
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){ // @TODO sepparate in it's own function
+				monitor_value->get_response_fn = operation_get_response;
+				monitor_value->get_response_fn(monitor_value,worker_info->monitor_values_tree,json_object_get_string(val));
+				rd_lru_push(valueslist,monitor_value);
+
+#if 0
 				const char * operation = (char *)json_object_get_string(val);
 				int op_ok=1;
 				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
@@ -905,6 +902,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						free(str_op);
 					free(str_op_variables);
 				}
+				#endif
 			}
 
 			if(errno!=0)
@@ -921,7 +919,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(likely(NULL!=printbuf)){
 					//char * str_to_kafka = printbuf->buf;
 					//printbuf->buf=NULL;
-					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
+					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community) && have_to_print(monitor_value))
 					{
 						Log(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf);
 						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,

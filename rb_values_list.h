@@ -14,6 +14,8 @@ struct monitor_values_tree;
 
 struct monitor_values_tree * new_monitor_values_tree();
 
+struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,struct monitor_value *src);
+
 /**
   Add a monitor value to a monitor_values_tree.
   @note src value will be copied.

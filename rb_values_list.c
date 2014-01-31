@@ -51,62 +51,9 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
-#if 0
-/**
- Add a monitor value to the tree. 'src' will be copied and not changed.
- */
-static struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const struct monitor_value *src)
-{
-	struct monitor_value * dst = rd_memctx_calloc(&memctx,1,sizeof(struct monitor_value));
-
-	if(dst)
-	{
-		#ifdef MONITOR_VALUE_MAGIC
-		dst->magic = MONITOR_VALUE_MAGIC;
-		#endif
-
-		rd_memctx_init(&dst->memctx,NULL,RD_MEMCTX_F_LOCK | RD_MEMCTX_F_TRACK);
-	
-		monitor_value_copy(dst,src);
-		RD_AVL_INSERT(tree->avl,dst,avl_node);
-	}
-
-	return dst;
-}
-
-struct monitor_value * find_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *node)
-{
-	return RD_AVL_FIND(tree->avl,node);
-}
-#endif
-
 struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,struct monitor_value *new_mv)
 {
-	#if 0
-	struct monitor_value * current_value = find_monitor_value(tree,src);
-	if(current_value)
-	{
-		if(src->timestamp != current_value->timestamp)
-		{
-			// monitor_value_copy(current_value,src); <- Not possible because strings
-			current_value->timestamp = src->timestamp;
-			current_value->value = src->value;
-		}
-		else
-		{
-			// fprintf(stderr,"Same timestamp, return no monitor value.\n");
-			current_value = NULL;
-		}
-	}
-	else
-	{
-		current_value = add_monitor_value(tree,src);
-	}
-
-	return current_value;
-	#endif
 	return RD_AVL_INSERT(tree->avl,new_mv,avl_node);
-
 }
 
 void destroy_monitor_values_tree(struct monitor_values_tree*tree)
