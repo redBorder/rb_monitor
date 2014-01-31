@@ -264,7 +264,7 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 */
 
 // @todo pass just a monitor_value with all precached possible.
-int process_novector_monitor(struct monitor_value * monitor_value,struct _worker_info *worker_info,struct _sensor_data *sensor_data, struct libmatheval_stuffs *libmatheval_variables)
+int process_novector_monitor(struct monitor_value * monitor_value,struct _sensor_data *sensor_data, struct libmatheval_stuffs *libmatheval_variables)
 {
 	int aok = 1;
 	if(1 || likely(libmatheval_append(libmatheval_variables,monitor_value->name,monitor_value->value)))
@@ -626,7 +626,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(!need_double || valid_double)
 					{
-						process_novector_monitor(&monitor_value,worker_info,sensor_data, libmatheval_variables);
+						process_novector_monitor(&monitor_value,sensor_data, libmatheval_variables);
 
 						monitor_value.sensor_name = sensor_data->sensor_name;
 						monitor_value.sensor_id   = sensor_data->sensor_id;
