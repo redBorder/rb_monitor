@@ -8,6 +8,7 @@
 #include "librd/rdavl.h"
 #include "librd/rdmem.h"
 
+#include <json/json.h>
 #include <stdbool.h>
 
 #define MONITOR_VALUE_MAGIC 0x12345678
@@ -75,6 +76,8 @@ static void set_sensor_information(struct monitor_value *this,const struct _sens
 }
 
 #define have_to_print(monitor_value) monitor_value->kafka
+
+void set_json_information(struct monitor_value *monitor_value,json_object *attributes_array);
 
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
 

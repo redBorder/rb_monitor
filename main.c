@@ -259,12 +259,6 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 	}
 }
 
-/** @note our way to save a SNMP string vector in libmatheval_array is:
-    names:  [ ...  vector_name_0 ... vector_name_(N)     vector_name   ... ]
-    values: [ ...     number0    ...    number(N)      split_op_result ... ]
-*/
-
-// @todo pass just a monitor_value with all precached possible.
 // @todo this must be in rb_value.c
 int process_novector_monitor(struct monitor_value * monitor_value)
 {
@@ -475,52 +469,6 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 	return aok;
 }
-
-static inline void set_json_information(struct monitor_value *monitor_value,json_object *attributes_array)
-{
-	monitor_value->kafka = 1; // default
-	json_object_object_foreach(attributes_array,key,val)
-	{
-		errno=0;
-		if(0==strncmp(key,"split",strlen("split")+1)){
-			monitor_value->splittok = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"split_op",strlen("split_op"))){
-			monitor_value->splitop = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"name",strlen("name")+1)){ 
-			monitor_value->name = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
-			monitor_value->name_split_suffix = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strcmp(key,"instance_prefix")){
-			monitor_value->instance_prefix = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"unit",strlen("unit"))){
-			monitor_value->unit = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"group_name",strlen("group_name"))){
-			monitor_value->group_name = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strncmp(key,"group_id",strlen("group_id"))){
-			monitor_value->group_id = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
-		}else if(0==strcmp(key,"nonzero")){
-			monitor_value->nonzero = 1;
-		}else if(0==strcmp(key,"timestamp_given")){
-			monitor_value->timestamp_given=json_object_get_int64(val);
-		}else if(0==strncmp(key,"kafka",strlen("kafka")) || 0==strncmp(key,"name",strlen("name"))){
-			monitor_value->kafka = json_object_get_int64(val);
-		}else if(0==strcmp(key,"integer")){
-			monitor_value->integer = json_object_get_int64(val);
-		}else if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"op",strlen("op"))){
-			// not to be processed here
-		}else if(0==strncmp(key,"system",strlen("system"))){
-			// not to be processed here
-		}else{
-			Log(LOG_ERR,"Cannot parse %s argument\n",key);
-		}
-		if(errno!=0){
-			Log(LOG_ERR,"Could not parse %s value: %s\n",key,strerror(errno));
-		}
-
-	} /* foreach */
-}
-
-
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
