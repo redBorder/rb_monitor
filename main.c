@@ -616,30 +616,30 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else if(!splittok)
 				{
-						process_novector_monitor(monitor_value);
+					process_novector_monitor(monitor_value);
 
-						monitor_value->sensor_name = sensor_data->sensor_name;
-						monitor_value->sensor_id   = sensor_data->sensor_id;
-						// @todo pass to another function
-						monitor_value->timestamp    = time(NULL);
-						monitor_value->value        = number;
-						monitor_value->string_value = rd_memctx_strdup(&monitor_value->memctx,value_buf);
+					monitor_value->sensor_name = sensor_data->sensor_name;
+					monitor_value->sensor_id   = sensor_data->sensor_id;
+					// @todo pass to another function
+					monitor_value->timestamp    = time(NULL);
+					monitor_value->value        = number;
+					monitor_value->string_value = rd_memctx_strdup(&monitor_value->memctx,value_buf);
 
-						if(monitor_value->get_response_fn)
-							monitor_value->get_response_fn(monitor_value,NULL,json_object_get_string(val));
-						else
-							Log(LOG_ERR,"monitor value does not have get_response_fn.");
+					if(monitor_value->get_response_fn)
+						monitor_value->get_response_fn(monitor_value,NULL,json_object_get_string(val));
+					else
+						Log(LOG_ERR,"monitor value does not have get_response_fn.");
 
-						process_monitor_value(monitor_value);
+					process_monitor_value(monitor_value);
 
-						struct monitor_value * old_mv = update_monitor_value(worker_info->monitor_values_tree,monitor_value);
-						if(monitor_value->kafka)
-							rd_lru_push(valueslist,(void *)monitor_value);
-						if(old_mv)
-						{
-							rd_memctx_freeall(&old_mv->memctx);
-							free(old_mv);
-						}
+					struct monitor_value * old_mv = update_monitor_value(worker_info->monitor_values_tree,monitor_value);
+					if(monitor_value->kafka)
+						rd_lru_push(valueslist,(void *)monitor_value);
+					if(old_mv)
+					{
+						rd_memctx_freeall(&old_mv->memctx);
+						free(old_mv);
+					}
 				}
 				else /* We have a vector here */
 				{ 
