@@ -45,13 +45,6 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 		dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
 }
 
-void add_sensor_data(struct monitor_value *this,const struct _sensor_data *sensor_data)
-{
-	this->sensor_name = sensor_data->sensor_name;
-	this->sensor_id = sensor_data->sensor_id;
-	this->sensor_id_valid = sensor_data->sensor_id_valid;
-}
-
 struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 {
 	struct printbuf * printbuf = printbuf_new();
@@ -93,12 +86,19 @@ int process_monitor_value(struct monitor_value *monitor_value)
 	if(monitor_value->string_value)
 	{
 		if(likely(strlen(monitor_value->string_value)!=0))
+		{
 			monitor_value->value = atof(monitor_value->string_value);
+			return 1;
+		}
 		else
+		{
 			Log(LOG_WARNING,"Not seeing %s value.\n", monitor_value->name);
+			return 0;
+		}
 	}
 	else
 	{
 		Log(LOG_WARNING,"NULL value in %s\n",monitor_value->name);
+		return 0;
 	}
 }

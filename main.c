@@ -265,27 +265,18 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 */
 
 // @todo pass just a monitor_value with all precached possible.
-int process_novector_monitor(struct monitor_value * monitor_value,struct _worker_info *worker_info,struct _sensor_data *sensor_data, struct libmatheval_stuffs *libmatheval_variables)
+// @todo this must be in rb_value.c
+int process_novector_monitor(struct monitor_value * monitor_value)
 {
-	int aok = 1;
-	if(1 || likely(libmatheval_append(libmatheval_variables,monitor_value->name,monitor_value->value)))
-	{
-		#ifdef MONITOR_VALUE_MAGIC
-		monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
-		#endif
-		add_sensor_data(monitor_value,sensor_data);
-		monitor_value->timestamp = time(NULL);
-		monitor_value->instance = 0;
-		monitor_value->instance_valid = 0;
-		monitor_value->bad_value = 0;
-	}
-	else
-	{
-		Log(LOG_ERR,"Error adding libmatheval value\n");
-		aok = 0;
-	}
+	#ifdef MONITOR_VALUE_MAGIC
+	monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
+	#endif
+	monitor_value->timestamp = time(NULL);
+	monitor_value->instance = 0;
+	monitor_value->instance_valid = 0;
+	monitor_value->bad_value = 0;
 
-	return aok;
+	return 1;
 }
 
 
@@ -488,25 +479,26 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 static inline void set_json_information(struct monitor_value *monitor_value,json_object *attributes_array)
 {
+	monitor_value->kafka = 1; // default
 	json_object_object_foreach(attributes_array,key,val)
 	{
 		errno=0;
 		if(0==strncmp(key,"split",strlen("split")+1)){
-			monitor_value->splittok = strdup(json_object_get_string(val));
+			monitor_value->splittok = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"split_op",strlen("split_op"))){
-			monitor_value->splitop = strdup(json_object_get_string(val));
+			monitor_value->splitop = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"name",strlen("name")+1)){ 
-			monitor_value->name = strdup(json_object_get_string(val));
+			monitor_value->name = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"name_split_suffix",strlen("name_split_suffix"))){
-			monitor_value->name_split_suffix = strdup(json_object_get_string(val));
+			monitor_value->name_split_suffix = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strcmp(key,"instance_prefix")){
-			monitor_value->instance_prefix = strdup(json_object_get_string(val));
+			monitor_value->instance_prefix = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"unit",strlen("unit"))){
-			monitor_value->unit = strdup(json_object_get_string(val));
+			monitor_value->unit = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"group_name",strlen("group_name"))){
-			monitor_value->group_name = strdup(json_object_get_string(val));
+			monitor_value->group_name = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strncmp(key,"group_id",strlen("group_id"))){
-			monitor_value->group_id = strdup(json_object_get_string(val));
+			monitor_value->group_id = rd_memctx_strdup(&monitor_value->memctx,json_object_get_string(val));
 		}else if(0==strcmp(key,"nonzero")){
 			monitor_value->nonzero = 1;
 		}else if(0==strcmp(key,"timestamp_given")){
@@ -535,11 +527,6 @@ static inline void set_json_information(struct monitor_value *monitor_value,json
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
 			json_object * monitors)
 {
-	struct monitor_value monitor_value;
-	memset(&monitor_value,0,sizeof(monitor_value));
-	#ifdef MONITOR_VALUE_MAGIC
-	monitor_value.magic=MONITOR_VALUE_MAGIC;
-	#endif
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
@@ -581,12 +568,19 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		uint64_t kafka=1,nonzero=0,timestamp_given=0,integer=0;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
-		double number;int valid_double;
-		const int need_double=1; // maybe you don't want a double
+		double number;
+
+		struct monitor_value * monitor_value = calloc(1,sizeof(struct monitor_value));
+		// memset(monitor_value,0,sizeof(*monitor_value));
+		#ifdef MONITOR_VALUE_MAGIC
+		monitor_value->magic=MONITOR_VALUE_MAGIC;
+		#endif
+		rd_memctx_init(&monitor_value->memctx,NULL,RD_MEMCTX_F_TRACK);
 
 		rd_lru_t * valueslist    = rd_lru_new();
 		
-		set_json_information(&monitor_value,monitor_parameters_array);
+		set_json_information(monitor_value,monitor_parameters_array);
+		set_sensor_information(monitor_value,sensor_data);
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
 			Log(LOG_ERR,"sensor name not setted. Skipping.\n");
@@ -598,7 +592,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			if(0==strncmp(key,"oid",strlen("oid")) || 0==strncmp(key,"system",strlen("system"))){
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
-				if(unlikely(!name && !monitor_value.name)){
+				if(unlikely(!name && !monitor_value->name)){
 					Log(LOG_WARNING,"name of param not set in %s. Skipping\n",
 						sensor_data->sensor_name);
 					break /*foreach*/;
@@ -609,11 +603,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(0==strcmp(key,"oid"))
 				{
 					type_fn = snmp_type_fn;
-					valid_double = snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
+					snmp_solve_response(value_buf,1024,&number,snmp_sessp,json_object_get_string(val));
 				}
 				else
 				{
-					monitor_value.get_response_fn = system_get_response;
+					monitor_value->get_response_fn = system_get_response;
 					// valid_double = system_solve_response(value_buf,1024,&number,NULL,json_object_get_string(val));
 				}
 
@@ -623,32 +617,37 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else if(!splittok)
 				{
-					if(!need_double || valid_double)
-					{
-						process_novector_monitor(&monitor_value,worker_info,sensor_data, libmatheval_variables);
+					// if(!need_double || valid_double)
+					// {
+						process_novector_monitor(monitor_value);
 
-						monitor_value.sensor_name = sensor_data->sensor_name;
-						monitor_value.sensor_id   = sensor_data->sensor_id;
+						monitor_value->sensor_name = sensor_data->sensor_name;
+						monitor_value->sensor_id   = sensor_data->sensor_id;
 						// @todo pass to another function
-						monitor_value.timestamp    = time(NULL);
-						monitor_value.value        = number;
-						monitor_value.string_value = strdup(value_buf);
+						monitor_value->timestamp    = time(NULL);
+						monitor_value->value        = number;
+						monitor_value->string_value = rd_memctx_strdup(&monitor_value->memctx,value_buf);
 
-						if(monitor_value.get_response_fn)
-							monitor_value.get_response_fn(&monitor_value,NULL,json_object_get_string(val));
+						if(monitor_value->get_response_fn)
+							monitor_value->get_response_fn(monitor_value,NULL,json_object_get_string(val));
 						else
 							Log(LOG_ERR,"monitor value does not have get_response_fn.");
 
-						process_monitor_value(&monitor_value);
+						process_monitor_value(monitor_value);
 
-						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-						if(monitor_value.kafka && new_mv)
-							rd_lru_push(valueslist,(void *)new_mv);
-					}
-					else
-					{
-						Log(LOG_WARNING,"Value of %s is not a number");
-					}
+						struct monitor_value * old_mv = update_monitor_value(worker_info->monitor_values_tree,monitor_value);
+						if(monitor_value->kafka)
+							rd_lru_push(valueslist,(void *)monitor_value);
+						if(old_mv)
+						{
+							rd_memctx_freeall(&old_mv->memctx);
+							free(old_mv);
+						}
+					// }
+					// else
+					// {
+					// 	Log(LOG_WARNING,"Value of %s is not a number");
+					// }
 				}
 				else /* We have a vector here */
 				{ 
@@ -861,7 +860,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								op_monitor_value.instance_valid = 0;
 								op_monitor_value.string_value=val_buf;
 							}
-							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,monitor_value);
 
 							if(kafka && new_mv)
 								rd_lru_push(valueslist,(void *)new_mv);
@@ -890,7 +889,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							op_monitor_value.instance_valid = 0;							
 							op_monitor_value.string_value=split_op_result;
 
-							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,monitor_value);
 
 							if(kafka && new_mv)
 								rd_lru_push(valueslist,(void *)new_mv);
