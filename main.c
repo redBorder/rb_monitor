@@ -487,6 +487,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 static inline void set_json_information(struct monitor_value *monitor_value,json_object *attributes_array)
 {
+	monitor_value->kafka = 1; // default
 	json_object_object_foreach(attributes_array,key,val)
 	{
 		errno=0;
