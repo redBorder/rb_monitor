@@ -272,7 +272,7 @@ int process_novector_monitor(struct monitor_value * monitor_value,struct _worker
 		#ifdef MONITOR_VALUE_MAGIC
 		monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
-		add_sensor_data(monitor_value,sensor_data);
+		set_sensor_information(monitor_value,sensor_data);
 		monitor_value->timestamp = time(NULL);
 		monitor_value->instance = 0;
 		monitor_value->instance_valid = 0;
@@ -587,6 +587,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		rd_lru_t * valueslist    = rd_lru_new();
 		
 		set_json_information(&monitor_value,monitor_parameters_array);
+		set_sensor_information(&monitor_value,sensor_data);
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
 			Log(LOG_ERR,"sensor name not setted. Skipping.\n");

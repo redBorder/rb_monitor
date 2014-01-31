@@ -65,9 +65,14 @@ struct monitor_value{
 	bool bad_value;
 };
 
-void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
+static void set_sensor_information(struct monitor_value *this,const struct _sensor_data *sensor_data)
+{
+	this->sensor_name = sensor_data->sensor_name;
+	this->sensor_id = sensor_data->sensor_id;
+	this->sensor_id_valid = sensor_data->sensor_id_valid;
+}
 
-void add_sensor_data(struct monitor_value *dst,const struct _sensor_data *sensor_data);
+void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
 
 int process_monitor_value(struct monitor_value *monitor_value);
 
