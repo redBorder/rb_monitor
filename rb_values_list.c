@@ -51,6 +51,12 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
+const struct monitor_value * find_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *node)
+{
+       return RD_AVL_FIND(tree->avl,node);
+}
+
+
 struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,struct monitor_value *new_mv)
 {
 	return RD_AVL_INSERT(tree->avl,new_mv,avl_node);

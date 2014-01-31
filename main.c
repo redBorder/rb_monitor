@@ -534,9 +534,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	memset(&memctx,0,sizeof(memctx));
 	rd_memctx_init(&memctx,NULL,RD_MEMCTX_F_TRACK);
 
-	const char *bad_names[json_object_array_length(monitors)]; /* ops cannot be added to libmatheval array.*/
-	size_t bad_names_pos = 0;
-
 	assert(sensor_data->sensor_name);
 	check_setted(sensor_data->peername,&aok,
 		"Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
@@ -564,7 +561,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		uint64_t kafka=1,nonzero=0,timestamp_given=0,integer=0;
+		uint64_t kafka=1,timestamp_given=0,integer=0;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
 		double number;
@@ -618,13 +615,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					process_novector_monitor(monitor_value);
 
-					monitor_value->sensor_name = sensor_data->sensor_name;
-					monitor_value->sensor_id   = sensor_data->sensor_id;
-					// @todo pass to another function
-					monitor_value->timestamp    = time(NULL);
-					monitor_value->value        = number;
-					monitor_value->string_value = rd_memctx_strdup(&monitor_value->memctx,value_buf);
-
 					if(monitor_value->get_response_fn)
 						monitor_value->get_response_fn(monitor_value,NULL,json_object_get_string(val));
 					else
@@ -646,13 +636,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
 					kafka,timestamp_given,type_fn,&memctx,integer);
-				}
-
-				if(nonzero && 0 == number)
-				{
-					Log(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
-					bad_names[bad_names_pos++] = name;
-					kafka=0;
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){ // @TODO sepparate in it's own function
 				monitor_value->get_response_fn = operation_get_response;

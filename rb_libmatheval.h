@@ -13,6 +13,8 @@ struct libmatheval_stuffs{
 	unsigned int total_lenght;
 };
 
+
+static struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size) __attribute__((unused));
 static struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 {
 	struct libmatheval_stuffs * this = calloc(1,sizeof(struct libmatheval_stuffs));
@@ -46,6 +48,7 @@ static struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 	return this;
 }
 
+static void delete_libmatheval_stuffs(struct libmatheval_stuffs *this) __attribute__((unused));
 static void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
 {
 	unsigned int i;
@@ -64,6 +67,7 @@ static void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
  * @return         1 in exit. 0 in other case (malloc error).
  */
 
+static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val) __attribute__((unused));
 static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
 	Log(LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
 						                                         name,val);
@@ -92,6 +96,7 @@ static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *na
 	return 1;
 }
 
+static int libmatheval_search_vector(char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size) __attribute__((unused));
 static int libmatheval_search_vector(char ** variables,size_t variables_count, const char *vector, size_t *pos,size_t *size)
 {
 	int state = 0; /* 0: searching; 1: counting length; 2:finished */
