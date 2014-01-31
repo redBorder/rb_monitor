@@ -65,6 +65,7 @@ struct monitor_value{
 	bool bad_value;
 };
 
+static void set_sensor_information(struct monitor_value *this,const struct _sensor_data *sensor_data) __attribute__((unused));
 static void set_sensor_information(struct monitor_value *this,const struct _sensor_data *sensor_data)
 {
 	this->sensor_name = sensor_data->sensor_name;
