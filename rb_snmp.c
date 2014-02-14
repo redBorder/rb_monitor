@@ -56,6 +56,7 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 			ss->community_len = strlen(config->community);
 			ss->timeout = config->timeout;
 			ss->flags = config->flags;
+			ss->version = config->version;
 		}
 		else
 		{
@@ -89,15 +90,15 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	assert(value_buf);
 	assert(number);
 	
-	if(NULL==response)
-	{
-		Log(LOG_ERR,"No SNMP response given.\n");
-	}
-	else if (status != STAT_SUCCESS)
+	if (status != STAT_SUCCESS)
 	{
 		Log(LOG_ERR,"Snmp error: %s\n", 
 			snmp_api_errstring(snmp_sess_session(session->sessp)->s_snmp_errno));
 		//Log(LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
+	}
+	else if(NULL==response)
+	{
+		Log(LOG_ERR,"No SNMP response given.\n");
 	}
 	else
 	{
@@ -130,9 +131,22 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	return ret;
 }
 
+int net_snmp_version(const char *string_version,const char *sensor_name){
+	if(string_version)
+	{
+		if(0==strcmp(string_version,"1"))
+			return SNMP_VERSION_1;
+		else if(0==strcmp(string_version,"2c"))
+			return SNMP_VERSION_2c;
+	}
+
+	Log(LOG_ERR,"Bad snmp version (%s) in sensor %s\n",string_version,sensor_name);
+	exit(1);
+	return SNMP_DEFAULT_VERSION;
+}
+
 void destroy_snmp_session(struct monitor_snmp_session * s)
 {
 	snmp_sess_close(s->sessp);
 	free(s);
-
 }

@@ -28,6 +28,7 @@ struct monitor_snmp_new_session_config{
 	const char * community;
 	int timeout;
 	int flags;
+	long version;
 };
 
 struct monitor_snmp_session;
@@ -45,5 +46,7 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *ss,const str
 int snmp_solve_response(char * value_buf,const size_t value_buf_len,
 	double * number,struct monitor_snmp_session * session,const char *oid_string);
 void destroy_snmp_session(struct monitor_snmp_session *);
+
+int net_snmp_version(const char *string_version,const char *sensor_name);
 
 static inline const char * snmp_type_fn(void){return "snmp";}
