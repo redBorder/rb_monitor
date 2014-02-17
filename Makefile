@@ -34,7 +34,7 @@ main.o:main.c rb_sensor_data.h rb_system.h rb_libmatheval.h rb_log.h rb_snmp.h r
 	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99
 
 rb_value.o:rb_value.c rb_value.h
-	$(CC) $(CFLAGS) -o $@ $< -c 
+	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99 
 
 rb_values_list.o:rb_values_list.c rb_values_list.h rb_value.h
 	$(CC) $(CFLAGS) -o $@ $< -c 
