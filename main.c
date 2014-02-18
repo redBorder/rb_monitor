@@ -265,13 +265,24 @@ int process_novector_monitor(struct monitor_value * monitor_value)
 	#ifdef MONITOR_VALUE_MAGIC
 	monitor_value->magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
-	monitor_value->timestamp = time(NULL);
-	monitor_value->instance = 0;
-	monitor_value->instance_valid = 0;
+	monitor_value->timestamp    = rd_memctx_calloc(&monitor_value->memctx,1,sizeof(monitor_value->timestamp[0]));
+	monitor_value->timestamp[0] = time(NULL);
 	monitor_value->bad_value = 0;
 	return 1;
 }
 
+static inline int countOccurences(const char *str,const char ch)
+{
+	assert(str);
+	int count = 0;
+	int i=0;
+	for(i=0;str[i]!='\0';i++)
+	{
+		if(str[i]==ch)
+			++count;
+	}
+	return count;
+}
 
 // @todo pass just a monitor_value with all precached possible.
 // @todo make a call to process_novector_monitor
@@ -317,6 +328,8 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	char per_instance_name[per_instance_name_len];
 	snprintf(per_instance_name,per_instance_name_len,"%s%s",name,name_split_suffix);
 
+	const size_t proposed_vector_length = countOccurences(value_buf,splittok[0]);
+	const size_t vector_length = proposed_vector_length==0 ? 1 : proposed_vector_length;
 
 	unsigned int count = 0,mean_count=0;
 	double sum=0;
@@ -354,7 +367,6 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 			if(tok && *tok)
 			{
-
 				errno=0;			
 				double tok_f = toDouble(tok);
 				if(errno==0)
@@ -366,13 +378,14 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 					
 					if(likely(0!=libmatheval_append(libmatheval_variables,tok_name,atof(tok))))
 					{
-						monitor_value.timestamp = timestamp;
+						monitor_value.timestamp = rd_memctx_calloc(&monitor_value.memctx,vector_length,sizeof(monitor_value.timestamp[0]));
+						monitor_value.timestamp[0] = timestamp;
 						monitor_value.name = tok_name;
 						monitor_value.send_name = per_instance_name;
 						monitor_value.instance = count;
 						monitor_value.instance_prefix = instance_prefix;
-						monitor_value.instance_valid = 1;
-						monitor_value.value=tok_f;
+						monitor_value.value = rd_memctx_calloc(&monitor_value.memctx,vector_length,sizeof(monitor_value.value[0]));
+						monitor_value.value[0]=tok_f;
 						monitor_value.string_value=tok;
 			
 						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
@@ -441,13 +454,14 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			}
 			else
 			{
-				monitor_value.timestamp = last_valid_timestamp;
+				monitor_value.timestamp    = rd_memctx_calloc(&monitor_value.memctx,vector_length,sizeof(monitor_value.timestamp[0]));
+				monitor_value.timestamp[0] = last_valid_timestamp;
 				monitor_value.name = name;
 				monitor_value.send_name = NULL;
 				monitor_value.instance = 0;
 				monitor_value.instance_prefix = NULL;
-				monitor_value.instance_valid = 0;
-				monitor_value.value=result;
+				monitor_value.value    = rd_memctx_calloc(&monitor_value.memctx,vector_length,sizeof(monitor_value.value[0]));
+				monitor_value.value[0] =result;
 				monitor_value.string_value=split_op_result;
 				monitor_value.group_name=group_name;
 				monitor_value.group_id=group_id;

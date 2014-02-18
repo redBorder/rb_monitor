@@ -73,5 +73,6 @@ static bool system_get_response(struct monitor_value *mv,void *unused __attribut
 	mv->type = system_type_fn;
 
 	mv->string_value = rd_memctx_calloc(&mv->memctx, bufsize, sizeof(char));
-	return system_solve_response(mv->string_value,bufsize,&mv->value,NULL,command);
+	mv->value = rd_memctx_calloc(&mv->memctx, bufsize, sizeof(char));
+	return system_solve_response(mv->string_value,bufsize,&mv->value[0],NULL,command);
 }

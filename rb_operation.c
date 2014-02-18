@@ -52,7 +52,7 @@ static bool fill_name_value_libmatheval_vector(struct monitor_values_tree *mv_tr
 		const struct monitor_value *tree_mv = find_monitor_value(mv_tree,&mv_tofind);
 		if(tree_mv)
 		{
-			values[i] = tree_mv->value;
+			values[i] = tree_mv->value[0];
 		}
 		else
 		{
@@ -71,9 +71,13 @@ static void do_operation(struct monitor_value *mv, struct monitor_values_tree *m
 	double *values= NULL;
 
 	evaluator_get_variables(evaluator,&names,&count);
-	mv->invalid_value = !fill_name_value_libmatheval_vector(mv_tree,(const char **)names,&values,count,mv);
-	if(!mv->invalid_value)
-		mv->value = evaluator_evaluate(evaluator, count, names, values);
+	mv->invalid_value = rd_memctx_calloc(&mv->memctx,1,sizeof(mv->invalid_value[0]));
+	mv->invalid_value[0] = !fill_name_value_libmatheval_vector(mv_tree,(const char **)names,&values,count,mv);
+	if(!mv->invalid_value[0])
+	{
+		mv->value = rd_memctx_calloc(&mv->memctx,1,sizeof(double));
+		mv->value[0] = evaluator_evaluate(evaluator, count, names, values);
+	}
 
 	free(values);
 }

@@ -7,6 +7,7 @@
 #include "librd/rdmem.h"
 #include <json/printbuf.h>
 
+#if 0
 /* Copy just the 'useful' data of the node, not list-related */
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)
 {
@@ -44,6 +45,7 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 	if(src->group_id) 
 		dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
 }
+#endif
 
 struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 {
@@ -61,12 +63,12 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->send_name);
 		else
 			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->name);
-		if(monitor_value->instance_valid && monitor_value->instance_prefix)
-			sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
+//		if(monitor_value->instance_valid && monitor_value->instance_prefix)
+//			sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
 		if(monitor_value->integer)
-			sprintbuf(printbuf, ",\"value\":%ld", (long int)monitor_value->value);
+			sprintbuf(printbuf, ",\"value\":%ld", monitor_value->value[0]);
 		else
-			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
+			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value[0]);
 		if(monitor_value->type)
 			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type());
 		if(monitor_value->unit)
@@ -87,11 +89,14 @@ int process_monitor_value(struct monitor_value *monitor_value)
 	{
 		if(likely(strlen(monitor_value->string_value)!=0))
 		{
-			monitor_value->value = atof(monitor_value->string_value);
+			monitor_value->vector_length = 1;
+			monitor_value->value    = rd_memctx_calloc(&monitor_value->memctx,1,sizeof(double));
+			monitor_value->value[0] = atof(monitor_value->string_value);
 			return 1;
 		}
 		else
 		{
+			monitor_value->vector_length = 0;
 			Log(LOG_WARNING,"Not seeing %s value.\n", monitor_value->name);
 			return 0;
 		}

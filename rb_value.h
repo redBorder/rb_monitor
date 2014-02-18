@@ -55,16 +55,16 @@ struct monitor_value{
 
 	/* response */
 	get_response_fn_t get_response_fn;
-	time_t timestamp;
-	bool invalid_value;
-	double value;
 	char * string_value;
 	const char * (*type)(void); // way that the value has been obtained
 
 	/* vector response */
+	int vector_length;
+	bool *invalid_value;
+	time_t *timestamp;
+	double *value;
 	unsigned int instance;
-	bool instance_valid;
-	bool bad_value;
+	bool *bad_value;
 };
 
 static void set_sensor_information(struct monitor_value *this,const struct _sensor_data *sensor_data) __attribute__((unused));
