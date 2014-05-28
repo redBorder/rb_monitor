@@ -279,8 +279,6 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 	return ret;
 }
 
-#if 0
-#ifndef NDEBUG
 /**
  * Message delivery report callback.
  * Called once for each message.
@@ -292,14 +290,11 @@ static void msg_delivered (rd_kafka_t *rk,
 			   void *opaque, void *msg_opaque) {
 	(void)payload,(void)msg_opaque;
 	if (error_code)
-		Log(opaque,LOG_DEBUG,"%% Message delivery failed: %s\n",
-		       rd_kafka_err2str(rk, error_code));
+		Log(LOG_ERR,"%% Message delivery failed: %s\n",
+		       rd_kafka_err2str(error_code));
 	else
-		Log(opaque,LOG_DEBUG,"%% Message delivered (%zd bytes)\n", len);
+		Log(LOG_DEBUG,"%% Message delivered (%zd bytes)\n", len);
 }
-
-#endif /* NDEBUG */
-#endif
 
 static inline void check_setted(const void *ptr,int *aok,const char *errmsg,const char *sensor_name)
 {
@@ -997,9 +992,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 			} /* for i in splittoks */
 
-			#ifndef NDEBUG
 			rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
-			#endif /* NDEBUG */
 
 
 		} /* if kafka */
@@ -1072,18 +1065,15 @@ void * worker(void *_info){
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
 
-	#if !defined(NDEBUG)
-	// conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
-	// conf.producer.dr_cb = msg_delivered;
-	#endif
+	rd_kafka_conf_set_dr_cb(conf,msg_delivered);
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
 		Log(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
 		pt_worker_info.thread_ok=0;
 	}
 
-	if(pt_worker_info.thread_ok && worker_info->debug_output_flags | DEBUG_SYSLOG)
-		rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
+	//if(pt_worker_info.thread_ok && worker_info->debug_output_flags | DEBUG_SYSLOG)
+	//	rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
 
 	if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
 		Log(LOG_ERR,"No valid brokers specified\n");
@@ -1146,8 +1136,8 @@ int main(int argc, char  *argv[])
 	struct json_object * default_config = json_tokener_parse( str_default_config );
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
+	
 	memset(&worker_info,0,sizeof(worker_info));
-
 	worker_info.rk_conf  = rd_kafka_conf_new();
 	worker_info.rkt_conf = rd_kafka_topic_conf_new();
 
