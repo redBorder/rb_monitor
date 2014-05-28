@@ -54,6 +54,9 @@
 
 #define VECTOR_SEP "_pos_"
 #define GROUP_SEP  "_gid_"
+
+#define CONFIG_RDKAFKA_KEY "rdkafka."
+
 const char * OPERATIONS = "+-*/&^|";
 
 static inline void swap(void **a,void **b){
@@ -107,6 +110,8 @@ struct _worker_info{
 	pthread_mutex_t snmp_session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
 	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
+	rd_kafka_conf_t * rk_conf;
+	rd_kafka_topic_conf_t * rkt_conf;
 	int64_t sleep_worker,max_snmp_fails,timeout,debug,debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
@@ -158,6 +163,38 @@ void printHelp(const char * progName){
 		"\n",
 		progName);
 }
+
+static void parse_rdkafka_keyval_config(rd_kafka_conf_t *rk_conf,rd_kafka_topic_conf_t *rkt_conf,
+													const char *key,const char *value){
+	// Extracted from Magnus Edenhill's kafkacat 
+	rd_kafka_conf_res_t res;
+	char errstr[512];
+
+	const char *name = key + strlen(CONFIG_RDKAFKA_KEY);
+
+	res = RD_KAFKA_CONF_UNKNOWN;
+	/* Try "topic." prefixed properties on topic
+	 * conf first, and then fall through to global if
+	 * it didnt match a topic configuration property. */
+	if (!strncmp(name, "topic.", strlen("topic.")))
+		res = rd_kafka_topic_conf_set(rkt_conf,
+					      name+strlen("topic."),
+					      value,errstr,sizeof(errstr));
+
+	if (res == RD_KAFKA_CONF_UNKNOWN)
+		res = rd_kafka_conf_set(rk_conf, name, value,
+					errstr, sizeof(errstr));
+
+	if (res != RD_KAFKA_CONF_OK)
+		Log(LOG_ERR,"rdkafka: %s\n", errstr);
+}
+
+static void parse_rdkafka_config_json(struct _worker_info *worker_info,
+							const char *key,json_object *jvalue){
+	const char *value = json_object_get_string(jvalue);
+	parse_rdkafka_keyval_config(worker_info->rk_conf,worker_info->rkt_conf,key,value);
+}
+
 
 json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
 	                                          struct _main_info *main_info){
@@ -223,7 +260,13 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
 		{
 			worker_info->sleep_worker = json_object_get_int64(val);
-		}else{
+		}
+		else if (0==strncmp(key, CONFIG_RDKAFKA_KEY, strlen(CONFIG_RDKAFKA_KEY)))
+		{
+			parse_rdkafka_config_json(worker_info,key,val);
+		}
+		else
+		{
 			Log(LOG_ERR,"Don't know what config.%s key means.\n",key);
 		}
 		
@@ -993,7 +1036,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 			pt_worker_info->sensor_data.community = json_object_get_string(val);
 		}else if(0==strncmp(key,"snmp_version",strlen("snmp_version"))){
 			const char *string_version = json_object_get_string(val);
-			pt_worker_info->sensor_data.snmp_version = net_snmp_version(string_version,sensor_name);
+			pt_worker_info->sensor_data.snmp_version = net_snmp_version(string_version,pt_worker_info->sensor_data.sensor_name);
 		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
 			monitors = val;
 		}else {
@@ -1023,8 +1066,8 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	rd_kafka_conf_t * conf = rd_kafka_conf_new();
-	rd_kafka_topic_conf_t * topic_conf = rd_kafka_topic_conf_new();
+	rd_kafka_conf_t * conf = rd_kafka_conf_dup(worker_info->rk_conf);
+	rd_kafka_topic_conf_t * topic_conf = rd_kafka_topic_conf_dup(worker_info->rkt_conf);
 	char errstr[256];
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
@@ -1033,22 +1076,6 @@ void * worker(void *_info){
 	// conf.opaque = worker_info; /* Change msg_delivered function if you change this! */
 	// conf.producer.dr_cb = msg_delivered;
 	#endif
-
-	const rd_kafka_conf_res_t confset = 
-		rd_kafka_conf_set (conf,"message.send.max.retries",worker_info->max_kafka_fails,
-		errstr, sizeof errstr);
-
-	switch(confset)
-	{
-		case RD_KAFKA_CONF_UNKNOWN: /* Unknown configuration name. */
-			Log(LOG_EMERG,"Error in line %d, invalid name. FIX\n",__LINE__);
-			break;
-		case RD_KAFKA_CONF_INVALID:
-			Log(LOG_ERR,"Error in configuration file. Value not valid in max_kafka_fails.\n");
-			break;
-		case RD_KAFKA_CONF_OK:
-			break; /* AOK */
-	}
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
 		Log(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
@@ -1120,6 +1147,10 @@ int main(int argc, char  *argv[])
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
 	memset(&worker_info,0,sizeof(worker_info));
+
+	worker_info.rk_conf  = rd_kafka_conf_new();
+	worker_info.rkt_conf = rd_kafka_topic_conf_new();
+
 	assert(default_config);
 	pthread_t * pd_thread = NULL;
 	rd_fifoq_t queue = {{0}};
