@@ -1,6 +1,7 @@
 // rb_value.c
 
 #include "rb_value.h"
+#include "rb_log.h"
 
 #include "librd/rdmem.h"
 #include <json/printbuf.h>
@@ -35,6 +36,67 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 		dst->group_name      = rd_memctx_strdup(&dst->memctx,src->group_name);
 	if(src->group_id) 
 		dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
+	dst->enrichment          = src->enrichment;
+}
+
+/// @TODO we should print all with this function
+static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_object *_enrichment)
+{
+	json_object *enrichment = (json_object *)_enrichment;
+
+	char *key; struct json_object *val; struct lh_entry *entry;
+	for(entry = json_object_get_object(enrichment)->head; 
+		(entry ? (key = (char*)entry->k, val = (struct json_object*)entry->v, entry) : 0); 
+		entry = entry->next){
+	//json_object_object_foreach(enrichment,key,val) {
+		const json_type type = json_object_get_type(val);
+		switch(type){
+			case json_type_string:
+			{
+				const char *str = json_object_get_string(val);
+				if(NULL == str) {
+					Log(LOG_ERR,"Cannot extract string value of enrichment key %s\n",key);
+				} else {
+					sprintbuf(printbuf, ",\"%s\":\"%s\"",key,str);
+				}
+				break;
+			}
+			case json_type_int:
+			{
+				errno = 0;
+				int64_t integer = json_object_get_int64(val);
+				if(errno != 0) {
+					Log(LOG_ERR,"Cannot extract int value of enrichment key %s\n",key);
+				} else {
+					sprintbuf(printbuf, ",\"%s\":%ld",key,integer);
+				}
+				break;
+			}
+			case json_type_null:
+			{	
+				sprintbuf(printbuf, ",\"%s\":null",key);
+				break;
+			}
+			case json_type_boolean:
+			{
+				const json_bool b = json_object_get_boolean(val);
+				sprintbuf(printbuf, ",\"%s\":%s",key,b==FALSE ? "false" : "true");
+				break;
+			}
+			case json_type_double:
+			{
+				const double d = json_object_get_double(val);
+				sprintbuf(printbuf, ",\"%s\":%lf",key,d);
+				break;
+			}
+			case json_type_object:
+			case json_type_array:
+			{
+				Log(LOG_ERR,"Can't enrich with objects/array at this time\n");
+				break;
+			}
+		};
+	}
 }
 
 struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
@@ -67,6 +129,8 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 			sprintbuf(printbuf, ",\"group_name\":\"%s\"", monitor_value->group_name);
 		if(monitor_value->group_id)   
 			sprintbuf(printbuf, ",\"group_id\":%s", monitor_value->group_id);
+		if(monitor_value->enrichment)
+			print_monitor_value_enrichment(printbuf,monitor_value->enrichment);
 		sprintbuf(printbuf, "}");
 	}
 

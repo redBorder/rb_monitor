@@ -2,11 +2,16 @@
 
 #pragma once
 
-#include "librd/rdlru.h"
-#include "librd/rdavl.h"
-#include "librd/rdmem.h"
+#include <signal.h>
+#include <pthread.h>
+#include <librd/rdtypes.h>
+#include <librd/rdlru.h>
+#include <librd/rdavl.h>
+#include <librd/rdmem.h>
 
 #include <stdbool.h>
+#include <json/json.h>
+
 
 // #define MONITOR_VALUE_MAGIC 0x12345678
 
@@ -32,6 +37,9 @@ struct monitor_value{
 	const char * group_name;
 	const char * group_id;
 	bool integer;
+
+	/* enrichment */
+	const json_object *enrichment;
 
 	/* response */
 	time_t timestamp;

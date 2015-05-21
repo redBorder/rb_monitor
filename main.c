@@ -120,7 +120,8 @@ struct _worker_info{
 
 struct _sensor_data{
 	int timeout;
-	const char * peername; 
+	const char * peername;
+	json_object * enrichment;
 	const char * sensor_name;
 	bool sensor_id_valid;
 	uint64_t sensor_id;
@@ -288,7 +289,7 @@ static void msg_delivered (rd_kafka_t *rk,
 			   void *payload, size_t len,
 			   int error_code,
 			   void *opaque, void *msg_opaque) {
-	(void)payload,(void)msg_opaque;
+	(void)rk,(void)opaque,(void)payload,(void)msg_opaque;
 	if (error_code)
 		Log(LOG_ERR,"%% Message delivery failed: %s\n",
 		       rd_kafka_err2str(error_code));
@@ -313,7 +314,7 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 // @todo pass just a monitor_value with all precached possible.
 int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,
-	const char *(*type)(void),int kafka,int integer)
+	const char *(*type)(void),const json_object *enrichment,int kafka,int integer)
 {
 	int aok = 1;
 	if(likely(libmatheval_append(libmatheval_variables,name,value)))
@@ -338,6 +339,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.group_id=group_id;
 		monitor_value.integer=integer;
 		monitor_value.type = type;
+		monitor_value.enrichment = enrichment;
 		
 		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
@@ -358,7 +360,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 // @todo make a call to process_novector_monitor
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * name_split_suffix,const char * splitop,int kafka,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
+	const char * instance_prefix,const char * name_split_suffix,const char * splitop,const json_object *enrichment,int kafka,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
 {
 	assert(worker_info);
 	assert(sensor_data);
@@ -393,6 +395,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.group_id=group_id;
 	monitor_value.integer=integer;
 	monitor_value.type = type;
+	monitor_value.enrichment = enrichment;
 
 	const size_t per_instance_name_len = strlen(name) + (name_split_suffix?strlen(name_split_suffix):0) + 1;
 	char per_instance_name[per_instance_name_len];
@@ -685,7 +688,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(!need_double || valid_double)
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,kafka,integer);
+						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,
+						pt_worker_info->sensor_data.enrichment,kafka,integer);
 					}
 					else
 					{
@@ -696,7 +700,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					kafka,timestamp_given,type_fn,&memctx,integer);
+					pt_worker_info->sensor_data.enrichment,kafka,timestamp_given,type_fn,&memctx,integer);
 				}
 
 				if(nonzero && 0 == number)
@@ -786,6 +790,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					monitor_value.group_name=group_name;
 					monitor_value.group_id=group_id;
 					monitor_value.type = op_type;
+					monitor_value.enrichment = sensor_data->enrichment;
 
 					for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 					{
@@ -1032,6 +1037,8 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 			pt_worker_info->sensor_data.snmp_version = net_snmp_version(string_version,pt_worker_info->sensor_data.sensor_name);
 		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
 			monitors = val;
+		}else if(0==strncmp(key,"enrichment", strlen("enrichment"))){
+			pt_worker_info->sensor_data.enrichment = val;
 		}else {
 			Log(LOG_ERR,"Cannot parse %s argument\n",key);
 			aok=0;
