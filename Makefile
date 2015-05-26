@@ -1,53 +1,33 @@
-PROGNAME=rb_monitor
 
-all: $(PROGNAME) 
+include Makefile.config
 
-CC ?= cc
-CFLAGS ?= -g -W -Wall -Wno-missing-field-initializers -DWITH_LIBRD -DNDEBUG -Os
+BIN = rb_monitor
 
-PREFIX?=/opt/rb
-LIBRDKAFKA_INCLUDES ?= /opt/rb/include
-LIBRD_INCLUDES ?= /opt/rb/include
-LIBRDKAFKA_LIBRARIES ?= /opt/rb/lib
-LIBRD_LIBRARIES ?= /opt/rb/lib
+SRCS = main.c rb_log.c rb_snmp.c rb_value.c rb_values_list.c
+OBJS = $(SRCS:.c=.o)
 
-CFLAGS+= -I${LIBRDKAFKA_INCLUDES} -I${LIBRD_INCLUDES}
-LDFLAGS+= -L${LIBRDKAFKA_LIBRARIES} -L${LIBRD_LIBRARIES}
+.PHONY: version.c tests
 
-OBJECTS=rb_snmp.o rb_value.o rb_values_list.o rb_log.o main.o
+all: $(BIN)
 
-.PHONY: clean tests install
+include mklove/Makefile.base
 
-clean: 
-	-rm -rf $(PROGNAME) $(OBJECTS)
+version.c: 
+	@rm -f $@
+	@echo "const char *nprobe_revision=\"`git describe --abbrev=6 --tags HEAD --always`\";" >> $@
+	@echo "const char *version=\"6.13.`date +"%y%m%d"`\";" >> $@
 
-rb_log.o:rb_log.c rb_log.h
-	$(CC) $(CFLAGS) -o $@ $< -c
+clean: bin-clean
 
-rb_snmp.o:rb_snmp.c rb_snmp.h
-	$(CC) $(CFLAGS) -o $@ $< -c
-
-main.o:main.c
-	$(CC) $(CFLAGS) -o $@ $< -c -std=gnu99
-
-rb_value.o:rb_value.c rb_value.h
-	$(CC) $(CFLAGS) -o $@ $< -c 
-
-rb_values_list.o:rb_values_list.c rb_values_list.h
-	$(CC) $(CFLAGS) -o $@ $< -c 
-
-$(PROGNAME): $(OBJECTS) rb_libmatheval.h rb_system.h 
-	$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LDFLAGS) -ljson -lpthread -lrd -lrt -lz -lsnmp -lrdkafka -lmatheval 
-
-install:
-	install -t $(PREFIX)/bin $(PROGNAME)
+install: bin-install
 
 TESTS = tests/test01.json tests/test02.json tests/test03.json tests/test04.json \
         tests/test05.json tests/test06.json tests/test07.json tests/test08.json \
         tests/test09.json tests/test10.json tests/test11.json tests/test12.json
 
-
 test: $(PROGNAME)
 	for test in ${TESTS}; do \
 	  sh test.sh ${PROGNAME} $$test; \
         done
+
+-include $(DEPS)
