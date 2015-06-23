@@ -163,7 +163,6 @@ static void leader_useful_string(const struct String_vector *strings,const char 
     Log(LOG_ERR,"Can't find last '/' of our path [%s]. Exiting.",my_str);
   }
 
-
   for(i=0;i<strings->count;++i) {
     if(strings->data[i] == NULL) {
       continue;
@@ -333,6 +332,9 @@ static void reset_zk_context(struct rb_monitor_zk *context) {
     }
   }
 
+  override_leader_node(context,NULL);
+  context->i_am_leader = 0;
+
   context->handler = zookeeper_init(context->zk_host, zk_watcher, zk_read_timeout, 0, context, 0);
   context->need_to_reconnect = 0;
 }
@@ -383,7 +385,6 @@ struct rb_monitor_zk *init_zk(char *host,uint64_t pop_watcher_timeout,
   pthread_mutex_init(&_zk->ntr_mutex,NULL);
   reset_zk_context(_zk);
   pthread_create(&_zk->zk_thread, NULL, zk_ok_watcher, _zk);
-
 
   if(NULL == _zk->handler) {
     strerror_r(errno,strerror_buf,sizeof(strerror_buf));
