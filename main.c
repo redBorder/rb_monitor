@@ -19,11 +19,17 @@
 ** Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#include "config.h"
+
 #include "rb_system.h"
 #include "rb_libmatheval.h"
 #include "rb_log.h"
 #include "rb_snmp.h"
 #include "rb_values_list.h"
+
+#ifdef HAVE_ZOOKEEPER
+#include "rb_zk.h"
+#endif
 
 #include <stdlib.h>
 #include <json/json.h>
@@ -56,6 +62,7 @@
 #define GROUP_SEP  "_gid_"
 
 #define CONFIG_RDKAFKA_KEY "rdkafka."
+#define CONFIG_ZOOKEEPER_KEY "zookeeper"
 
 const char * OPERATIONS = "+-*/&^|";
 
@@ -139,6 +146,9 @@ struct _perthread_worker_info{
 struct _main_info{
 	const char * syslog_indent;
 	int64_t sleep_main,threads;
+#ifdef HAVE_ZOOKEEPER
+	struct rb_monitor_zk *zk;
+#endif
 };
 
 int run = 1;
@@ -195,6 +205,44 @@ static void parse_rdkafka_config_json(struct _worker_info *worker_info,
 	const char *value = json_object_get_string(jvalue);
 	parse_rdkafka_keyval_config(worker_info->rk_conf,worker_info->rkt_conf,key,value);
 }
+
+#ifdef HAVE_ZOOKEEPER
+static void parse_zookeeper_json(struct _main_info *main_info, json_object *zk_config) {
+	char *host = NULL;
+	uint64_t pop_watcher_timeout = 0,push_timeout = 0;
+	json_object *zk_sensors = NULL;
+
+	json_object_object_foreach(zk_config, key, val) {
+		if(0 == strcmp(key, "host")) {
+			host = strdup(json_object_get_string(val));
+		} else if(0 == strcmp(key, "pop_watcher_timeout")) {
+			pop_watcher_timeout = json_object_get_int64(val);
+		} else if(0 == strcmp(key, "push_timeout")) {
+			push_timeout = json_object_get_int64(val);
+		} else if(0 == strcmp(key, "sensors")) {
+			zk_sensors = val;
+		} else {
+			Log(LOG_ERR,"Don't know what zookeeper config.%s key means.\n",key);
+		}
+		
+		if(errno!=0)
+		{
+			Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+			return;
+		}
+	}
+
+	if(NULL == host) {
+		Log(LOG_ERR,"No zookeeper host specified. Can't use ZK.");
+		return;
+	} else if (0 == push_timeout) {
+		Log(LOG_INFO,"No pop push_timeout specified. We will never be ZK masters.");
+		return;
+	}
+
+	main_info->zk = init_zk(host,pop_watcher_timeout,push_timeout,zk_sensors);
+}
+#endif
 
 
 json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
@@ -1139,7 +1187,7 @@ int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
 	char opt;
-	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL;
+	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL,*zk=NULL;
 	struct json_object * default_config = json_tokener_parse( str_default_config );
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
@@ -1208,6 +1256,14 @@ int main(int argc, char  *argv[])
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
+	}
+
+	if(FALSE != json_object_object_get_ex(config_file,"zookeeper",&zk)) {
+#ifndef HAVE_ZOOKEEPER
+			Log(LOG_ERR,"This monitor does not have zookeeper enabled.");
+#else
+			parse_zookeeper_json(&main_info,zk);
+#endif
 	}
 
 	snmp_sess_init(&worker_info.default_session); /* set defaults */
