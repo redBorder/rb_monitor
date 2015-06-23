@@ -1,0 +1,63 @@
+#!/bin/bash
+#
+
+#mkl_require good_cflags
+mkl_require gitversion as GITVERSION
+mkl_require atomics must pass
+
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-DFORTIFY_SOURCE=2"
+mkl_mkvar_append CPPFLAGS CPPFLAGS "-DNDEBUG"
+mkl_mkvar_append CPPFLAGS CPPFLAGS "-std=gnu99"
+
+
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-ftrack-macro-expansion=2 -Wextra -Wcast-qual -Wshadow -Wsign-conversion -Wno-used"
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wjump-misses-init" # New in gcc 4.5
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wdouble-promotion" # New in gcc 4.6
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wunused-local-typedefs" # New in gcc 4.7
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wcast-align -Wdisabled-optimization -Winit-self -Wlogical-op"
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wmissing-include-dirs -Wstrict-overflow=5 -Wundef -Wswitch-default" 
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wmissing-declarations -Wdisabled-optimization" 
+
+mkl_toggle_option "Standard" WITH_ZOOKEEPER "--enable-zookeeper"   "Apache Zookeeper support" "n"
+
+function checks {
+    mkl_define_set "OS name" "osName" "`uname`"
+
+    mkl_lib_check "librd" "" fail CC "-lrd -lpthread -lz -lrt"
+    mkl_lib_check "pcap" "" fail CC "-lpcap"
+
+    mkl_lib_check pthread HAVE_LIBPTHREAD fail CC "-lpthread" \
+        "#include <pthread.h> 
+         void *f();void *f(){return pthread_mutex_init;}"
+
+    mkl_lib_check json HAVE_JSON_C fail CC "-ljson" \
+        "#include #include <json/json.h>"
+
+    # Check that librdkafka is available, and allow to link it statically.
+    mkl_meta_set "librdkafka" "desc" "librdkafka is available at http://github.com/edenhill/librdkafka."
+    mkl_meta_set "librdkafka" "deb" "librdkafka-dev"
+    mkl_lib_check --static=-lrdkafka "librdkafka" "" fail CC "-lrdkafka -lpthread -lz" \
+       "#include <librdkafka/rdkafka.h>"
+
+    mkl_meta_set "librd" "desc" "librd is available at http://github.com/edenhill/librd."
+    mkl_meta_set "librd" "deb" "librdkafka-dev"
+    mkl_lib_check --static=-lrd "librd" "" fail CC "-lrd -lrt -lz" \
+       "#include <librd/rd.h>"
+
+    mkl_lib_check --static=-lmatheval "libmatheval" "" fail CC "-lmatheval" \
+       "#include <matheval.h>"
+
+
+    mkl_lib_check --static=-lsnmp "net_snmp" "" fail CC "-lsnmp" \
+       "#include <net-snmp/net-snmp-config.h>
+       #include <net-snmp/net-snmp-includes.h>"
+
+    mkl_meta_set "zookeeper" "desc" "Zookeeper development libraries"
+    mkl_meta_set "zookeeper" "deb" "libzookeeper-mt-dev"
+    if [ "x$WITH_ZOOKEEPER" == "xy" ]; then
+        mkl_lib_check "zookeeper" HAVE_ZOOKEEPER fail CC "-lzookeeper_mt" \
+            "#include <zookeeper/zookeeper.h>"
+        mkl_define_set "Zookeeper Support" "HAVE_ZOOKEEPER" "1"
+    fi
+
+}
