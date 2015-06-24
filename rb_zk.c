@@ -33,7 +33,8 @@
 #include <string.h>
 #include <errno.h>
 
-#define RB_MONITOR_ZK_MAGIC 0xAB4598CF54L
+#define RB_ZK_MAGIC 0xAB4598CF54L
+#define RB_MONITOR_ZK_LOCK_MAGIC 0xB0100CA1C0100CA1L
 
 /* Zookeeper path to save data */
 /** @TODO need to delete this!! */
@@ -76,6 +77,28 @@ static const char* type2String(int type){
   return "UNKNOWN_EVENT_TYPE";
 }
 
+struct rb_zk_mutex {
+#ifdef RB_MONITOR_ZK_LOCK_MAGIC
+  uint64_t magic;
+#endif
+  char *path;
+  int i_am_leader;
+
+  void *opaque;
+};
+
+static int rb_zk_mutex_lock_locked(const struct rb_zk_mutex *lock) {
+  return lock->i_am_leader;
+}
+
+static int rb_zk_mutex_set_lock(struct rb_zk_mutex *lock) {
+  lock->i_am_leader = 1;
+}
+
+static int rb_zk_mutex_unset_lock(struct rb_zk_mutex *lock) {
+  lock->i_am_leader = 0;
+}
+
 struct rb_zk {
 #ifdef RB_ZK_MAGIC
   uint64_t magic;
@@ -85,9 +108,7 @@ struct rb_zk {
   zhandle_t *handler;
   pthread_t zk_thread;
 
-  /// @TODO reset function that set to 0 this fields
-  char *my_leader_node;
-  int i_am_leader;
+  struct rb_zk_mutex master_lock;
 
   /* Reconnect related signal */
   pthread_cond_t ntr_cond;
@@ -112,19 +133,19 @@ static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
   pthread_cond_signal(&context->ntr_cond);
 }
 
-static int override_leader_node(struct rb_zk *context,const char *leader_node) {
-  if(context->my_leader_node){
-    free(context->my_leader_node);
+static int override_leader_node(struct rb_zk_mutex *lock,const char *leader_node) {
+  if(lock->path){
+    free(lock->path);
   }
 
   if(leader_node){
-    context->my_leader_node = strdup(leader_node);
-    if(NULL == context->my_leader_node) {
+    lock->path = strdup(leader_node);
+    if(NULL == lock->path) {
       Log(LOG_ERR,"Can't strdup string (out of memory?)");
       return -1;
     }
   } else {
-    context->my_leader_node = NULL;
+    lock->path = NULL;
   }
 
   return 0;
@@ -133,7 +154,7 @@ static int override_leader_node(struct rb_zk *context,const char *leader_node) {
 static struct rb_zk *monitor_zc_casting(void *_ctx){
   struct rb_zk *context = _ctx;
 #ifdef RB_ZK_MAGIC
-  assert(RB_MONITOR_ZK_MAGIC == context->magic);
+  assert(RB_ZK_MAGIC == context->magic);
 #endif
 
   return context;
@@ -225,10 +246,10 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   }
 
   const char *bef_str = NULL;
-  leader_useful_string(strings,context->my_leader_node,&bef_str);
+  leader_useful_string(strings,context->master_lock.path,&bef_str);
   if(NULL == bef_str){
     Log(LOG_INFO,"I'm the leader here");
-    context->i_am_leader = 1;
+    rb_zk_mutex_set_lock(&context->master_lock);
   } else {
     char buf[BUFSIZ];
     snprintf(buf,sizeof(buf),"%s/%s",ZOOKEEPER_LEADER_PATH,bef_str);
@@ -259,7 +280,7 @@ static void create_master_node_complete(int rc, const char *leader_node, const v
     return;
   }
 
-  const int override_rc = override_leader_node(context,leader_node);
+  const int override_rc = override_leader_node(&context->master_lock,leader_node);
   if(0 != override_rc) {
     Log(LOG_ERR,"Error overriding leading node");
     rb_monitor_zk_async_reconnect(context);
@@ -355,11 +376,12 @@ static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
     }
   }
 
-  override_leader_node(context,NULL);
-  context->i_am_leader = 0;
+  override_leader_node(&context->master_lock,NULL);
+  rb_zk_mutex_unset_lock(&context->master_lock);
 
   context->handler = zookeeper_init(context->zk_host, zk_watcher, zk_read_timeout, 0, context, 0);
   context->need_to_reconnect = 0;
+  context->master_lock.opaque = context;
 }
 
 /// @TODO use client id too.
