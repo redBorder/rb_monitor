@@ -35,9 +35,6 @@ static const char ZOOKEEPER_LEADER_LEAF_NAME[] = "leader_prop_";
 static const int zk_read_timeout = 10000;
 
 struct rb_monitor_zk {
-#ifdef RB_MONITOR_ZK_MAGIC
-  uint64_t magic;
-#endif
   char *zk_host;
   time_t pop_watcher_timeout,push_timeout;
 
