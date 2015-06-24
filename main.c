@@ -28,7 +28,7 @@
 #include "rb_values_list.h"
 
 #ifdef HAVE_ZOOKEEPER
-#include "rb_zk.h"
+#include "rb_monitor_zk.h"
 #endif
 
 #include <stdlib.h>
@@ -240,7 +240,7 @@ static void parse_zookeeper_json(struct _main_info *main_info, json_object *zk_c
 		return;
 	}
 
-	main_info->zk = init_zk(host,pop_watcher_timeout,push_timeout,zk_sensors);
+	main_info->zk = init_rbmon_zk(host,pop_watcher_timeout,push_timeout,zk_sensors);
 }
 #endif
 

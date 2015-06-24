@@ -21,17 +21,15 @@
 #pragma once
 
 #include "config.h"
-#include <zookeeper/zookeeper.h>
 
-struct rb_zk;
-struct rb_zk *rb_zk_init(char *host,int timeout);
+#ifdef HAVE_ZOOKEEPER
 
-int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
-    int valuelen,const struct ACL_vector *acl,int flags,char *path_buffer,
-    int path_buffer_len);
+#include <json/json.h>
 
-int rb_zk_create_recursive_node(struct rb_zk *zk,const char *path,int flags);
+struct rb_monitor_zk;
+struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
+  uint64_t push_timeout,json_object *zk_sensors);
 
-void rb_zk_done(struct rb_zk *zk);
+void stop_zk(struct rb_monitor_zk *zk);
 
-
+#endif
