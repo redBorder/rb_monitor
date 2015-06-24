@@ -34,7 +34,7 @@
 #include <errno.h>
 
 #define RB_ZK_MAGIC 0xAB4598CF54L
-#define RB_MONITOR_ZK_LOCK_MAGIC 0xB0100CA1C0100CA1L
+#define RB_ZK_MUTEX_MAGIC 0xB0100CA1C0100CA1L
 
 /* Zookeeper path to save data */
 /** @TODO need to delete this!! */
@@ -77,15 +77,33 @@ static const char* type2String(int type){
   return "UNKNOWN_EVENT_TYPE";
 }
 
+struct rb_zk;
 struct rb_zk_mutex {
-#ifdef RB_MONITOR_ZK_LOCK_MAGIC
+#ifdef RB_ZK_MUTEX_MAGIC
   uint64_t magic;
 #endif
   char *path;
   int i_am_leader;
 
-  void *opaque;
+  struct rb_zk *context;
 };
+
+static struct rb_zk_mutex *monitor_zc_mutex_casting(void *_ctx){
+  struct rb_zk_mutex *context = _ctx;
+#ifdef RB_ZK_MUTEX_MAGIC
+  assert(RB_ZK_MUTEX_MAGIC == context->magic);
+#endif
+
+  return context;
+}
+
+// Need to do this way because zookeeper imposed const, even when in it's doc
+// says that we have to take care of free memory.
+static struct rb_zk_mutex *monitor_zc_mutex_const_casting(const void *_ctx){
+  struct rb_zk_mutex *context = NULL;
+  memcpy(&context,&_ctx,sizeof(context));
+  return context;
+}
 
 static int rb_zk_mutex_lock_locked(const struct rb_zk_mutex *lock) {
   return lock->i_am_leader;
@@ -160,14 +178,6 @@ static struct rb_zk *monitor_zc_casting(void *_ctx){
   return context;
 }
 
-// Need to do this way because zookeeper imposed const, even when in it's doc
-// says that we have to take care of free memory.
-static struct rb_zk *monitor_zc_const_casting(const void *_ctx){
-  struct rb_zk *context = NULL;
-  memcpy(&context,&_ctx,sizeof(context));
-  return context;
-}
-
 /*
  *   MASTERING
  */
@@ -184,15 +194,15 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
                                                                    const void *data);
 
 static void previous_leader_watcher(zhandle_t *zh, int type, int state, const char *path, 
-                                                                      void *_context) {
+                                                                      void *_mutex) {
   char buf[BUFSIZ];
   snprintf(buf,sizeof(buf),"%s",path);
   parent_node(buf);
 
-  struct rb_zk *context = monitor_zc_casting(_context);
   /* Something happens with previous leader. Check if we are the new master */
-  zoo_aget_children(context->handler,buf,0,
-                       leader_get_children_complete,context);
+  struct rb_zk_mutex *mutex = monitor_zc_mutex_casting(_mutex);
+  zoo_aget_children(mutex->context->handler,buf,0,
+                       leader_get_children_complete,_mutex);
 
 }
 
@@ -236,8 +246,8 @@ static void leader_useful_string(const struct String_vector *strings,const char 
   }
 }
 
-static void leader_get_children_complete(int rc, const struct String_vector *strings, const void *data) {
-  struct rb_zk *context = monitor_zc_const_casting(data);
+static void leader_get_children_complete(int rc, const struct String_vector *strings, const void *_mutex) {
+  struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
   if(0 != rc) {
     Log(LOG_ERR,"Can't get leader children list (%d)",rc);
@@ -246,63 +256,62 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   }
 
   const char *bef_str = NULL;
-  leader_useful_string(strings,context->master_lock.path,&bef_str);
+  leader_useful_string(strings,mutex->path,&bef_str);
   if(NULL == bef_str){
     Log(LOG_INFO,"I'm the leader here");
-    rb_zk_mutex_set_lock(&context->master_lock);
+    rb_zk_mutex_set_lock(mutex);
   } else {
     char buf[BUFSIZ];
     snprintf(buf,sizeof(buf),"%s/%s",ZOOKEEPER_LEADER_PATH,bef_str);
 
     struct Stat stat;
     Log(LOG_INFO,"I'm not the leader. Trying to watch %s",buf);
-    const int wget_rc = zoo_wexists(context->handler,buf,
-                          previous_leader_watcher,context,&stat);
+    const int wget_rc = zoo_wexists(mutex->context->handler,buf,
+                          previous_leader_watcher,mutex,&stat);
     if(wget_rc != 0) {
       Log(LOG_ERR,"Can't wget [rc = %d]",wget_rc);
-      rb_monitor_zk_async_reconnect(context);
+      rb_monitor_zk_async_reconnect(mutex->context);
     }
   }
 }
 
-static void create_master_node_complete(int rc, const char *leader_node, const void *_context) {
-  struct rb_zk *context = monitor_zc_const_casting(_context);
+static void create_master_node_complete(int rc, const char *leader_node, const void *_mutex) {
+  struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
   if(rc != 0) {
     Log(LOG_ERR,"Couldn't create leader node. rc = %d",rc);
-    rb_monitor_zk_async_reconnect(context);
+    rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
   if(NULL == leader_node) {
     Log(LOG_ERR,"NULL path when returning");
-    rb_monitor_zk_async_reconnect(context);
+    rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
-  const int override_rc = override_leader_node(&context->master_lock,leader_node);
+  const int override_rc = override_leader_node(mutex,leader_node);
   if(0 != override_rc) {
     Log(LOG_ERR,"Error overriding leading node");
-    rb_monitor_zk_async_reconnect(context);
+    rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
   Log(LOG_DEBUG,"ZK connected. Trying to be the leader.");
 
-  zoo_aget_children(context->handler,ZOOKEEPER_LEADER_PATH,0,
-                       leader_get_children_complete,context);
+  zoo_aget_children(mutex->context->handler,ZOOKEEPER_LEADER_PATH,0,
+                       leader_get_children_complete,mutex);
 }
 
-static void try_to_be_master(zhandle_t *zh,struct rb_zk *_context) {
+static void try_to_be_master(zhandle_t *zh,struct rb_zk *context) {
   char path[BUFSIZ];
   struct ACL_vector acl;
-  struct rb_zk *context = monitor_zc_casting(_context);
 
   snprintf(path,sizeof(path),"%s/%s",ZOOKEEPER_LEADER_PATH,ZOOKEEPER_LEADER_LEAF_NAME);
   memcpy(&acl,&ZOO_OPEN_ACL_UNSAFE,sizeof(acl));
 
   const int acreate_rc = zoo_acreate(zh,path,"",0,&acl,ZOO_EPHEMERAL|ZOO_SEQUENCE,
-    create_master_node_complete,_context);
+    create_master_node_complete,&context->master_lock);
   if(ZOK != acreate_rc) {
     Log(LOG_ERR,"Can't call acreate (%d)",acreate_rc);
     rb_monitor_zk_async_reconnect(context);
@@ -381,7 +390,13 @@ static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
 
   context->handler = zookeeper_init(context->zk_host, zk_watcher, zk_read_timeout, 0, context, 0);
   context->need_to_reconnect = 0;
-  context->master_lock.opaque = context;
+#ifdef RB_ZK_MAGIC
+  context->magic = RB_ZK_MAGIC;
+#endif
+#ifdef RB_ZK_MUTEX_MAGIC
+  context->master_lock.magic = RB_ZK_MUTEX_MAGIC;
+#endif
+  context->master_lock.context = context;
 }
 
 /// @TODO use client id too.
