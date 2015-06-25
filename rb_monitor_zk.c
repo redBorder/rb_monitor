@@ -29,12 +29,18 @@
 /* Zookeeper path to save data */
 static const char ZOOKEEPER_TASKS_PATH[]  = "/rb_monitor/tasks";
 static const char ZOOKEEPER_LOCK_PATH[]   = "/rb_monitor/lock";
-static const char ZOOKEEPER_LEADER_PATH[] = "/rb_monitor/leader";
-static const char ZOOKEEPER_LEADER_LEAF_NAME[] = "leader_prop_";
+#define ZOOKEEPER_LEADER_PATH "/rb_monitor/leader"
+#define ZOOKEEPER_LEADER_LEAF_NAME ZOOKEEPER_LEADER_PATH "/leader_prop_"
+
+#define RB_MONITOR_ZK_MAGIC 0xB010A1C0B010A1C0L
 
 static const int zk_read_timeout = 10000;
 
 struct rb_monitor_zk {
+#ifdef RB_MONITOR_ZK_MAGIC
+	uint64_t magic;
+#endif
+
   char *zk_host;
   time_t pop_watcher_timeout,push_timeout;
 
@@ -45,9 +51,41 @@ struct rb_monitor_zk {
   struct rb_zk *zk_handler;
 };
 
+struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
+	struct rb_monitor_zk *b=a;
+#ifdef RB_MONITOR_ZK_MAGIC
+	assert(RB_MONITOR_ZK_MAGIC == b->magic);
+#endif
+	return b;
+}
+
+static void try_to_be_master(struct rb_monitor_zk *rb_mzk);
+
+static void leader_lock_status_chage_cb(struct rb_zk_mutex *mutex,void *opaque) {
+	struct rb_monitor_zk *monitor_zk = rb_monitor_zk_casting(opaque);
+
+	monitor_zk->i_am_leader = rb_zk_mutex_obtained(mutex);
+
+	Log(LOG_DEBUG,"Mutex %s status change: %d\n",rb_zk_mutex_path(mutex),
+		rb_zk_mutex_obtained(mutex));
+}
+
+static void leader_lock_error_cb(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
+	const char *cause,int rc,void *opaque) {
+  struct rb_monitor_zk *monitor_zk = rb_monitor_zk_casting(opaque);
+
+	Log(LOG_ERR,"Can't get ZK leader status: [%s][rc=%d]\n",cause,rc);
+	try_to_be_master(monitor_zk);
+}
+
+static void try_to_be_master(struct rb_monitor_zk *rb_mzk) {
+  rb_zk_mutex_lock(rb_mzk->zk_handler,ZOOKEEPER_LEADER_LEAF_NAME,
+  leader_lock_status_chage_cb,leader_lock_error_cb,rb_mzk);
+}
+
 /* Prepare zookeeper structure */
 static int zk_prepare(struct rb_zk *zh) {
-  Log(LOG_DEBUG,"Preparing zookeeper structure");
+  Log(LOG_DEBUG,"Preparing zookeeper structure\n");
   rb_zk_create_recursive_node(zh,ZOOKEEPER_TASKS_PATH,0);
   rb_zk_create_recursive_node(zh,ZOOKEEPER_LOCK_PATH,0);
   rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
@@ -61,7 +99,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
 
   struct rb_monitor_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
-    Log(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
+    Log(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)\n");
   }
 
 #ifdef RB_MONITOR_ZK_MAGIC
@@ -79,6 +117,8 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   } else {
     Log(LOG_ERR,"Connected to ZooKeeper %s",_zk->zk_host);
   }
+
   zk_prepare(_zk->zk_handler);
+  try_to_be_master(_zk);
 }
 

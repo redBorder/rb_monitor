@@ -27,6 +27,8 @@
 /// @TODO need to delete this dependence
 #include "rb_log.h"
 
+#include <librd/rdavl.h>
+#include <librd/rdsysqueue.h>
 #include <stdint.h>
 #include <zookeeper/zookeeper.h>
 #include <pthread.h>
@@ -36,12 +38,7 @@
 #define RB_ZK_MAGIC 0xAB4598CF54L
 #define RB_ZK_MUTEX_MAGIC 0xB0100CA1C0100CA1L
 
-/* Zookeeper path to save data */
-/** @TODO need to delete this!! */
-static const char ZOOKEEPER_TASKS_PATH[]  = "/rb_monitor/tasks";
-static const char ZOOKEEPER_LOCK_PATH[]   = "/rb_monitor/lock";
-static const char ZOOKEEPER_LEADER_PATH[] = "/rb_monitor/leader";
-static const char ZOOKEEPER_LEADER_LEAF_NAME[] = "leader_prop_";
+static const char ZOOKEEPER_LOCK_NODE_CONTENT[] = "";
 
 static const char* state2String(int state){
   if (state == 0)
@@ -77,7 +74,10 @@ static const char* type2String(int type){
   return "UNKNOWN_EVENT_TYPE";
 }
 
-struct rb_zk;
+/*
+ * ZOOKEEPER MUTEX
+ */
+
 struct rb_zk_mutex {
 #ifdef RB_ZK_MUTEX_MAGIC
   uint64_t magic;
@@ -85,8 +85,31 @@ struct rb_zk_mutex {
   char *path;
   int i_am_leader;
 
+  rb_mutex_status_change_cb schange_cb;
+  rb_mutex_error_cb error_cb;
+  void *cb_opaque;
+
+  rd_avl_node_t avl_node;
+  TAILQ_ENTRY(rb_zk_mutex) list_entry;
   struct rb_zk *context;
 };
+
+typedef TAILQ_HEAD(,rb_zk_mutex) rb_zk_mutex_list;
+#define rb_zk_mutex_list_init(list) TAILQ_INIT(list)
+#define rb_zk_mutex_list_foreach(i,list) TAILQ_FOREACH(i,list,list_entry)
+#define rb_zk_mutex_list_foreach_safe(i,aux,list) \
+                                TAILQ_FOREACH_SAFE(i,aux,list,list_entry)
+#define rb_zk_mutex_list_insert(list,i) TAILQ_INSERT_TAIL(list,i,list_entry)
+#define rb_zk_mutex_list_remove(list,i) TAILQ_REMOVE(list,i,list_entry)
+
+static void rb_zk_mutex_done(struct rb_zk_mutex *mutex) {
+  free(mutex->path);
+  free(mutex);
+}
+
+const char *rb_zk_mutex_path(struct rb_zk_mutex *mutex) {
+  return mutex->path;
+}
 
 static struct rb_zk_mutex *monitor_zc_mutex_casting(void *_ctx){
   struct rb_zk_mutex *context = _ctx;
@@ -95,6 +118,10 @@ static struct rb_zk_mutex *monitor_zc_mutex_casting(void *_ctx){
 #endif
 
   return context;
+}
+
+int rb_zk_mutex_obtained(struct rb_zk_mutex *mutex) {
+  return mutex->i_am_leader;
 }
 
 // Need to do this way because zookeeper imposed const, even when in it's doc
@@ -117,6 +144,13 @@ static int rb_zk_mutex_unset_lock(struct rb_zk_mutex *lock) {
   lock->i_am_leader = 0;
 }
 
+static int rb_zk_mutex_cmp(const void *_m1,const void *_m2) {
+  const struct rb_zk_mutex *m1 = monitor_zc_mutex_const_casting(_m1);
+  const struct rb_zk_mutex *m2 = monitor_zc_mutex_const_casting(_m2);
+
+  return strcmp(m1->path,m2->path);
+}
+
 struct rb_zk {
 #ifdef RB_ZK_MAGIC
   uint64_t magic;
@@ -126,7 +160,13 @@ struct rb_zk {
   zhandle_t *handler;
   pthread_t zk_thread;
 
-  struct rb_zk_mutex master_lock;
+  pthread_rwlock_t leaders_lock;
+  rb_zk_mutex_list leaders_nodes_list;
+  rd_avl_t leaders_avl;
+
+  // Leaders added when ZK was down
+  pthread_mutex_t pending_leaders_lock;
+  rb_zk_mutex_list pending_leaders;
 
   /* Reconnect related signal */
   pthread_cond_t ntr_cond;
@@ -142,6 +182,14 @@ int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
     path_buffer_len);
 }
 
+static void rb_zk_mutex_error_done(struct rb_zk *zk,struct rb_zk_mutex *mutex,
+  int rc,const char *error) {
+    pthread_rwlock_wrlock(&zk->leaders_lock);
+    RD_AVL_REMOVE_ELM(&zk->leaders_avl,mutex);
+    rb_zk_mutex_list_remove(&zk->leaders_nodes_list, mutex);
+    pthread_rwlock_unlock(&zk->leaders_lock);
+    mutex->error_cb(zk,mutex,error,rc,mutex->cb_opaque);
+}
 
 /// send async reconnect signal
 static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
@@ -258,24 +306,27 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   const char *bef_str = NULL;
   leader_useful_string(strings,mutex->path,&bef_str);
   if(NULL == bef_str){
-    Log(LOG_INFO,"I'm the leader here");
+    // I'm the lower node -> I'm the leader here
     rb_zk_mutex_set_lock(mutex);
+    mutex->schange_cb(mutex,mutex->cb_opaque);
   } else {
-    char buf[BUFSIZ];
-    snprintf(buf,sizeof(buf),"%s/%s",ZOOKEEPER_LEADER_PATH,bef_str);
+    char buf_path[BUFSIZ],prev_node_path[BUFSIZ];
+    snprintf(buf_path,sizeof(buf_path),"%s",rb_zk_mutex_path(mutex),bef_str);
+    parent_node(buf_path);
+    snprintf(prev_node_path,sizeof(prev_node_path),"%s/%s",buf_path,bef_str);
 
     struct Stat stat;
-    Log(LOG_INFO,"I'm not the leader. Trying to watch %s",buf);
-    const int wget_rc = zoo_wexists(mutex->context->handler,buf,
+    Log(LOG_INFO,"I'm not the leader. Trying to watch %s\n",prev_node_path);
+    const int wget_rc = zoo_wexists(mutex->context->handler,prev_node_path,
                           previous_leader_watcher,mutex,&stat);
     if(wget_rc != 0) {
-      Log(LOG_ERR,"Can't wget [rc = %d]",wget_rc);
-      rb_monitor_zk_async_reconnect(mutex->context);
+      rb_zk_mutex_error_done(mutex->context,mutex,wget_rc,"Can't wget previous node");
     }
   }
 }
 
-static void create_master_node_complete(int rc, const char *leader_node, const void *_mutex) {
+static void create_mutex_node_complete(int rc, const char *leader_node, const void *_mutex) {
+  char buf[BUFSIZ];
   struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
   if(rc != 0) {
@@ -299,22 +350,120 @@ static void create_master_node_complete(int rc, const char *leader_node, const v
 
   Log(LOG_DEBUG,"ZK connected. Trying to be the leader.");
 
-  zoo_aget_children(mutex->context->handler,ZOOKEEPER_LEADER_PATH,0,
-                       leader_get_children_complete,mutex);
+  /* Chopping entry if needed */
+  /// @TODO control all snprintf output
+  snprintf(buf,sizeof(buf),"%s",rb_zk_mutex_path(mutex));
+  parent_node(buf);
+
+  const int aget_children_rc = zoo_aget_children(mutex->context->handler,
+              buf,0,leader_get_children_complete,mutex);
+
+  if(aget_children_rc != 0) {
+    rb_zk_mutex_error_done(mutex->context,mutex,rc,"Couldn't aget children");
+  }
 }
 
-static void try_to_be_master(zhandle_t *zh,struct rb_zk *context) {
-  char path[BUFSIZ];
-  struct ACL_vector acl;
+static struct rb_zk_mutex *rb_zk_mutex_create_entry(struct rb_zk *zk,const char *leader_path,
+      rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb, void *cb_opaque) {
+  assert(zk);
+  assert(leader_path);
 
-  snprintf(path,sizeof(path),"%s/%s",ZOOKEEPER_LEADER_PATH,ZOOKEEPER_LEADER_LEAF_NAME);
+  /// @TODO use rd_memctx_calloc to save callocs calls
+  struct rb_zk_mutex *mutex = calloc(1,sizeof(*mutex));
+  if(mutex == NULL) {
+    return NULL;
+  }
+
+#ifdef RB_ZK_MUTEX_MAGIC
+  mutex->magic = RB_ZK_MUTEX_MAGIC;
+#endif
+  mutex->path = strdup(leader_path);
+  if(mutex->path == NULL) {
+    goto err;
+  }
+
+  mutex->schange_cb = schange_cb;
+  mutex->error_cb  = error_cb;
+  mutex->cb_opaque = cb_opaque;
+  mutex->context = zk;
+
+  return mutex;
+err:
+  free(mutex);
+  return NULL;
+}
+
+static void rb_zk_mutex_lock0(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
+  struct ACL_vector acl;
   memcpy(&acl,&ZOO_OPEN_ACL_UNSAFE,sizeof(acl));
 
-  const int acreate_rc = zoo_acreate(zh,path,"",0,&acl,ZOO_EPHEMERAL|ZOO_SEQUENCE,
-    create_master_node_complete,&context->master_lock);
+  const int acreate_rc = zoo_acreate(zk->handler,rb_zk_mutex_path(mutex),
+    ZOOKEEPER_LOCK_NODE_CONTENT,strlen(ZOOKEEPER_LOCK_NODE_CONTENT),
+    &acl,ZOO_EPHEMERAL|ZOO_SEQUENCE,
+    create_mutex_node_complete,mutex);
+
   if(ZOK != acreate_rc) {
-    Log(LOG_ERR,"Can't call acreate (%d)",acreate_rc);
+    rb_zk_mutex_error_done(zk,mutex,acreate_rc,"Can't call acreate");
+    rb_zk_mutex_done(mutex);
+  } else {
+    Log(LOG_DEBUG,"acreate called successfuly for path %s\n",rb_zk_mutex_path(mutex));
+  }
+}
+
+void rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
+  rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque) {
+  
+  struct rb_zk_mutex *_mutex = rb_zk_mutex_create_entry(zk,leader_path,
+                                            schange_cb,error_cb,cb_opaque);
+  rb_zk_mutex_list_insert(&zk->pending_leaders,_mutex);
+  /// @TODO signal
+}
+
+static void zk_watcher_do_pending_locks(struct rb_zk *context) {
+  struct rb_zk_mutex *i=NULL,*aux=NULL;
+
+  if(zoo_state(context->handler) != ZOO_CONNECTED_STATE)
+    return; //still can't do anything
+  
+  pthread_mutex_lock(&context->pending_leaders_lock);
+  pthread_rwlock_wrlock(&context->leaders_lock);
+  rb_zk_mutex_list_foreach_safe(i,aux,&context->pending_leaders) {
+    rb_zk_mutex_list_remove(&context->pending_leaders,i);
+    rb_zk_mutex_list_insert(&context->leaders_nodes_list,i);
+    rb_zk_mutex_lock0(context,i);
+
+  }
+  pthread_rwlock_unlock(&context->leaders_lock);
+  pthread_mutex_unlock(&context->pending_leaders_lock);
+}
+
+static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
+  char buf[BUFSIZ];
+  struct rb_zk_mutex *i=NULL,*aux=NULL;
+  rb_zk_mutex_list mutex_list_aux;
+
+  snprintf(buf,sizeof(buf),"ZK disconnected [type=%s][state=%s]",
+    type2String(type),state2String(state));
+  
+  pthread_rwlock_wrlock(&context->leaders_lock);
+  mutex_list_aux = context->leaders_nodes_list;
+  rb_zk_mutex_list_init(&context->leaders_nodes_list);
+  rd_avl_init(&context->leaders_avl,context->leaders_avl.ravl_cmp,
+                                            context->leaders_avl.ravl_flags);
+  pthread_rwlock_unlock(&context->leaders_lock);
+
+  if(type == ZOO_SESSION_EVENT && state == ZOO_EXPIRED_SESSION_STATE) {
+    Log(LOG_ERR,"Trying to reconnect\n");
     rb_monitor_zk_async_reconnect(context);
+  }
+
+  // Notifying status change
+  rb_zk_mutex_list_foreach_safe(i,aux,&mutex_list_aux) {
+    i->i_am_leader = 0;
+    i->schange_cb(i,i->cb_opaque);
+    i->error_cb(i->context,i,buf,state,i->cb_opaque);
+
+    rb_zk_mutex_done(i);
   }
 }
 
@@ -323,17 +472,16 @@ static void zk_watcher(zhandle_t *zh, int type, int state, const char *path,
 
   struct rb_zk *context = monitor_zc_casting(_context);
 
-  if(type == ZOO_SESSION_EVENT && state == ZOO_CONNECTED_STATE){
-    Log(LOG_DEBUG,"ZK connected. Trying to be the leader.");
+  if(type == ZOO_SESSION_EVENT && state == ZOO_CONNECTED_STATE) {
+    Log(LOG_DEBUG,"ZK connected. Adding pending mutex.\n");
     context->need_to_reconnect = 0;
-    try_to_be_master(zh,context);
+    /// @TODO better if we signal
+    zk_watcher_do_pending_locks(context);
   } else {
     Log(LOG_ERR,"Can't connect to ZK: [type: %d (%s)][state: %d (%s)]",
       type,type2String(type),state,state2String(state));
-    if(type == ZOO_SESSION_EVENT && state == ZOO_EXPIRED_SESSION_STATE) {
-      Log(LOG_ERR,"Trying to reconnect");
-      rb_monitor_zk_async_reconnect(context);
-    }
+
+    zk_watcher_clean_mutex(context,type,state);
   }
 
   zoo_set_watcher(zh,zk_watcher);
@@ -385,18 +533,8 @@ static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
     }
   }
 
-  override_leader_node(&context->master_lock,NULL);
-  rb_zk_mutex_unset_lock(&context->master_lock);
-
   context->handler = zookeeper_init(context->zk_host, zk_watcher, zk_read_timeout, 0, context, 0);
   context->need_to_reconnect = 0;
-#ifdef RB_ZK_MAGIC
-  context->magic = RB_ZK_MAGIC;
-#endif
-#ifdef RB_ZK_MUTEX_MAGIC
-  context->master_lock.magic = RB_ZK_MUTEX_MAGIC;
-#endif
-  context->master_lock.context = context;
 }
 
 /// @TODO use client id too.
@@ -408,10 +546,15 @@ static void*zk_ok_watcher(void *_context) {
       .tv_sec = 1, .tv_nsec=0
     };
 
+    /// @TODO we need to do a decent tasks queue
+    zk_watcher_do_pending_locks(context);
+
     /// @TODO be able to exit from here
     if(context->need_to_reconnect)
       reset_zk_context(context,context->zk_timeout);
+    pthread_mutex_lock(&context->ntr_mutex);
     pthread_cond_timedwait(&context->ntr_cond,&context->ntr_mutex,&ts);
+    pthread_mutex_unlock(&context->ntr_mutex);
   }
 }
 
@@ -432,6 +575,10 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
   _zk->zk_host = host;
   pthread_cond_init(&_zk->ntr_cond,NULL);
   pthread_mutex_init(&_zk->ntr_mutex,NULL);
+  rd_avl_init(&_zk->leaders_avl,rb_zk_mutex_cmp,0);
+  rb_zk_mutex_list_init(&_zk->leaders_nodes_list);
+  rb_zk_mutex_list_init(&_zk->pending_leaders);
+  _zk->zk_timeout = zk_timeout;
   reset_zk_context(_zk,zk_timeout);
   pthread_create(&_zk->zk_thread, NULL, zk_ok_watcher, _zk);
 
