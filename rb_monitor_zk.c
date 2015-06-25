@@ -21,8 +21,9 @@
 #include "rb_monitor_zk.h"
 
 #include "rb_zk.h"
-#include "rb_log.h"
 
+#include <librd/rdlog.h>
+#include <assert.h>
 #include <string.h>
 #include <errno.h>
 
@@ -66,7 +67,7 @@ static void leader_lock_status_chage_cb(struct rb_zk_mutex *mutex,void *opaque) 
 
 	monitor_zk->i_am_leader = rb_zk_mutex_obtained(mutex);
 
-	Log(LOG_DEBUG,"Mutex %s status change: %d\n",rb_zk_mutex_path(mutex),
+	rdlog(LOG_DEBUG,"Mutex %s status change: %d",rb_zk_mutex_path(mutex),
 		rb_zk_mutex_obtained(mutex));
 }
 
@@ -74,7 +75,7 @@ static void leader_lock_error_cb(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
 	const char *cause,int rc,void *opaque) {
   struct rb_monitor_zk *monitor_zk = rb_monitor_zk_casting(opaque);
 
-	Log(LOG_ERR,"Can't get ZK leader status: [%s][rc=%d]\n",cause,rc);
+	rdlog(LOG_ERR,"Can't get ZK leader status: [%s][rc=%d]",cause,rc);
 	try_to_be_master(monitor_zk);
 }
 
@@ -85,7 +86,7 @@ static void try_to_be_master(struct rb_monitor_zk *rb_mzk) {
 
 /* Prepare zookeeper structure */
 static int zk_prepare(struct rb_zk *zh) {
-  Log(LOG_DEBUG,"Preparing zookeeper structure\n");
+  rdlog(LOG_DEBUG,"Preparing zookeeper structure");
   rb_zk_create_recursive_node(zh,ZOOKEEPER_TASKS_PATH,0);
   rb_zk_create_recursive_node(zh,ZOOKEEPER_LOCK_PATH,0);
   rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
@@ -99,7 +100,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
 
   struct rb_monitor_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
-    Log(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)\n");
+    rdlog(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
   }
 
 #ifdef RB_MONITOR_ZK_MAGIC
@@ -113,9 +114,9 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
 
   if(NULL == _zk->zk_handler) {
     strerror_r(errno,strerror_buf,sizeof(strerror_buf));
-    Log(LOG_ERR,"Can't init zookeeper: [%s].",strerror_buf);
+    rdlog(LOG_ERR,"Can't init zookeeper: [%s].",strerror_buf);
   } else {
-    Log(LOG_ERR,"Connected to ZooKeeper %s",_zk->zk_host);
+    rdlog(LOG_ERR,"Connected to ZooKeeper %s",_zk->zk_host);
   }
 
   zk_prepare(_zk->zk_handler);

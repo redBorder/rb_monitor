@@ -19,7 +19,7 @@
 ** Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
-#include "rb_log.h"
+#include <librd/rdlog.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,17 +58,17 @@ static int system_solve_response(char * buff,const size_t buff_size,
 	FILE * fp = popen(command, "r");
 	if(NULL==fp)
 	{
-		Log(LOG_ERR,"Cannot get system command.");
+		rdlog(LOG_ERR,"Cannot get system command.");
 	}
 	else
 	{
 		if(NULL==fgets(buff, buff_size, fp))
 		{
-			Log(LOG_ERR,"Cannot get buffer information");
+			rdlog(LOG_ERR,"Cannot get buffer information");
 		}
 		else
 		{
-			Log(LOG_DEBUG,"System response: %s",buff);
+			rdlog(LOG_DEBUG,"System response: %s",buff);
 			trim_end(buff);
 			char * endPtr;
 			*number = strtod(buff,&endPtr);

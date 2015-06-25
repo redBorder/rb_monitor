@@ -25,8 +25,8 @@
 
 #include "rb_zk.h"
 /// @TODO need to delete this dependence
-#include "rb_log.h"
 
+#include <librd/rdlog.h>
 #include <librd/rdavl.h>
 #include <librd/rdsysqueue.h>
 #include <stdint.h>
@@ -207,7 +207,7 @@ static int override_leader_node(struct rb_zk_mutex *lock,const char *leader_node
   if(leader_node){
     lock->path = strdup(leader_node);
     if(NULL == lock->path) {
-      Log(LOG_ERR,"Can't strdup string (out of memory?)");
+      rdlog(LOG_ERR,"Can't strdup string (out of memory?)");
       return -1;
     }
   } else {
@@ -262,7 +262,7 @@ static void leader_useful_string(const struct String_vector *strings,const char 
   if(_my_str) {
     _my_str++;
   } else {
-    Log(LOG_ERR,"Can't find last '/' of our path [%s]. Exiting.",my_str);
+    rdlog(LOG_ERR,"Can't find last '/' of our path [%s]. Exiting.",my_str);
   }
 
   for(i=0;i<strings->count;++i) {
@@ -298,7 +298,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
   if(0 != rc) {
-    Log(LOG_ERR,"Can't get leader children list (%d)",rc);
+    rdlog(LOG_ERR,"Can't get leader children list (%d)",rc);
     
     return;
   }
@@ -316,7 +316,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
     snprintf(prev_node_path,sizeof(prev_node_path),"%s/%s",buf_path,bef_str);
 
     struct Stat stat;
-    Log(LOG_INFO,"I'm not the leader. Trying to watch %s\n",prev_node_path);
+    rdlog(LOG_INFO,"I'm not the leader. Trying to watch %s",prev_node_path);
     const int wget_rc = zoo_wexists(mutex->context->handler,prev_node_path,
                           previous_leader_watcher,mutex,&stat);
     if(wget_rc != 0) {
@@ -330,25 +330,25 @@ static void create_mutex_node_complete(int rc, const char *leader_node, const vo
   struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
   if(rc != 0) {
-    Log(LOG_ERR,"Couldn't create leader node. rc = %d",rc);
+    rdlog(LOG_ERR,"Couldn't create leader node. rc = %d",rc);
     rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
   if(NULL == leader_node) {
-    Log(LOG_ERR,"NULL path when returning");
+    rdlog(LOG_ERR,"NULL path when returning");
     rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
   const int override_rc = override_leader_node(mutex,leader_node);
   if(0 != override_rc) {
-    Log(LOG_ERR,"Error overriding leading node");
+    rdlog(LOG_ERR,"Error overriding leading node");
     rb_monitor_zk_async_reconnect(mutex->context);
     return;
   }
 
-  Log(LOG_DEBUG,"ZK connected. Trying to be the leader.");
+  rdlog(LOG_DEBUG,"ZK connected. Trying to be the leader.");
 
   /* Chopping entry if needed */
   /// @TODO control all snprintf output
@@ -406,7 +406,7 @@ static void rb_zk_mutex_lock0(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
     rb_zk_mutex_error_done(zk,mutex,acreate_rc,"Can't call acreate");
     rb_zk_mutex_done(mutex);
   } else {
-    Log(LOG_DEBUG,"acreate called successfuly for path %s\n",rb_zk_mutex_path(mutex));
+    rdlog(LOG_DEBUG,"acreate called successfuly for path %s",rb_zk_mutex_path(mutex));
   }
 }
 
@@ -453,7 +453,7 @@ static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
   pthread_rwlock_unlock(&context->leaders_lock);
 
   if(type == ZOO_SESSION_EVENT && state == ZOO_EXPIRED_SESSION_STATE) {
-    Log(LOG_ERR,"Trying to reconnect\n");
+    rdlog(LOG_ERR,"Trying to reconnect");
     rb_monitor_zk_async_reconnect(context);
   }
 
@@ -473,12 +473,12 @@ static void zk_watcher(zhandle_t *zh, int type, int state, const char *path,
   struct rb_zk *context = monitor_zc_casting(_context);
 
   if(type == ZOO_SESSION_EVENT && state == ZOO_CONNECTED_STATE) {
-    Log(LOG_DEBUG,"ZK connected. Adding pending mutex.\n");
+    rdlog(LOG_DEBUG,"ZK connected. Adding pending mutex.");
     context->need_to_reconnect = 0;
     /// @TODO better if we signal
     zk_watcher_do_pending_locks(context);
   } else {
-    Log(LOG_ERR,"Can't connect to ZK: [type: %d (%s)][state: %d (%s)]",
+    rdlog(LOG_ERR,"Can't connect to ZK: [type: %d (%s)][state: %d (%s)]",
       type,type2String(type),state,state2String(state));
 
     zk_watcher_clean_mutex(context,type,state);
@@ -509,7 +509,7 @@ int rb_zk_create_recursive_node(struct rb_zk *context,const char *node,int flags
 
     if(create_rc != ZOK) {
       if(create_rc != ZNODEEXISTS)
-        Log(LOG_ERR,"Can't create zookeeper path [%s]: %s",node,zerror(create_rc));
+        rdlog(LOG_ERR,"Can't create zookeeper path [%s]: %s",node,zerror(create_rc));
     }
 
     if(cursor) {
@@ -525,11 +525,11 @@ int rb_zk_create_recursive_node(struct rb_zk *context,const char *node,int flags
 
 /// @TODO use client_id
 static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
-  Log(LOG_INFO,"Resetting ZooKeeper connection");
+  rdlog(LOG_INFO,"Resetting ZooKeeper connection");
   if(context->handler) {
     const int close_rc = zookeeper_close(context->handler);
     if(close_rc != 0) {
-      Log(LOG_ERR,"Error closing ZK connection [rc=%d]",close_rc);
+      rdlog(LOG_ERR,"Error closing ZK connection [rc=%d]",close_rc);
     }
   }
 
@@ -565,7 +565,7 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
 
   struct rb_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
-    Log(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
+    rdlog(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
   }
 
 #ifdef RB_ZK_MAGIC
@@ -584,9 +584,9 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
 
   if(NULL == _zk->handler) {
     strerror_r(errno,strerror_buf,sizeof(strerror_buf));
-    Log(LOG_ERR,"Can't init zookeeper: [%s].",strerror_buf);
+    rdlog(LOG_ERR,"Can't init zookeeper: [%s].",strerror_buf);
   } else {
-    Log(LOG_ERR,"Connected to ZooKeeper %s",_zk->zk_host);
+    rdlog(LOG_ERR,"Connected to ZooKeeper %s",_zk->zk_host);
   }
 
   return _zk;

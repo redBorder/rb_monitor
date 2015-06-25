@@ -1,9 +1,9 @@
 // rb_value.c
 
 #include "rb_value.h"
-#include "rb_log.h"
 
-#include "librd/rdmem.h"
+#include <librd/rdlog.h>
+#include <librd/rdmem.h>
 #include <json/printbuf.h>
 
 /* Copy just the 'useful' data of the node, not list-related */
@@ -55,7 +55,7 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 			{
 				const char *str = json_object_get_string(val);
 				if(NULL == str) {
-					Log(LOG_ERR,"Cannot extract string value of enrichment key %s\n",key);
+					rdlog(LOG_ERR,"Cannot extract string value of enrichment key %s",key);
 				} else {
 					sprintbuf(printbuf, ",\"%s\":\"%s\"",key,str);
 				}
@@ -66,7 +66,7 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 				errno = 0;
 				int64_t integer = json_object_get_int64(val);
 				if(errno != 0) {
-					Log(LOG_ERR,"Cannot extract int value of enrichment key %s\n",key);
+					rdlog(LOG_ERR,"Cannot extract int value of enrichment key %s",key);
 				} else {
 					sprintbuf(printbuf, ",\"%s\":%ld",key,integer);
 				}
@@ -92,7 +92,7 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 			case json_type_object:
 			case json_type_array:
 			{
-				Log(LOG_ERR,"Can't enrich with objects/array at this time\n");
+				rdlog(LOG_ERR,"Can't enrich with objects/array at this time");
 				break;
 			}
 		};

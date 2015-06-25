@@ -20,8 +20,8 @@
 */
 
 #include "rb_snmp.h"
-#include "rb_log.h"
-#include "librd/rd.h"
+#include <librd/rd.h>
+#include <librd/rdlog.h>
 #include <assert.h>
 
 // #define SNMP_SESS_MAGIC 0x12345678
@@ -60,7 +60,7 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 		}
 		else
 		{
-			Log(LOG_ERR,"Failed to load SNMP session");
+			rdlog(LOG_ERR,"Failed to load SNMP session");
 		}
 	}
 	return session;
@@ -92,17 +92,17 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	
 	if (status != STAT_SUCCESS)
 	{
-		Log(LOG_ERR,"Snmp error: %s\n", 
+		rdlog(LOG_ERR,"Snmp error: %s", 
 			snmp_api_errstring(snmp_sess_session(session->sessp)->s_snmp_errno));
-		//Log(LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
+		//rdlog(LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
 	}
 	else if(NULL==response)
 	{
-		Log(LOG_ERR,"No SNMP response given.\n");
+		rdlog(LOG_ERR,"No SNMP response given.");
 	}
 	else
 	{
-		Log(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
+		rdlog(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
 		const size_t effective_len = RD_MIN(value_buf_len,response->variables->val_len);
 	
 		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
@@ -122,7 +122,7 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 				ret = 1;
 				break;
 			default:
-				Log(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d\n",response->variables->type,__LINE__);
+				rdlog(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d",response->variables->type,__LINE__);
 		};
 	}
 	
@@ -140,7 +140,7 @@ int net_snmp_version(const char *string_version,const char *sensor_name){
 			return SNMP_VERSION_2c;
 	}
 
-	Log(LOG_ERR,"Bad snmp version (%s) in sensor %s\n",string_version,sensor_name);
+	rdlog(LOG_ERR,"Bad snmp version (%s) in sensor %s",string_version,sensor_name);
 	exit(1);
 	return SNMP_DEFAULT_VERSION;
 }

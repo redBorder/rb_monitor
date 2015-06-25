@@ -21,7 +21,8 @@
 
 #pragma once
 
-#include "rb_log.h"
+#include <librd/rdlog.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,7 +41,7 @@ struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 		this->names = calloc(new_size,sizeof(char *));
 		if(NULL==this->names)
 		{
-			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			rdlog(LOG_CRIT,"Cannot allocate memory. Exiting.");
 			free(this);
 			this=NULL;
 		}
@@ -51,7 +52,7 @@ struct libmatheval_stuffs * new_libmatheval_stuffs(size_t new_size)
 		this->values = calloc(new_size,sizeof(double));
 		if(NULL==this->values)
 		{
-			Log(LOG_CRIT,"Cannot allocate memory. Exiting.\n");
+			rdlog(LOG_CRIT,"Cannot allocate memory. Exiting.");
 			free(this->names);
 			free(this);
 			this=NULL;
@@ -84,7 +85,7 @@ void delete_libmatheval_stuffs(struct libmatheval_stuffs *this)
  */
 
 static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *name,double val){
-	Log(LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf\n",
+	rdlog(LOG_DEBUG,"[libmatheval] Saving %s var in libmatheval array. Value=%.3lf",
 						                                         name,val);
 
 	if(matheval->variables_pos<matheval->total_lenght){
@@ -99,7 +100,7 @@ static int libmatheval_append(struct libmatheval_stuffs *matheval,const char *na
 		}
 		else
 		{
-			Log(LOG_CRIT,"Memory error. \n",__LINE__);
+			rdlog(LOG_CRIT,"Memory error.");
 			if(matheval->names) free(matheval->names);
 			matheval->total_lenght = 0;
 			return 0;

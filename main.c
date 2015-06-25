@@ -23,7 +23,6 @@
 
 #include "rb_system.h"
 #include "rb_libmatheval.h"
-#include "rb_log.h"
 #include "rb_snmp.h"
 #include "rb_values_list.h"
 
@@ -31,6 +30,7 @@
 #include "rb_monitor_zk.h"
 #endif
 
+#include <librd/rdlog.h>
 #include <stdlib.h>
 #include <json/json.h>
 #include <json/printbuf.h>
@@ -197,7 +197,7 @@ static void parse_rdkafka_keyval_config(rd_kafka_conf_t *rk_conf,rd_kafka_topic_
 					errstr, sizeof(errstr));
 
 	if (res != RD_KAFKA_CONF_OK)
-		Log(LOG_ERR,"rdkafka: %s\n", errstr);
+		rdlog(LOG_ERR,"rdkafka: %s", errstr);
 }
 
 static void parse_rdkafka_config_json(struct _worker_info *worker_info,
@@ -222,21 +222,21 @@ static void parse_zookeeper_json(struct _main_info *main_info, json_object *zk_c
 		} else if(0 == strcmp(key, "sensors")) {
 			zk_sensors = val;
 		} else {
-			Log(LOG_ERR,"Don't know what zookeeper config.%s key means.\n",key);
+			rdlog(LOG_ERR,"Don't know what zookeeper config.%s key means.",key);
 		}
 		
 		if(errno!=0)
 		{
-			Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+			rdlog(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			return;
 		}
 	}
 
 	if(NULL == host) {
-		Log(LOG_ERR,"No zookeeper host specified. Can't use ZK.");
+		rdlog(LOG_ERR,"No zookeeper host specified. Can't use ZK.");
 		return;
 	} else if (0 == push_timeout) {
-		Log(LOG_INFO,"No pop push_timeout specified. We will never be ZK masters.");
+		rdlog(LOG_INFO,"No pop push_timeout specified. We will never be ZK masters.");
 		return;
 	}
 
@@ -257,17 +257,23 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		}
 		else if(0==strncmp(key,"stdout",sizeof "stdout"-1))
 		{
+#if 0
+			/// @TODO recover
 			if(json_object_get_int64(val)) 
 				worker_info->debug_output_flags |= DEBUG_STDOUT;
 			else                           
 				worker_info->debug_output_flags &= ~DEBUG_STDOUT;
+#endif
 		}
 		else if(0==strncmp(key,"syslog",sizeof "syslog"-1))
 		{
+#if 0
+			/// @TODO recover
 			if(json_object_get_int64(val)) 
 				worker_info->debug_output_flags |= DEBUG_SYSLOG;
 			else
 				worker_info->debug_output_flags &= ~DEBUG_SYSLOG;
+#endif
 		}
 		else if(0==strncmp(key,"threads",sizeof "threads"-1))
 		{
@@ -300,7 +306,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition"))
 			 || 0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
 		{
-			Log(LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
+			rdlog(LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
 		}
 		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
 		{
@@ -316,12 +322,12 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		}
 		else
 		{
-			Log(LOG_ERR,"Don't know what config.%s key means.\n",key);
+			rdlog(LOG_ERR,"Don't know what config.%s key means.",key);
 		}
 		
 		if(errno!=0)
 		{
-			Log(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
+			rdlog(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			ret=FALSE;
 		}
 	}
@@ -339,10 +345,10 @@ static void msg_delivered (rd_kafka_t *rk,
 			   void *opaque, void *msg_opaque) {
 	(void)rk,(void)opaque,(void)payload,(void)msg_opaque;
 	if (error_code)
-		Log(LOG_ERR,"%% Message delivery failed: %s\n",
+		rdlog(LOG_ERR,"%% Message delivery failed: %s",
 		       rd_kafka_err2str(error_code));
 	else
-		Log(LOG_DEBUG,"%% Message delivered (%zd bytes)\n", len);
+		rdlog(LOG_DEBUG,"%% Message delivered (%zd bytes)", len);
 }
 
 static inline void check_setted(const void *ptr,int *aok,const char *errmsg,const char *sensor_name)
@@ -350,7 +356,7 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 	assert(aok);
 	if(*aok && ptr == NULL){
 		*aok = 0;
-		Log(LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)\n");
+		rdlog(LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)");
 	}
 }
 
@@ -396,7 +402,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 	}
 	else
 	{
-		Log(LOG_ERR,"Error adding libmatheval value\n");
+		rdlog(LOG_ERR,"Error adding libmatheval value");
 		aok = 0;
 	}
 
@@ -474,7 +480,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				if(0!=errno)
 				{
 					char buf[1024];
-					Log(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp\n",tok,strerror_r(errno,buf,sizeof(buf)));
+					rdlog(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp",tok,strerror_r(errno,buf,sizeof(buf)));
 					tok = nexttok;
 					timestamp = time(NULL);
 				}
@@ -518,7 +524,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 					}
 					else
 					{
-						Log(LOG_ERR,"Error adding libmatheval value\n");
+						rdlog(LOG_ERR,"Error adding libmatheval value");
 						aok = 0;
 					}
 
@@ -530,13 +536,13 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				}
 				else
 				{
-					Log(LOG_WARNING,"Invalid double: %s. Not counting.\n",tok);
+					rdlog(LOG_WARNING,"Invalid double: %s. Not counting.",tok);
 				} /* valid double */
 			}
 		}
 		else /* *tok==0 */
 		{
-			Log(LOG_DEBUG,"Not seeing value %s(%d)\n",name,count);
+			rdlog(LOG_DEBUG,"Not seeing value %s(%d)",name,count);
 		}
 	
 		count++;
@@ -557,7 +563,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		else
 		{
-			Log(LOG_WARNING,"Splitop %s unknow in monitor parameter %s\n",splitop,name);
+			rdlog(LOG_WARNING,"Splitop %s unknow in monitor parameter %s",splitop,name);
 		}
 
 		
@@ -568,7 +574,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			snprintf(split_op_result,SPLITOP_RESULT_LEN,"%lf",result);
 			if(0==libmatheval_append(libmatheval_variables,name,result))
 			{
-				Log(LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.\n",
+				rdlog(LOG_WARNING,"Cannot save %s -> %s in libmatheval_variables.",
 					name,split_op_result);
 			}
 			else
@@ -594,7 +600,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		else
 		{
 			if(sum!=0)
-				Log(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)\n",name,sum,mean_count);
+				rdlog(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)",name,sum,mean_count);
 		}
 		
 	}
@@ -621,9 +627,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 	assert(sensor_data->sensor_name);
 	check_setted(sensor_data->peername,&aok,
-		"Peername not setted in %s. Skipping.\n",sensor_data->sensor_name);
+		"Peername not setted in %s. Skipping.",sensor_data->sensor_name);
 	check_setted(sensor_data->community,&aok,
-		"Community not setted in %s. Skipping.\n",sensor_data->sensor_name);
+		"Community not setted in %s. Skipping.",sensor_data->sensor_name);
 
 
 	if(aok){
@@ -638,7 +644,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		};
 		snmp_sessp = new_snmp_session(&worker_info->default_session,&config);
 		if(NULL== snmp_sessp){
-			Log(LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
+			rdlog(LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
 			aok=0;
 		}
 		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
@@ -689,17 +695,17 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}else if(0==strncmp(key2,"system",strlen("system"))){
 				// will be resolved in the next foreach
 			}else{
-				Log(LOG_ERR,"Cannot parse %s argument\n",key2);
+				rdlog(LOG_ERR,"Cannot parse %s argument",key2);
 			}
 
 			if(errno!=0){
-				Log(LOG_ERR,"Could not parse %s value: %s\n",key2,strerror(errno));
+				rdlog(LOG_ERR,"Could not parse %s value: %s",key2,strerror(errno));
 			}
 
 		} /* foreach */
 
 		if(unlikely(NULL==sensor_data->sensor_name)){
-			Log(LOG_ERR,"sensor name not setted. Skipping.\n");
+			rdlog(LOG_ERR,"sensor name not setted. Skipping.");
 			break;
 		}
 
@@ -709,7 +715,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				// @TODO refactor all this block. Search for repeated code.
 				/* @TODO test passing a sensor without params to caller function. */
 				if(unlikely(!name)){
-					Log(LOG_WARNING,"name of param not set in %s. Skipping\n",
+					rdlog(LOG_WARNING,"name of param not set in %s. Skipping",
 						sensor_data->sensor_name);
 					break /*foreach*/;
 				}
@@ -729,7 +735,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 				if(unlikely(strlen(value_buf)==0))
 				{
-					Log(LOG_WARNING,"Not seeing %s value.\n", name);
+					rdlog(LOG_WARNING,"Not seeing %s value.", name);
 				}
 				else if(!splittok)
 				{
@@ -741,7 +747,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					}
 					else
 					{
-						Log(LOG_WARNING,"Value of %s is not a number");
+						rdlog(LOG_WARNING,"Value of %s is not a number");
 					}
 				}
 				else /* We have a vector here */
@@ -753,7 +759,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 				if(nonzero && 0 == number)
 				{
-					Log(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.\n");
+					rdlog(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.");
 					bad_names[bad_names_pos++] = name;
 					kafka=0;
 				}
@@ -763,7 +769,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				for(unsigned int i=0;op_ok==1 && i<bad_names_pos;++i)
 				{
 					if(strstr(bad_names[i],operation)){
-						Log(LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping\n",
+						rdlog(LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping",
 							operation,bad_names[i]);
 						kafka=op_ok=0;
 					}
@@ -804,7 +810,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							else if(vectors_len!=size)
 							{
-								Log(LOG_ERR,"vector dimension mismatch\n");
+								rdlog(LOG_ERR,"vector dimension mismatch");
 								op_ok=0;
 							}
 						}
@@ -870,7 +876,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							operation_iterator += unchanged_size + vector_iterator->name_len;
 
 						}
-						Log(LOG_DEBUG,"vector operation string result: %s\n",str_op);
+						rdlog(LOG_DEBUG,"vector operation string result: %s",str_op);
 
 						/* extracting suffix */
 						if(vectors_len>1)
@@ -890,7 +896,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					                                                       /* also, we have to create a new one for each iteration */
 						if(NULL==f)
 						{
-							Log(LOG_ERR,"Operation not valid: %s\n",str_op);
+							rdlog(LOG_ERR,"Operation not valid: %s",str_op);
 							op_ok = 0;
 						}
 						
@@ -900,7 +906,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
 							if(!op_ok)
 							{
-								Log(LOG_ERR,"Variable not found: %s\n",evaluator_variables[vars_pos]);
+								rdlog(LOG_ERR,"Variable not found: %s",evaluator_variables[vars_pos]);
 								evaluator_destroy(f);
 							}
 						}
@@ -910,16 +916,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
 								(char **) libmatheval_variables->names,	libmatheval_variables->values);
 							evaluator_destroy (f);
-							Log(LOG_DEBUG,"Result of operation %s: %lf\n",key,number);
+							rdlog(LOG_DEBUG,"Result of operation %s: %lf",key,number);
 							if(number == 0 && nonzero)
 							{
 								op_ok=false;
-								Log(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.\n",operation);
+								rdlog(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.",operation);
 							}
 							if(!isnormal(number))
 							{
 								op_ok=false;
-								Log(LOG_ERR,"OP %s return a bad value: %lf. Skipping.\n",operation,number);
+								rdlog(LOG_ERR,"OP %s return a bad value: %lf. Skipping.",operation,number);
 							}
 							/* op will send by default, so we ignore kafka param */
 						}
@@ -1005,7 +1011,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 			if(errno!=0)
 			{
-				Log(LOG_ERR,"Could not parse %s value: %s\n",key,strerror(errno));
+				rdlog(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
 			}
 		} /* foreach monitor attribute */
 
@@ -1019,7 +1025,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					//printbuf->buf=NULL;
 					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
 					{
-						Log(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf);
+						rdlog(LOG_DEBUG,"[Kafka] %s",printbuf->buf);
 						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
 								RD_KAFKA_MSG_F_FREE,
 								/* Payload and length */
@@ -1035,13 +1041,13 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 						else
 						{
-							Log(LOG_ERR,"[Kafka] Cannot produce kafka message\n");
+							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message");
 						}
 					}
 					printbuf_free(printbuf);
 					printbuf = NULL;
 				}else{ /* if(printbuf) after malloc */
-					Log(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping\n");
+					rdlog(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping");
 				}
 			} /* for i in splittoks */
 
@@ -1088,7 +1094,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		}else if(0==strncmp(key,"enrichment", strlen("enrichment"))){
 			pt_worker_info->sensor_data.enrichment = val;
 		}else {
-			Log(LOG_ERR,"Cannot parse %s argument\n",key);
+			rdlog(LOG_ERR,"Cannot parse %s argument",key);
 			aok=0;
 		}
 	}
@@ -1123,7 +1129,7 @@ void * worker(void *_info){
 	rd_kafka_conf_set_dr_cb(conf,msg_delivered);
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
-		Log(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
+		rdlog(LOG_ERR,"Error calling kafka_new producer: %s",errstr);
 		pt_worker_info.thread_ok=0;
 	}
 
@@ -1131,17 +1137,17 @@ void * worker(void *_info){
 	//	rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
 
 	if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
-		Log(LOG_ERR,"No valid brokers specified\n");
+		rdlog(LOG_ERR,"No valid brokers specified");
 		pt_worker_info.thread_ok=0;
 	}
 	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
 
-	Log(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
+	rdlog(LOG_INFO,"Thread %lu connected successfuly.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
-			Log(LOG_DEBUG,"Pop element %p\n",elm->rfqe_ptr);
+			rdlog(LOG_DEBUG,"Pop element %p",elm->rfqe_ptr);
 			json_object * sensor_info = elm->rfqe_ptr;
 			process_sensor(worker_info,&pt_worker_info,sensor_info);
 			rd_fifoq_elm_release(worker_info->queue,elm);
@@ -1159,8 +1165,8 @@ void * worker(void *_info){
 			throw_msg_count--;
 		else
 			throw_msg_count = atoi(worker_info->max_kafka_fails);
-		Log(LOG_INFO,
-			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
+		rdlog(LOG_INFO,
+			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.",
 			pthread_self(),msg_left,throw_msg_count);
 		prev_msg_left = msg_left;
 		#ifndef NDEBUG
@@ -1178,7 +1184,7 @@ void * worker(void *_info){
 void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
-		Log(LOG_DEBUG,"Push element %p\n",value);
+		rdlog(LOG_DEBUG,"Push element %p",value);
 		rd_fifoq_add(queue,value);
 	}
 }
@@ -1207,8 +1213,9 @@ int main(int argc, char  *argv[])
 	assert(ret==TRUE);
 	worker_info.monitor_values_tree = new_monitor_values_tree();
 
-	debug_set_debug_level(worker_info.debug);
-	debug_set_output_flags(worker_info.debug_output_flags);
+// @TODO recover
+//	debug_set_debug_level(worker_info.debug);
+//	debug_set_output_flags(worker_info.debug_output_flags);
 
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {
@@ -1234,25 +1241,26 @@ int main(int argc, char  *argv[])
 		MC_SET_DEBUG(1);
 
 	if(configPath == NULL){
-		Log(LOG_ERR,"Config path not set. Exiting\n");
+		rdlog(LOG_ERR,"Config path not set. Exiting");
 		exit(1);
 	}
 
 	config_file = json_object_from_file(configPath);
 	if(!config_file){
-		Log(LOG_CRIT,"[EE] Could not open config file %s. Exiting\n",configPath);
+		rdlog(LOG_CRIT,"[EE] Could not open config file %s. Exiting",configPath);
 		exit(1);
 	}
 
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
 
-	debug_set_debug_level(worker_info.debug);
-	debug_set_output_flags(worker_info.debug_output_flags);
+/// @TODO recover
+//	debug_set_debug_level(worker_info.debug);
+//	debug_set_output_flags(worker_info.debug_output_flags);
 
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
-		Log(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
+		rdlog(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
@@ -1260,7 +1268,7 @@ int main(int argc, char  *argv[])
 
 	if(FALSE != json_object_object_get_ex(config_file,"zookeeper",&zk)) {
 #ifndef HAVE_ZOOKEEPER
-			Log(LOG_ERR,"This monitor does not have zookeeper enabled.");
+			rdlog(LOG_ERR,"This monitor does not have zookeeper enabled.");
 #else
 			parse_zookeeper_json(&main_info,zk);
 #endif
@@ -1273,15 +1281,15 @@ int main(int argc, char  *argv[])
 	openlog(main_info.syslog_indent, 0, LOG_USER);
 
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
-		Log(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting\n");
+		rdlog(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting");
 	}else{
 		rd_fifoq_init(&queue);
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
-			Log(LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.\n");
+			rdlog(LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.");
 		}else{
-			Log(LOG_INFO,"Main thread started successfuly. Starting workers threads.\n");
+			rdlog(LOG_INFO,"Main thread started successfuly. Starting workers threads.");
 			worker_info.queue = &queue;
 			for(int i=0;i<main_info.threads;++i){
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
@@ -1291,7 +1299,7 @@ int main(int argc, char  *argv[])
 				queueSensors(sensors,&queue);
 				sleep(main_info.sleep_main);
 			}
-			Log(LOG_INFO,"Leaving, wait for workers...\n");
+			rdlog(LOG_INFO,"Leaving, wait for workers...");
 
 			for(int i=0;i<main_info.threads;++i){
 				pthread_cancel(pd_thread[i]);
