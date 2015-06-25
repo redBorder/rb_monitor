@@ -119,7 +119,7 @@ struct _worker_info{
 	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
 	rd_kafka_conf_t * rk_conf;
 	rd_kafka_topic_conf_t * rkt_conf;
-	int64_t sleep_worker,max_snmp_fails,timeout,debug,debug_output_flags;
+	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
 	struct monitor_values_tree * monitor_values_tree;
@@ -253,7 +253,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		errno = 0;
 		if(0==strncmp(key,"debug",sizeof "debug"-1))
 		{
-			worker_info->debug = json_object_get_int64(val);
+			rd_log_set_severity(json_object_get_int64(val));
 		}
 		else if(0==strncmp(key,"stdout",sizeof "stdout"-1))
 		{
@@ -1197,6 +1197,7 @@ int main(int argc, char  *argv[])
 	struct json_object * default_config = json_tokener_parse( str_default_config );
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
+	int debug_severity = LOG_INFO;
 	
 	memset(&worker_info,0,sizeof(worker_info));
 	worker_info.rk_conf  = rd_kafka_conf_new();
@@ -1213,10 +1214,6 @@ int main(int argc, char  *argv[])
 	assert(ret==TRUE);
 	worker_info.monitor_values_tree = new_monitor_values_tree();
 
-// @TODO recover
-//	debug_set_debug_level(worker_info.debug);
-//	debug_set_output_flags(worker_info.debug_output_flags);
-
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {
 		case 'h':
@@ -1229,7 +1226,7 @@ int main(int argc, char  *argv[])
 			configPath = optarg;
 			break;
 		case 'd':
-			worker_info.debug = atoi(optarg);
+			debug_severity = atoi(optarg);
 			break;
 		default:
 			printHelp(argv[0]);
@@ -1237,7 +1234,8 @@ int main(int argc, char  *argv[])
 		}
 	}
 
-	if(worker_info.debug >=0)
+	rd_log_set_severity(debug_severity);
+	if(debug_severity >=0)
 		MC_SET_DEBUG(1);
 
 	if(configPath == NULL){
@@ -1253,11 +1251,6 @@ int main(int argc, char  *argv[])
 
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
-
-/// @TODO recover
-//	debug_set_debug_level(worker_info.debug);
-//	debug_set_output_flags(worker_info.debug_output_flags);
-
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
 		rdlog(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
