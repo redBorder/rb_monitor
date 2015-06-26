@@ -313,25 +313,20 @@ static void create_mutex_node_complete(int rc, const char *leader_node, const vo
 
 /// @TODO treat this error in a different way
   if(rc != 0) {
-    rdlog(LOG_ERR,"Couldn't create leader node. rc = %d",rc);
-    rb_monitor_zk_async_reconnect(mutex->context);
+    rb_zk_mutex_error_done(mutex->context,mutex,rc,"Couldn't create leader node.");
     return;
   }
 
   if(NULL == leader_node) {
-    rdlog(LOG_ERR,"NULL path when returning");
-    rb_monitor_zk_async_reconnect(mutex->context);
+    rb_zk_mutex_error_done(mutex->context,mutex,rc,"NULL path when returning");
     return;
   }
 
   const int override_rc = override_leader_node(mutex,leader_node);
   if(0 != override_rc) {
-    rdlog(LOG_ERR,"Error overriding leading node");
-    rb_monitor_zk_async_reconnect(mutex->context);
+    rb_zk_mutex_error_done(mutex->context,mutex,rc,"Error overriding leading node");
     return;
   }
-
-  rdlog(LOG_DEBUG,"ZK connected. Trying to be the leader.");
 
   /* Chopping entry if needed */
   /// @TODO control all snprintf output
