@@ -24,8 +24,8 @@
 #ifdef HAVE_ZOOKEEPER
 
 #include "rb_zk.h"
-/// @TODO need to delete this dependence
 
+#include <librd/rdevent.h>
 #include <librd/rdlog.h>
 #include <librd/rdavl.h>
 #include <librd/rdsysqueue.h>
@@ -158,7 +158,7 @@ struct rb_zk {
   char *zk_host;
   int zk_timeout;
   zhandle_t *handler;
-  pthread_t zk_thread;
+  rd_thread_t *zk_thread;
 
   pthread_rwlock_t leaders_lock;
   rb_zk_mutex_list leaders_nodes_list;
@@ -167,11 +167,6 @@ struct rb_zk {
   // Leaders added when ZK was down
   pthread_mutex_t pending_leaders_lock;
   rb_zk_mutex_list pending_leaders;
-
-  /* Reconnect related signal */
-  pthread_cond_t ntr_cond;
-  pthread_mutex_t ntr_mutex;
-  int need_to_reconnect;
 };
 
 int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
@@ -192,12 +187,7 @@ static void rb_zk_mutex_error_done(struct rb_zk *zk,struct rb_zk_mutex *mutex,
 }
 
 /// send async reconnect signal
-static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
-  pthread_mutex_lock(&context->ntr_mutex);
-  context->need_to_reconnect = 1;
-  pthread_mutex_unlock(&context->ntr_mutex);
-  pthread_cond_signal(&context->ntr_cond);
-}
+static void rb_monitor_zk_async_reconnect(struct rb_zk *context);
 
 static int override_leader_node(struct rb_zk_mutex *lock,const char *leader_node) {
   if(lock->path){
@@ -329,6 +319,7 @@ static void create_mutex_node_complete(int rc, const char *leader_node, const vo
   char buf[BUFSIZ];
   struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(_mutex);
 
+/// @TODO treat this error in a different way
   if(rc != 0) {
     rdlog(LOG_ERR,"Couldn't create leader node. rc = %d",rc);
     rb_monitor_zk_async_reconnect(mutex->context);
@@ -410,15 +401,6 @@ static void rb_zk_mutex_lock0(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
   }
 }
 
-void rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
-  rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque) {
-  
-  struct rb_zk_mutex *_mutex = rb_zk_mutex_create_entry(zk,leader_path,
-                                            schange_cb,error_cb,cb_opaque);
-  rb_zk_mutex_list_insert(&zk->pending_leaders,_mutex);
-  /// @TODO signal
-}
-
 static void zk_watcher_do_pending_locks(struct rb_zk *context) {
   struct rb_zk_mutex *i=NULL,*aux=NULL;
 
@@ -435,6 +417,15 @@ static void zk_watcher_do_pending_locks(struct rb_zk *context) {
   }
   pthread_rwlock_unlock(&context->leaders_lock);
   pthread_mutex_unlock(&context->pending_leaders_lock);
+}
+
+void rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
+  rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque) {
+  
+  struct rb_zk_mutex *_mutex = rb_zk_mutex_create_entry(zk,leader_path,
+                                            schange_cb,error_cb,cb_opaque);
+  rb_zk_mutex_list_insert(&zk->pending_leaders,_mutex);
+  rd_thread_func_call1(zk->zk_thread,zk_watcher_do_pending_locks,zk);
 }
 
 static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
@@ -474,9 +465,7 @@ static void zk_watcher(zhandle_t *zh, int type, int state, const char *path,
 
   if(type == ZOO_SESSION_EVENT && state == ZOO_CONNECTED_STATE) {
     rdlog(LOG_DEBUG,"ZK connected. Adding pending mutex.");
-    context->need_to_reconnect = 0;
-    /// @TODO better if we signal
-    zk_watcher_do_pending_locks(context);
+    rd_thread_func_call1(context->zk_thread,zk_watcher_do_pending_locks,context);
   } else {
     rdlog(LOG_ERR,"Can't connect to ZK: [type: %d (%s)][state: %d (%s)]",
       type,type2String(type),state,state2String(state));
@@ -524,7 +513,7 @@ int rb_zk_create_recursive_node(struct rb_zk *context,const char *node,int flags
 }
 
 /// @TODO use client_id
-static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
+static void reset_zk_context(struct rb_zk *context) {
   rdlog(LOG_INFO,"Resetting ZooKeeper connection");
   if(context->handler) {
     const int close_rc = zookeeper_close(context->handler);
@@ -533,29 +522,16 @@ static void reset_zk_context(struct rb_zk *context,int zk_read_timeout) {
     }
   }
 
-  context->handler = zookeeper_init(context->zk_host, zk_watcher, zk_read_timeout, 0, context, 0);
-  context->need_to_reconnect = 0;
+  context->handler = zookeeper_init(context->zk_host, zk_watcher, context->zk_timeout, 0, context, 0);
+}
+
+static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
+  rd_thread_func_call1(context->zk_thread,reset_zk_context,context);
 }
 
 /// @TODO use client id too.
 static void*zk_ok_watcher(void *_context) {
-  struct rb_zk *context = monitor_zc_casting(_context);
-
-  while(1){
-    struct timespec ts = {
-      .tv_sec = 1, .tv_nsec=0
-    };
-
-    /// @TODO we need to do a decent tasks queue
-    zk_watcher_do_pending_locks(context);
-
-    /// @TODO be able to exit from here
-    if(context->need_to_reconnect)
-      reset_zk_context(context,context->zk_timeout);
-    pthread_mutex_lock(&context->ntr_mutex);
-    pthread_cond_timedwait(&context->ntr_cond,&context->ntr_mutex,&ts);
-    pthread_mutex_unlock(&context->ntr_mutex);
-  }
+  rd_thread_dispatch();
 }
 
 struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
@@ -573,14 +549,12 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
 #endif
 
   _zk->zk_host = host;
-  pthread_cond_init(&_zk->ntr_cond,NULL);
-  pthread_mutex_init(&_zk->ntr_mutex,NULL);
   rd_avl_init(&_zk->leaders_avl,rb_zk_mutex_cmp,0);
   rb_zk_mutex_list_init(&_zk->leaders_nodes_list);
   rb_zk_mutex_list_init(&_zk->pending_leaders);
   _zk->zk_timeout = zk_timeout;
-  reset_zk_context(_zk,zk_timeout);
-  pthread_create(&_zk->zk_thread, NULL, zk_ok_watcher, _zk);
+  reset_zk_context(_zk);
+  rd_thread_create(&_zk->zk_thread, NULL, NULL, zk_ok_watcher, _zk);
 
   if(NULL == _zk->handler) {
     strerror_r(errno,strerror_buf,sizeof(strerror_buf));
