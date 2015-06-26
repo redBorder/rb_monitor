@@ -30,8 +30,9 @@
 #include <errno.h>
 
 /* Zookeeper path to save data */
-static const char ZOOKEEPER_TASKS_PATH[]  = "/rb_monitor/tasks";
-static const char ZOOKEEPER_LOCK_PATH[]   = "/rb_monitor/lock";
+static const char ZOOKEEPER_TASKS_PATH[]  = "/rb_monitor/sensors";
+#define ZOOKEEPER_LOCK_PATH   "/rb_monitor/lock"
+#define ZOOKEEPER_LOCK_PATH_LEAF ZOOKEEPER_LEADER_PATH "/sensors_list_"
 #define ZOOKEEPER_LEADER_PATH "/rb_monitor/leader"
 #define ZOOKEEPER_LEADER_LEAF_NAME ZOOKEEPER_LEADER_PATH "/leader_prop_"
 
@@ -74,6 +75,8 @@ struct rb_monitor_zk {
 #ifdef RB_MONITOR_ZK_MAGIC
 	uint64_t magic;
 #endif
+  rd_timer_t timer;
+  rd_thread_t *worker;
 
   char *zk_host;
   time_t pop_watcher_timeout,push_timeout;
@@ -90,7 +93,7 @@ struct rb_monitor_zk {
 static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
                                                   json_object *zk_sensors) {
   string_list_init(&monitor_zk->sensors_list);
-  
+
   int i=0;
   for(i=0;i<json_object_array_length(zk_sensors);++i) {
     json_object *value = json_object_array_get_idx(zk_sensors, i);
@@ -125,6 +128,10 @@ static struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
 
 static void try_to_be_master(struct rb_monitor_zk *rb_mzk);
 
+static void timer_cb(void *opaque) {
+  rdlog(LOG_ERR,"Timer called!");
+}
+
 static void leader_lock_status_chage_cb(struct rb_zk_mutex *mutex,void *opaque) {
 	struct rb_monitor_zk *monitor_zk = rb_monitor_zk_casting(opaque);
 
@@ -132,6 +139,12 @@ static void leader_lock_status_chage_cb(struct rb_zk_mutex *mutex,void *opaque) 
 
 	rdlog(LOG_DEBUG,"Mutex %s status change: %d",rb_zk_mutex_path(mutex),
 		rb_zk_mutex_obtained(mutex));
+
+  if(monitor_zk->i_am_leader) {
+    rd_timer_start(&monitor_zk->timer,monitor_zk->push_timeout*1000);
+  } else {
+    rd_timer_stop(&monitor_zk->timer);
+  }
 }
 
 static void leader_lock_error_cb(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
@@ -155,6 +168,12 @@ static int zk_prepare(struct rb_zk *zh) {
     rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
 }
 
+/// @TODO use client id too.
+static void*zk_mon_watcher(void *_context) {
+  rd_thread_dispatch();
+  return NULL;
+}
+
 struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   uint64_t push_timeout,json_object *zk_sensors) {
   char strerror_buf[BUFSIZ];
@@ -174,6 +193,8 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   _zk->pop_watcher_timeout = pop_watcher_timeout;
   _zk->push_timeout = push_timeout;
   _zk->zk_handler = rb_zk_init(_zk->zk_host,pop_watcher_timeout);
+  rd_thread_create(&_zk->worker, NULL, NULL, zk_mon_watcher, _zk);
+  rd_timer_init(&_zk->timer,RD_TIMER_RECURR,_zk->worker,timer_cb,_zk);
 
   rb_monitor_zk_parse_sensors(_zk,zk_sensors);
 

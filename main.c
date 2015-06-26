@@ -1129,6 +1129,8 @@ void * worker(void *_info){
 	pt_worker_info.thread_ok = 1;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
 
+	rd_init();
+
 	rd_kafka_conf_set_dr_cb(conf,msg_delivered);
 
 	if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
