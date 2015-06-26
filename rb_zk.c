@@ -237,7 +237,7 @@ static void previous_leader_watcher(zhandle_t *zh, int type, int state, const ch
 }
 
 /// Return minimum string and inmediate less than 'my_str' strings.
-static void leader_useful_string(const struct String_vector *strings,const char *my_str,
+static void leader_previous_string(const struct String_vector *strings,const char *my_str,
                                   const char **bef_str) {
   size_t i=0;
   const char *_my_str = strrchr(my_str,'/');
@@ -251,19 +251,6 @@ static void leader_useful_string(const struct String_vector *strings,const char 
     if(strings->data[i] == NULL) {
       continue;
     }
-
-    /* Searching minimum */
-#if 0
-    if(min && NULL == *min) {
-      *min = strings->data[i];
-    } else {
-      const int cmp_rc = strcmp(strings->data[i],*min);
-
-      if(cmp_rc < 0){
-        *min = strings->data[i];
-      }
-    }
-#endif
 
     /* Searching maximum before my_str */
 
@@ -286,7 +273,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   }
 
   const char *bef_str = NULL;
-  leader_useful_string(strings,mutex->path,&bef_str);
+  leader_previous_string(strings,mutex->path,&bef_str);
   if(NULL == bef_str){
     // I'm the lower node -> I'm the leader here
     rb_zk_mutex_set_lock(mutex);
