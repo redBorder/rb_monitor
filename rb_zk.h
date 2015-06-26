@@ -41,6 +41,10 @@ typedef void (*rb_mutex_error_cb)(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex
 /// @TODO is this needed??
 int rb_zk_create_recursive_node(struct rb_zk *zk,const char *path,int flags);
 
+typedef void (*rb_zk_push_callback)(struct rb_zk *zk,const char *path,int rc,const char *cause);
+void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,
+	string_completion_t cb,void *opaque);
+
 /** Try to obtain a lock.
 	@param zk redBorder Zookeeper handler
 	@param leader_path path you want to be the leader

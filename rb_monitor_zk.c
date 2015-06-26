@@ -30,9 +30,10 @@
 #include <errno.h>
 
 /* Zookeeper path to save data */
-static const char ZOOKEEPER_TASKS_PATH[]  = "/rb_monitor/sensors";
-#define ZOOKEEPER_LOCK_PATH   "/rb_monitor/lock"
-#define ZOOKEEPER_LOCK_PATH_LEAF ZOOKEEPER_LEADER_PATH "/sensors_list_"
+#define ZOOKEEPER_TASKS_PATH "/rb_monitor/sensors"
+#define ZOOKEEPER_TASKS_PATH_LEAF "/rb_monitor/sensors/sensor_"
+#define ZOOKEEPER_MUTEX_PATH "/rb_monitor/lock"
+#define ZOOKEEPER_MUTEX_PATH_LEAF ZOOKEEPER_MUTEX_PATH "/sensors_list_"
 #define ZOOKEEPER_LEADER_PATH "/rb_monitor/leader"
 #define ZOOKEEPER_LEADER_LEAF_NAME ZOOKEEPER_LEADER_PATH "/leader_prop_"
 
@@ -42,6 +43,7 @@ static const int zk_read_timeout = 10000;
 
 struct string_list_node {
   char *str;
+  int len;
   TAILQ_ENTRY(string_list_node) entry;
 };
 
@@ -56,11 +58,14 @@ static struct string_list_node *string_list_append(string_list *l,const char *st
     RD_MEM_END_TOKEN);
   
   if(node) {
+    node->len = strlen(node->str);
     TAILQ_INSERT_TAIL(l,node,entry);
   }
 
   return node;
 }
+
+#define string_list_foreach(var,head) TAILQ_FOREACH(var,head,entry)
 
 #if 0
 static void string_list_done(string_list *l) {
@@ -90,34 +95,6 @@ struct rb_monitor_zk {
   struct rb_zk *zk_handler;
 };
 
-static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
-                                                  json_object *zk_sensors) {
-  string_list_init(&monitor_zk->sensors_list);
-
-  int i=0;
-  for(i=0;i<json_object_array_length(zk_sensors);++i) {
-    json_object *value = json_object_array_get_idx(zk_sensors, i);
-    if(NULL == value) {
-      rdlog(LOG_ERR,"ZK sensor %d couldn't be getted",i);
-      continue;
-    }
-
-    const char *sensor_str = json_object_to_json_string(value);
-    if(NULL == sensor_str) {
-      rdlog(LOG_ERR,"Can't convert zk sensor %d to string",i);
-      continue;
-    }
-
-    void *rc = string_list_append(&monitor_zk->sensors_list,sensor_str);
-    if(rc == NULL) {
-      rdlog(LOG_ERR,"Can't append ZK sensor %d to string list (out of memory?)",i);
-      continue;
-    }
-  }
-
-  return i;
-}
-
 static struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
 	struct rb_monitor_zk *b=a;
 #ifdef RB_MONITOR_ZK_MAGIC
@@ -126,11 +103,32 @@ static struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
 	return b;
 }
 
-static void try_to_be_master(struct rb_monitor_zk *rb_mzk);
+/*
+ *  LIST PUSH
+ */
 
-static void timer_cb(void *opaque) {
-  rdlog(LOG_ERR,"Timer called!");
+static void rb_monitor_leader_push_sensors_cb(int rc,const char *value,const void *data) {
+  if(rc < 0) {
+    rdlog(LOG_ERR,"Error pushing element %s in the sensors queue. rc=%d",value,rc);
+  }
 }
+
+static void rb_monitor_leader_push_sensors(void *opaque) {
+  struct rb_monitor_zk *rb_mzk = rb_monitor_zk_casting(opaque);
+  struct string_list_node *i=NULL;
+  
+  TAILQ_FOREACH(i,&rb_mzk->sensors_list,entry) {
+    rdlog(LOG_DEBUG,"uploading sensor [%s]",i->str);
+    rb_zk_queue_push(rb_mzk->zk_handler,ZOOKEEPER_TASKS_PATH_LEAF,i->str,i->len,
+      rb_monitor_leader_push_sensors_cb, rb_mzk);
+  }
+}
+
+/*
+ *  RB_MONITOR ZOOKEEPER MASTER
+ */
+
+static void try_to_be_master(struct rb_monitor_zk *rb_mzk);
 
 static void leader_lock_status_chage_cb(struct rb_zk_mutex *mutex,void *opaque) {
 	struct rb_monitor_zk *monitor_zk = rb_monitor_zk_casting(opaque);
@@ -164,7 +162,7 @@ static void try_to_be_master(struct rb_monitor_zk *rb_mzk) {
 static int zk_prepare(struct rb_zk *zh) {
   rdlog(LOG_DEBUG,"Preparing zookeeper structure");
   return rb_zk_create_recursive_node(zh,ZOOKEEPER_TASKS_PATH,0) &&
-    rb_zk_create_recursive_node(zh,ZOOKEEPER_LOCK_PATH,0) &&
+    rb_zk_create_recursive_node(zh,ZOOKEEPER_MUTEX_PATH,0) &&
     rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
 }
 
@@ -172,6 +170,38 @@ static int zk_prepare(struct rb_zk *zh) {
 static void*zk_mon_watcher(void *_context) {
   rd_thread_dispatch();
   return NULL;
+}
+
+/* 
+ * RB_MONITOR ZOOKEEPER STRUCT (pt 2)
+ */
+
+ static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
+                                                  json_object *zk_sensors) {
+  string_list_init(&monitor_zk->sensors_list);
+
+  int i=0;
+  for(i=0;i<json_object_array_length(zk_sensors);++i) {
+    json_object *value = json_object_array_get_idx(zk_sensors, i);
+    if(NULL == value) {
+      rdlog(LOG_ERR,"ZK sensor %d couldn't be getted",i);
+      continue;
+    }
+
+    const char *sensor_str = json_object_to_json_string(value);
+    if(NULL == sensor_str) {
+      rdlog(LOG_ERR,"Can't convert zk sensor %d to string",i);
+      continue;
+    }
+
+    void *rc = string_list_append(&monitor_zk->sensors_list,sensor_str);
+    if(rc == NULL) {
+      rdlog(LOG_ERR,"Can't append ZK sensor %d to string list (out of memory?)",i);
+      continue;
+    }
+  }
+
+  return i;
 }
 
 struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
@@ -194,7 +224,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   _zk->push_timeout = push_timeout;
   _zk->zk_handler = rb_zk_init(_zk->zk_host,pop_watcher_timeout);
   rd_thread_create(&_zk->worker, NULL, NULL, zk_mon_watcher, _zk);
-  rd_timer_init(&_zk->timer,RD_TIMER_RECURR,_zk->worker,timer_cb,_zk);
+  rd_timer_init(&_zk->timer,RD_TIMER_RECURR,_zk->worker,rb_monitor_leader_push_sensors,_zk);
 
   rb_monitor_zk_parse_sensors(_zk,zk_sensors);
 

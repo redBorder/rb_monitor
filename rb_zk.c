@@ -445,6 +445,28 @@ static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
   }
 }
 
+/*
+ *  FIFO QUEUE
+ */
+
+void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,
+  string_completion_t create_mutex_node_complete, void *opaque) {
+
+  struct ACL_vector acl;
+  memcpy(&acl,&ZOO_OPEN_ACL_UNSAFE,sizeof(acl));
+
+  const int acreate_rc = zoo_acreate(zk->handler,path,
+    value,valuelen,
+    &acl,ZOO_SEQUENCE,
+    create_mutex_node_complete,opaque);
+
+  if(ZOK != acreate_rc) {
+    rdlog(LOG_ERR,"Can't call acreate to push queue %s element, rc=%d",path,acreate_rc);
+  } else {
+    rdlog(LOG_DEBUG,"acreate called successfuly for queue %s",path);
+  }
+}
+
 static void zk_watcher(zhandle_t *zh, int type, int state, const char *path,
              void* _context) {
 
