@@ -30,6 +30,8 @@
 #include "rb_monitor_zk.h"
 #endif
 
+#include <math.h>
+#include <librd/rdfloat.h>
 #include <librd/rdlog.h>
 #include <stdlib.h>
 #include <json/json.h>
@@ -480,7 +482,8 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 				if(0!=errno)
 				{
 					char buf[1024];
-					rdlog(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp",tok,strerror_r(errno,buf,sizeof(buf)));
+					strerror_r(errno,buf,sizeof(buf));
+					rdlog(LOG_WARNING,"Invalid double %s:%s. Assigned current timestamp",tok,buf);
 					tok = nexttok;
 					timestamp = time(NULL);
 				}
@@ -599,8 +602,8 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		}
 		else
 		{
-			if(sum!=0)
-				rdlog(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%lf)",name,sum,mean_count);
+			if(rd_dz(sum))
+				rdlog(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%u)",name,sum,mean_count);
 		}
 		
 	}
@@ -747,7 +750,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					}
 					else
 					{
-						rdlog(LOG_WARNING,"Value of %s is not a number");
+						rdlog(LOG_WARNING,"Value '%s' of '%s' is not a number",value_buf,key);
 					}
 				}
 				else /* We have a vector here */
@@ -757,9 +760,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					pt_worker_info->sensor_data.enrichment,kafka,timestamp_given,type_fn,&memctx,integer);
 				}
 
-				if(nonzero && 0 == number)
+				if(nonzero && rd_dz(number))
 				{
-					rdlog(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.");
+					rdlog(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.",json_object_get_string(val));
 					bad_names[bad_names_pos++] = name;
 					kafka=0;
 				}
@@ -917,7 +920,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								(char **) libmatheval_variables->names,	libmatheval_variables->values);
 							evaluator_destroy (f);
 							rdlog(LOG_DEBUG,"Result of operation %s: %lf",key,number);
-							if(number == 0 && nonzero)
+							if(rd_dz(number) == 0 && nonzero)
 							{
 								op_ok=false;
 								rdlog(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.",operation);
@@ -1166,8 +1169,8 @@ void * worker(void *_info){
 		else
 			throw_msg_count = atoi(worker_info->max_kafka_fails);
 		rdlog(LOG_INFO,
-			"[Thread %u] Waiting for messages to send. Still %u messages to be exported. %u retries left.",
-			pthread_self(),msg_left,throw_msg_count);
+			"Waiting for messages to send. Still %u messages to be exported. %u retries left.",
+			msg_left,throw_msg_count);
 		prev_msg_left = msg_left;
 		#ifndef NDEBUG
 		rd_kafka_poll(pt_worker_info.rk,1);

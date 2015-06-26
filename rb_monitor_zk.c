@@ -87,9 +87,9 @@ static void try_to_be_master(struct rb_monitor_zk *rb_mzk) {
 /* Prepare zookeeper structure */
 static int zk_prepare(struct rb_zk *zh) {
   rdlog(LOG_DEBUG,"Preparing zookeeper structure");
-  rb_zk_create_recursive_node(zh,ZOOKEEPER_TASKS_PATH,0);
-  rb_zk_create_recursive_node(zh,ZOOKEEPER_LOCK_PATH,0);
-  rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
+  return rb_zk_create_recursive_node(zh,ZOOKEEPER_TASKS_PATH,0) &&
+    rb_zk_create_recursive_node(zh,ZOOKEEPER_LOCK_PATH,0) &&
+    rb_zk_create_recursive_node(zh,ZOOKEEPER_LEADER_PATH,0);
 }
 
 struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
@@ -121,5 +121,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
 
   zk_prepare(_zk->zk_handler);
   try_to_be_master(_zk);
+
+  return _zk;
 }
 

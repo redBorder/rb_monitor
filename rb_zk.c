@@ -132,16 +132,8 @@ static struct rb_zk_mutex *monitor_zc_mutex_const_casting(const void *_ctx){
   return context;
 }
 
-static int rb_zk_mutex_lock_locked(const struct rb_zk_mutex *lock) {
-  return lock->i_am_leader;
-}
-
-static int rb_zk_mutex_set_lock(struct rb_zk_mutex *lock) {
+static void rb_zk_mutex_set_lock(struct rb_zk_mutex *lock) {
   lock->i_am_leader = 1;
-}
-
-static int rb_zk_mutex_unset_lock(struct rb_zk_mutex *lock) {
-  lock->i_am_leader = 0;
 }
 
 static int rb_zk_mutex_cmp(const void *_m1,const void *_m2) {
@@ -301,7 +293,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
     mutex->schange_cb(mutex,mutex->cb_opaque);
   } else {
     char buf_path[BUFSIZ],prev_node_path[BUFSIZ];
-    snprintf(buf_path,sizeof(buf_path),"%s",rb_zk_mutex_path(mutex),bef_str);
+    snprintf(buf_path,sizeof(buf_path),"%s",rb_zk_mutex_path(mutex));
     parent_node(buf_path);
     snprintf(prev_node_path,sizeof(prev_node_path),"%s/%s",buf_path,bef_str);
 
@@ -532,6 +524,7 @@ static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
 /// @TODO use client id too.
 static void*zk_ok_watcher(void *_context) {
   rd_thread_dispatch();
+  return NULL;
 }
 
 struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
