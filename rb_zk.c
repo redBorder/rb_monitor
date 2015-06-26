@@ -513,10 +513,10 @@ static void reset_zk_context(struct rb_zk *context) {
 }
 
 static void rb_monitor_zk_async_reconnect(struct rb_zk *context) {
+/// @TODO use client id too.
   rd_thread_func_call1(context->zk_thread,reset_zk_context,context);
 }
 
-/// @TODO use client id too.
 static void*zk_ok_watcher(void *_context) {
   rd_thread_dispatch();
   return NULL;
