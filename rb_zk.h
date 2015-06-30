@@ -55,13 +55,21 @@ void *rb_zk_queue_element_opaque(struct rb_zk_queue_element *);
 typedef void (*rb_zk_push_callback)(struct rb_zk *zk,const char *path,int rc,const char *cause);
 void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,
 	string_completion_t cb,void *opaque);
+
 /**
-	Pop an element from the queue
-	@param zk redBorder ZooKeeper handler
+	Pop an element from the queue.
+	@param zk redBorder ZooKeeper handler.
 	@param qelement Queue element configuration. From this moment, qelement is owned by zk.
-	@TODO create a pop that locks() automatically, passing the lock path.
 	*/
 void rb_zk_queue_pop_nolock(struct rb_zk *zk,struct rb_zk_queue_element *qelement);
+
+/**
+	Pop an element from the queue.
+	@param zk redBorder ZooKeeper handler.
+	@param qelement Queue element configuration. From this moment, qelement is owned by zk.
+	@param mutex Mutex to lock before do the pop.
+	*/
+void rb_zk_queue_pop(struct rb_zk *zk,struct rb_zk_queue_element *qelement,const char *mutex);
 
 /** Try to obtain a lock.
 	@param zk redBorder Zookeeper handler
@@ -83,5 +91,3 @@ struct rb_zk_mutex *rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
 void rb_zk_mutex_unlock(struct rb_zk *zk,struct rb_zk_mutex *mutex);
 
 void rb_zk_done(struct rb_zk *zk);
-
-

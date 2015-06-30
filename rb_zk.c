@@ -286,6 +286,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
   leader_previous_string(strings,mutex->path,&bef_str);
   if(NULL == bef_str){
     // I'm the lower node -> I'm the leader here
+    rdlog(LOG_DEBUG,"I'm the leader of %s now",mutex->path);
     rb_zk_mutex_set_lock(mutex);
     mutex->schange_cb(mutex,mutex->cb_opaque);
   } else {
@@ -295,7 +296,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
     snprintf(prev_node_path,sizeof(prev_node_path),"%s/%s",buf_path,bef_str);
 
     struct Stat stat;
-    rdlog(LOG_INFO,"I'm not the leader. Trying to watch %s",prev_node_path);
+    rdlog(LOG_INFO,"I'm not the leader of %s. Trying to watch %s",mutex->path,prev_node_path);
     const int wget_rc = zoo_wexists(mutex->context->handler,prev_node_path,
                           previous_leader_watcher,mutex,&stat);
     if(wget_rc != 0) {
@@ -485,6 +486,8 @@ struct rb_zk_queue_element {
   data_completion_t data_cb;
   void_completion_t delete_cb;
 
+  struct rb_zk_mutex *queue_mutex;
+
   uint64_t refcnt;
 };
 
@@ -561,6 +564,11 @@ static void rb_zk_queue_delete_completed(int rc, const void *data) {
   if(qelm->delete_cb) {
     qelm->delete_cb(rc,qelm->opaque);
   }
+
+  if(qelm->queue_mutex) {
+    rb_zk_mutex_unlock(qelm->rb_zk,qelm->queue_mutex);
+  }
+
   rb_zk_queue_element_decref(qelm);
 }
 
@@ -638,8 +646,8 @@ static void rb_zk_queue_pop_minimum0(int rc,
       qelm->should_ignore_watcher = 1;
     }
 
-    rdlog(LOG_DEBUG,"Trying to get sensor %s",buf);
-    const int aget_rc = zoo_aget(qelm->rb_zk->handler,buf,
+    rdlog(LOG_DEBUG,"Trying to get sensor %s",qelm->queue_element_path);
+    const int aget_rc = zoo_aget(qelm->rb_zk->handler,qelm->queue_element_path,
                           0,rb_zk_queue_get_element,qelm);
     if(aget_rc != 0) {
       qelm->error_cb(qelm->rb_zk,qelm,
@@ -679,6 +687,32 @@ void rb_zk_queue_pop_nolock(struct rb_zk *zk,struct rb_zk_queue_element *qelemen
     qelement->error_cb(zk,qelement,"Can't call aget.",aget_children_rc,qelement->opaque);
     rb_zk_queue_element_decref(qelement);
   }
+}
+
+static void rb_zk_queue_mutex_status_change(struct rb_zk_mutex *mutex,void *opaque) {
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_cast(opaque);
+
+  const int mutex_obtained = rb_zk_mutex_obtained(mutex);
+  rdlog(LOG_DEBUG,"Queue mutex status changed to %d",mutex_obtained);
+  
+  if(mutex_obtained) {
+    rb_zk_queue_pop_nolock(qelm->rb_zk,qelm);
+  }
+}
+
+static void rb_zk_queue_mutex_error_cb(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
+  const char *cause,int rc,void *opaque) {
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_cast(opaque);
+  if(qelm->error_cb) {
+    qelm->error_cb(rb_zk,qelm,cause,rc,qelm->opaque);
+  }
+
+  rb_zk_queue_element_decref(qelm);
+}
+
+void rb_zk_queue_pop(struct rb_zk *zk,struct rb_zk_queue_element *qelement,const char *mutex_path) {
+  qelement->queue_mutex = rb_zk_mutex_lock(zk,mutex_path,rb_zk_queue_mutex_status_change,
+    rb_zk_queue_mutex_error_cb,qelement);
 }
 
 /// @TODO need an error callback too
