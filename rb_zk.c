@@ -26,6 +26,7 @@
 #include "rb_zk.h"
 
 #include <librd/rdevent.h>
+#include <librd/rdmem.h>
 #include <librd/rdlog.h>
 #include <librd/rdavl.h>
 #include <librd/rdsysqueue.h>
@@ -102,11 +103,6 @@ typedef TAILQ_HEAD(,rb_zk_mutex) rb_zk_mutex_list;
 #define rb_zk_mutex_list_insert(list,i) TAILQ_INSERT_TAIL(list,i,list_entry)
 #define rb_zk_mutex_list_remove(list,i) TAILQ_REMOVE(list,i,list_entry)
 
-static void rb_zk_mutex_done(struct rb_zk_mutex *mutex) {
-  free(mutex->path);
-  free(mutex);
-}
-
 const char *rb_zk_mutex_path(struct rb_zk_mutex *mutex) {
   return mutex->path;
 }
@@ -170,13 +166,27 @@ int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
 }
 
 static void rb_zk_mutex_error_done(struct rb_zk *zk,struct rb_zk_mutex *mutex,
-  int rc,const char *error) {
-    pthread_rwlock_wrlock(&zk->leaders_lock);
-    RD_AVL_REMOVE_ELM(&zk->leaders_avl,mutex);
-    rb_zk_mutex_list_remove(&zk->leaders_nodes_list, mutex);
-    pthread_rwlock_unlock(&zk->leaders_lock);
+                                                   int rc,const char *error) {
+  pthread_rwlock_wrlock(&zk->leaders_lock);
+  RD_AVL_REMOVE_ELM(&zk->leaders_avl,mutex);
+  rb_zk_mutex_list_remove(&zk->leaders_nodes_list, mutex);
+  pthread_rwlock_unlock(&zk->leaders_lock);
+  
+  if(mutex->error_cb) {
     mutex->error_cb(zk,mutex,error,rc,mutex->cb_opaque);
+  }
+
+  // @TODO free of mutex->cb_opaque ??
+  free(mutex->path);
+  free(mutex);
 }
+
+static void rb_zk_mutex_done(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
+  mutex->error_cb = NULL; // not needed anymore
+  rb_zk_mutex_error_done(zk,mutex,0,NULL);
+}
+
+
 
 /// send async reconnect signal
 static void rb_monitor_zk_async_reconnect(struct rb_zk *context);
@@ -369,7 +379,6 @@ static void rb_zk_mutex_lock0(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
 
   if(ZOK != acreate_rc) {
     rb_zk_mutex_error_done(zk,mutex,acreate_rc,"Can't call acreate");
-    rb_zk_mutex_done(mutex);
   } else {
     rdlog(LOG_DEBUG,"acreate called successfuly for path %s",rb_zk_mutex_path(mutex));
   }
@@ -393,13 +402,34 @@ static void zk_watcher_do_pending_locks(struct rb_zk *context) {
   pthread_mutex_unlock(&context->pending_leaders_lock);
 }
 
-void rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
+struct rb_zk_mutex * rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
   rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque) {
   
   struct rb_zk_mutex *_mutex = rb_zk_mutex_create_entry(zk,leader_path,
                                             schange_cb,error_cb,cb_opaque);
   rb_zk_mutex_list_insert(&zk->pending_leaders,_mutex);
   rd_thread_func_call1(zk->zk_thread,zk_watcher_do_pending_locks,zk);
+  return _mutex;
+}
+
+static void delete_mutex_completed(int rc, const void *data) {
+  struct rb_zk_mutex *mutex = monitor_zc_mutex_const_casting(data);
+
+  rb_zk_mutex_done(mutex->context, mutex);
+}
+
+void rb_zk_mutex_unlock(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
+
+  if(zoo_state(zk->handler) == ZOO_CONNECTED_STATE) {
+    if(NULL == mutex->path) {
+      rdlog(LOG_ERR,"Does not seen mutex path -> cannot delete");
+    } else {
+      zoo_adelete(zk->handler,mutex->path,-1,delete_mutex_completed,mutex);
+    }
+  } else {
+    // mutex already unlocked, since locks are ephimerals -> free resources
+    delete_mutex_completed(0,mutex);
+  } 
 }
 
 static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
@@ -428,7 +458,7 @@ static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
     i->schange_cb(i,i->cb_opaque);
     i->error_cb(i->context,i,buf,state,i->cb_opaque);
 
-    rb_zk_mutex_done(i);
+    rb_zk_mutex_done(context,i);
   }
 }
 
@@ -436,6 +466,222 @@ static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
  *  FIFO QUEUE
  */
 
+#define PRIVATE_QELEMENT_MAGIC 0x1AEEEEA1C1AEEEEAL
+struct rb_zk_queue_element {
+#ifdef PRIVATE_QELEMENT_MAGIC
+  uint64_t magic;
+#endif
+  struct rb_zk *rb_zk;
+  /// @TODO change name by queue_path
+  char *path;
+  char *queue_element_path;
+  void *opaque;
+
+  /// Watcher setted, but node added to list when setting, so we should 
+  /// ignore it
+  int should_ignore_watcher;
+
+  rb_zk_queue_error_cb_t error_cb;
+  data_completion_t data_cb;
+  void_completion_t delete_cb;
+
+  uint64_t refcnt;
+};
+
+static void rb_zk_queue_element_incref(struct rb_zk_queue_element *qelm) {
+  ++qelm->refcnt;
+}
+
+static void rb_zk_queue_element_decref(struct rb_zk_queue_element *qelm) {
+  if(--qelm->refcnt == 0) {
+    free(qelm);
+  }
+}
+
+struct rb_zk_queue_element *new_queue_element(struct rb_zk *rb_zk,
+  const char *path,rb_zk_queue_error_cb_t error_cb,
+  data_completion_t data_cb,void_completion_t delete_cb,void *opaque) {
+
+  struct rb_zk_queue_element *qelm;
+  rd_calloc_struct(&qelm,sizeof(*qelm),
+    -1,path,&qelm->path,
+    RD_MEM_END_TOKEN);
+
+  if(NULL != qelm) {
+#ifdef PRIVATE_QELEMENT_MAGIC
+    qelm->magic = PRIVATE_QELEMENT_MAGIC;
+#endif
+    qelm->rb_zk     = rb_zk;
+    qelm->opaque    = opaque;
+    qelm->error_cb  = error_cb;
+    qelm->data_cb   = data_cb;
+    qelm->delete_cb = delete_cb;
+    rb_zk_queue_element_incref(qelm);
+  }
+  return qelm;
+}
+
+void *rb_zk_queue_element_opaque(struct rb_zk_queue_element *elm) {
+  return elm->opaque;
+}
+
+static struct rb_zk_queue_element *rb_zk_queue_element_cast(void *a) {
+  struct rb_zk_queue_element *r = a;
+#ifdef PRIVATE_QELEMENT_MAGIC
+  assert(PRIVATE_QELEMENT_MAGIC == r->magic);
+#endif
+  return r;
+}
+
+static struct rb_zk_queue_element *rb_zk_queue_element_const_cast(const void *a) {
+  struct rb_zk_queue_element *r = NULL;
+  memcpy(&r,&a,sizeof(r));
+  return rb_zk_queue_element_cast(r);
+}
+
+static const char *min_str(const struct String_vector *strings) {
+  const char *_min_str = NULL;
+  int i=0;
+
+  for(i=0;i<strings->count;++i) {
+    if(strings->data[i] == NULL) {
+      continue;
+    }
+
+    if(NULL == _min_str || strcmp(strings->data[i],_min_str) < 0) {
+      _min_str = strings->data[i];
+    }
+  }
+
+  return _min_str;
+}
+
+static void rb_zk_queue_delete_completed(int rc, const void *data) {
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_const_cast(data);
+  if(qelm->delete_cb) {
+    qelm->delete_cb(rc,qelm->opaque);
+  }
+  rb_zk_queue_element_decref(qelm);
+}
+
+static void rb_zk_queue_get_element(int rc, const char *value,int value_len,
+  const struct Stat *stat,const void *data) {
+  static const int IGNORE_NODE_VERSION = -1;
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_const_cast(data);
+
+  if(rc < 0) {
+    qelm->error_cb(qelm->rb_zk,qelm,
+      "Error getting queue element",rc,qelm->opaque);
+    rb_zk_queue_element_decref(qelm);
+  }
+
+  if(qelm->data_cb) {
+    qelm->data_cb(rc,value,value_len,stat,qelm);
+  }
+
+  const int adelete_rc = zoo_adelete(qelm->rb_zk->handler,
+    qelm->queue_element_path,IGNORE_NODE_VERSION,
+    rb_zk_queue_delete_completed,data);
+
+  if(adelete_rc < 0) {
+    if(qelm->error_cb) {
+      qelm->error_cb(qelm->rb_zk,qelm,
+        "Error calling adelete",rc,qelm->opaque);
+    }
+  }
+}
+
+static void rb_zk_queue_child_watcher(zhandle_t *zh, int type, int state, 
+                                    const char *path, void *watcherCtx) {
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_const_cast(watcherCtx);
+
+  if(!qelm->should_ignore_watcher) {
+    /// Node added to the queue.
+    rb_zk_queue_pop_nolock(qelm->rb_zk,qelm);
+  }
+}
+
+static void rb_zk_queue_pop_minimum0(int rc, 
+  const struct String_vector *strings, const void *_data, int watcher_setted);
+
+static void rb_zk_queue_pop_minimum_no_watcher_setted(int rc,
+    const struct String_vector *strings, const void *_data) {
+  rb_zk_queue_pop_minimum0(rc,strings,_data,0);
+}
+
+static void rb_zk_queue_pop_minimum_watcher_setted(int rc,
+    const struct String_vector *strings, const void *_data) {
+  rb_zk_queue_pop_minimum0(rc,strings,_data,1);
+}
+
+/// @TODO need an error callback too
+static void rb_zk_queue_pop_minimum0(int rc, 
+  const struct String_vector *strings, const void *_data, int watcher_setted) {
+
+  char buf[BUFSIZ];
+  struct rb_zk_queue_element *qelm = rb_zk_queue_element_const_cast(_data);
+
+  if(rc < 0) {
+    qelm->error_cb(qelm->rb_zk,qelm,
+       "Error getting queue minimum",rc,qelm->opaque);
+    return;
+  }
+
+  const char *_min_str = min_str(strings);
+  if(NULL != _min_str) {
+    snprintf(buf,sizeof(buf),"%s",qelm->path);
+    parent_node(buf);
+    asprintf(&qelm->queue_element_path,"%s/%s",buf,_min_str);
+
+    if(watcher_setted) {
+      rdlog(LOG_DEBUG,"Watcher already setted. Marking to ignore it.");
+      qelm->should_ignore_watcher = 1;
+    }
+
+    rdlog(LOG_DEBUG,"Trying to get sensor %s",buf);
+    const int aget_rc = zoo_aget(qelm->rb_zk->handler,buf,
+                          0,rb_zk_queue_get_element,qelm);
+    if(aget_rc != 0) {
+      qelm->error_cb(qelm->rb_zk,qelm,
+        "Can't do aget over min element queue",aget_rc,qelm->opaque);
+      rb_zk_queue_element_decref(qelm);
+    }
+  } else if(!watcher_setted) {
+    snprintf(buf,sizeof(buf),"%s",qelm->path);
+    parent_node(buf);
+    rdlog(LOG_DEBUG,"No more sensors to get, I will watch %s",buf);
+    zoo_awget_children(qelm->rb_zk->handler,buf,
+                        rb_zk_queue_child_watcher,qelm,
+                        rb_zk_queue_pop_minimum_watcher_setted,qelm);
+  } else {
+    rdlog(LOG_DEBUG,"Still no sensor to get. Waiting the watcher event.");
+  }
+}
+
+/// @TODO need an error callback too
+void rb_zk_queue_pop_nolock(struct rb_zk *zk,struct rb_zk_queue_element *qelement) {
+
+  char buf[BUFSIZ];
+  struct ACL_vector acl;
+  memcpy(&acl,&ZOO_OPEN_ACL_UNSAFE,sizeof(acl));
+
+#ifdef PRIVATE_QELEMENT_MAGIC
+  qelement->magic = PRIVATE_QELEMENT_MAGIC;
+#endif
+  qelement->rb_zk = zk;
+
+  snprintf(buf,sizeof(buf),"%s",qelement->path);
+  parent_node(buf);
+
+  const int aget_children_rc = zoo_aget_children(zk->handler,buf,0,
+                          rb_zk_queue_pop_minimum_no_watcher_setted,qelement);
+  if(aget_children_rc < 0) {
+    qelement->error_cb(zk,qelement,"Can't call aget.",aget_children_rc,qelement->opaque);
+    rb_zk_queue_element_decref(qelement);
+  }
+}
+
+/// @TODO need an error callback too
 void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,
   string_completion_t create_mutex_node_complete, void *opaque) {
 
@@ -453,6 +699,10 @@ void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int va
     rdlog(LOG_DEBUG,"acreate called successfuly for queue %s",path);
   }
 }
+
+/*
+ *  REDBORDER MONITOR ZOOKEEPER
+ */
 
 static void zk_watcher(zhandle_t *zh, int type, int state, const char *path,
              void* _context) {

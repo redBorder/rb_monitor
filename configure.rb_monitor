@@ -8,6 +8,7 @@ mkl_require atomics must pass
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-DFORTIFY_SOURCE=2"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-DNDEBUG"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-std=gnu99"
+mkl_mkvar_append CPPFLAGS CPPFLAGS "-D_GNU_SOURCE"
 
 
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-ftrack-macro-expansion=2 -Wextra -Wcast-qual -Wshadow -Wsign-conversion -Wno-used"
@@ -31,7 +32,7 @@ function checks {
          void *f();void *f(){return pthread_mutex_init;}"
 
     mkl_lib_check json HAVE_JSON_C fail CC "-ljson" \
-        "#include #include <json/json.h>"
+        "#include <json/json.h>"
 
     # Check that librdkafka is available, and allow to link it statically.
     mkl_meta_set "librdkafka" "desc" "librdkafka is available at http://github.com/edenhill/librdkafka."

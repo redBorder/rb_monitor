@@ -93,6 +93,7 @@ struct rb_monitor_zk {
   int i_am_leader;
 
   struct rb_zk *zk_handler;
+  struct rb_zk_mutex *zk_sensors_poll_mutex;
 };
 
 static struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
@@ -101,6 +102,81 @@ static struct rb_monitor_zk *rb_monitor_zk_casting(void *a) {
 	assert(RB_MONITOR_ZK_MAGIC == b->magic);
 #endif
 	return b;
+}
+
+static struct rb_monitor_zk *rb_monitor_zk_const_casting(const void *a) {
+  struct rb_monitor_zk *b=NULL;
+  memcpy(&b,&a,sizeof(a));
+  return rb_monitor_zk_casting(b);
+}
+
+/*
+ *  LIST POP
+ */
+
+static void sensors_queue_poll_loop_start(struct rb_monitor_zk *rb_mzk);
+
+void rb_zk_pop_error_cb(struct rb_zk *rb_zk,struct rb_zk_queue_element *qelm,
+  const char *cause,int rc,void *opaque) {
+  struct rb_monitor_zk *rb_mzk = rb_monitor_zk_const_casting(opaque);
+
+  rdlog(LOG_ERR,"Couldn't pop queue element [rc=%d]: %s. Retrying",rc,cause);
+  rb_zk_mutex_unlock(rb_zk,rb_mzk->zk_sensors_poll_mutex);
+  sensors_queue_poll_loop_start((struct rb_monitor_zk *)rb_zk_queue_element_opaque(qelm));
+}
+
+void rb_zk_pop_data_cb(int rc, const char *value, int value_len, 
+  const struct Stat *stat, const void *data) {
+
+  if(rc < 0) {
+    rdlog(LOG_ERR,"Error getting data [rc=%d]",rc);
+    /// @TODO unlock
+  }
+
+  /// @TODO real treatment
+  rdlog(LOG_INFO,"Received data %*.s",value_len,value);
+}
+
+void rb_zk_pop_delete_completed_cb(int rc,const void *data) {
+  struct rb_monitor_zk *rbmzk = rb_monitor_zk_const_casting(data);
+  
+  if(rc < 0) {
+    rdlog(LOG_ERR,"Error deleting [rc=%d]",rc);
+  } else {
+    rdlog(LOG_DEBUG,"Deleting sensor in zookeeper, pop completed");
+  }
+
+  rb_zk_mutex_unlock(rbmzk->zk_handler,rbmzk->zk_sensors_poll_mutex);
+  sensors_queue_poll_loop_start(rbmzk);
+}
+
+static void sensor_queue_poll_mutex_schange(struct rb_zk_mutex *mutex,void *opaque) {
+  struct rb_monitor_zk *rbmzk = rb_monitor_zk_casting(opaque);
+
+  const int mutex_obtained = rb_zk_mutex_obtained(mutex);
+  rdlog(LOG_DEBUG,"Queue mutex status changed to %d",mutex_obtained);
+  
+  struct rb_zk_queue_element *qelement_config = new_queue_element(rbmzk->zk_handler,
+    ZOOKEEPER_TASKS_PATH_LEAF,rb_zk_pop_error_cb,rb_zk_pop_data_cb,rb_zk_pop_delete_completed_cb,
+    rbmzk);
+
+  if(mutex_obtained) {
+    rb_zk_queue_pop_nolock(rbmzk->zk_handler,qelement_config);
+  }
+}
+
+static void zk_monitor_pop_error_cb(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
+  const char *cause,int rc,void *opaque) {
+
+  /// @TODO delayed retry.
+  rdlog(LOG_ERR,"Can't get sensor lists mutex: [%s][rc=%d]. Retrying.",cause,rc);
+  // sensors_queue_poll_loop_start(rbmzk);
+}
+
+static void sensors_queue_poll_loop_start(struct rb_monitor_zk *rb_mzk) {
+  rb_mzk->zk_sensors_poll_mutex = rb_zk_mutex_lock(rb_mzk->zk_handler,
+    ZOOKEEPER_MUTEX_PATH_LEAF,sensor_queue_poll_mutex_schange,
+    zk_monitor_pop_error_cb,rb_mzk);
 }
 
 /*
@@ -176,7 +252,7 @@ static void*zk_mon_watcher(void *_context) {
  * RB_MONITOR ZOOKEEPER STRUCT (pt 2)
  */
 
- static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
+static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
                                                   json_object *zk_sensors) {
   string_list_init(&monitor_zk->sensors_list);
 
@@ -238,6 +314,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
 
   zk_prepare(_zk->zk_handler);
   try_to_be_master(_zk);
+  sensors_queue_poll_loop_start(_zk);
 
   return _zk;
 err:
