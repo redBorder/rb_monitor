@@ -425,6 +425,7 @@ void rb_zk_mutex_unlock(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
     if(NULL == mutex->path) {
       rdlog(LOG_ERR,"Does not seen mutex path -> cannot delete");
     } else {
+      /// @TODO adelete error treatment
       zoo_adelete(zk->handler,mutex->path,-1,delete_mutex_completed,mutex);
     }
   } else {
