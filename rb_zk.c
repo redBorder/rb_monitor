@@ -666,7 +666,6 @@ static void rb_zk_queue_pop_minimum0(int rc,
   }
 }
 
-/// @TODO need an error callback too
 void rb_zk_queue_pop_nolock(struct rb_zk *zk,struct rb_zk_queue_element *qelement) {
 
   char buf[BUFSIZ];

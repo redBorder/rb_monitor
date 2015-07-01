@@ -32,7 +32,6 @@ int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
     int valuelen,const struct ACL_vector *acl,int flags,char *path_buffer,
     int path_buffer_len);
 
-/// @TODO change it for leader struct
 struct rb_zk_mutex;
 const char *rb_zk_mutex_path(struct rb_zk_mutex *mutex);
 int rb_zk_mutex_obtained(struct rb_zk_mutex *mutex);
@@ -40,7 +39,6 @@ typedef void (*rb_mutex_status_change_cb)(struct rb_zk_mutex *mutex,void *opaque
 typedef void (*rb_mutex_error_cb)(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
 	const char *cause,int rc,void *opaque);
 
-/// @TODO is this needed??
 int rb_zk_create_recursive_node(struct rb_zk *zk,const char *path,int flags);
 
 struct rb_zk_queue_element;
@@ -73,12 +71,12 @@ void rb_zk_queue_pop(struct rb_zk *zk,struct rb_zk_queue_element *qelement,const
 
 /** Try to obtain a lock.
 	@param zk redBorder Zookeeper handler
-	@param leader_path path you want to be the leader
+	@param mutex_path path you want to be the mutex
 	@param schange_cb Callback called when mutex status change
 	@param error_cb Callback called when an error happens. In this case,
 	       rb_zk_mutex will be deleted, and you have to create it again.
 */
-struct rb_zk_mutex *rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
+struct rb_zk_mutex *rb_zk_mutex_lock(struct rb_zk *zk,const char *mutex_path,
 	rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque);
 
 /** Release a lock.
