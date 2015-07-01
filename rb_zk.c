@@ -622,7 +622,6 @@ static void rb_zk_queue_pop_minimum_watcher_setted(int rc,
   rb_zk_queue_pop_minimum0(rc,strings,_data,1);
 }
 
-/// @TODO need an error callback too
 static void rb_zk_queue_pop_minimum0(int rc, 
   const struct String_vector *strings, const void *_data, int watcher_setted) {
 
@@ -632,6 +631,7 @@ static void rb_zk_queue_pop_minimum0(int rc,
   if(rc < 0) {
     qelm->error_cb(qelm->rb_zk,qelm,
        "Error getting queue minimum",rc,qelm->opaque);
+    rb_zk_queue_element_decref(qelm);
     return;
   }
 
