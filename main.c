@@ -18,6 +18,7 @@
 
 #include "config.h"
 
+#include "rb_sensor.h"
 #include "rb_system.h"
 #include "rb_libmatheval.h"
 #include "rb_snmp.h"
@@ -206,7 +207,7 @@ static void parse_rdkafka_config_json(struct _worker_info *worker_info,
 }
 
 #ifdef HAVE_ZOOKEEPER
-static void parse_zookeeper_json(struct _main_info *main_info, json_object *zk_config) {
+static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_info *worker_info,json_object *zk_config) {
 	char *host = NULL;
 	uint64_t pop_watcher_timeout = 0,push_timeout = 0;
 	json_object *zk_sensors = NULL;
@@ -239,7 +240,8 @@ static void parse_zookeeper_json(struct _main_info *main_info, json_object *zk_c
 		return;
 	}
 
-	main_info->zk = init_rbmon_zk(host,pop_watcher_timeout,push_timeout,zk_sensors);
+	main_info->zk = init_rbmon_zk(host,pop_watcher_timeout,
+		push_timeout,zk_sensors,worker_info->queue);
 }
 #endif
 
@@ -1150,8 +1152,16 @@ void * worker(void *_info){
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
 			rdlog(LOG_DEBUG,"Pop element %p",elm->rfqe_ptr);
-			json_object * sensor_info = elm->rfqe_ptr;
+			struct rb_sensor *sensor = elm->rfqe_ptr;
+#ifdef RB_SENSOR_MAGIC
+			assert(RB_SENSOR_MAGIC == sensor->magic);
+#endif
+			json_object * sensor_info = sensor->json_sensor;
 			process_sensor(worker_info,&pt_worker_info,sensor_info);
+			if(sensor->flags & RB_SENSOR_F_FREE) {
+				json_object_put(sensor->json_sensor);
+			}
+			free(sensor);
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
@@ -1187,7 +1197,16 @@ void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
 		rdlog(LOG_DEBUG,"Push element %p",value);
-		rd_fifoq_add(queue,value);
+		struct rb_sensor *sensor = calloc(1,sizeof(*sensor));
+		if(!sensor) {
+			rdlog(LOG_ERR,"Can't allocate sensor (out of memory?)");
+		} else {
+#ifdef RB_SENSOR_MAGIC
+			sensor->magic = RB_SENSOR_MAGIC;
+#endif
+			sensor->json_sensor = value;
+			rd_fifoq_add(queue,sensor);
+		}
 	}
 }
 
@@ -1265,7 +1284,7 @@ int main(int argc, char  *argv[])
 #ifndef HAVE_ZOOKEEPER
 			rdlog(LOG_ERR,"This monitor does not have zookeeper enabled.");
 #else
-			parse_zookeeper_json(&main_info,zk);
+			parse_zookeeper_json(&main_info,&worker_info,zk);
 #endif
 	}
 
