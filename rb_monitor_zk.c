@@ -57,8 +57,10 @@ typedef struct{
 
 #define string_list_have_to_lock(list) (list->flags & STRING_LIST_F_LOCK)
 
-static void string_list_init(string_list *list) {
+static void string_list_init(string_list *list,int flags) {
   TAILQ_INIT(&list->list);
+
+  list->flags = flags;
   if(string_list_have_to_lock(list)) {
     pthread_mutex_init(&list->mutex,NULL);    
   }
@@ -131,7 +133,7 @@ struct rb_monitor_zk {
   char *zk_host;
   time_t pop_watcher_timeout,push_timeout;
 
-  string_list sensors_list;
+  string_list push_sensors_list;
 
   /// @TODO reset function that set to 0 this fields
   char *my_leader_node;
@@ -218,7 +220,7 @@ static void rb_monitor_push_sensor(char *str,size_t len,void *_arg) {
 
 static void rb_monitor_leader_push_sensors(void *opaque) {
   struct rb_monitor_zk *rb_mzk = rb_monitor_zk_casting(opaque);
-  string_list_foreach_arg(&rb_mzk->sensors_list,rb_monitor_push_sensor,rb_mzk);
+  string_list_foreach_arg(&rb_mzk->push_sensors_list,rb_monitor_push_sensor,rb_mzk);
 }
 
 /*
@@ -275,7 +277,7 @@ static void*zk_mon_watcher(void *_context) {
 
 static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
                                                   json_object *zk_sensors) {
-  string_list_init(&monitor_zk->sensors_list);
+  string_list_init(&monitor_zk->push_sensors_list,0);
 
   int i=0;
   for(i=0;i<json_object_array_length(zk_sensors);++i) {
@@ -291,7 +293,7 @@ static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
       continue;
     }
 
-    void *rc = string_list_append_const(&monitor_zk->sensors_list,sensor_str,
+    void *rc = string_list_append_const(&monitor_zk->push_sensors_list,sensor_str,
       strlen(sensor_str),STRING_LIST_STR_F_COPY);
     if(rc == NULL) {
       rdlog(LOG_ERR,"Can't append ZK sensor %d to string list (out of memory?)",i);
