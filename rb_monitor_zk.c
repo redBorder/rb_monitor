@@ -42,28 +42,75 @@ static const int zk_read_timeout = 10000;
 struct string_list_node {
   char *str;
   int len;
+#define STRING_LIST_STR_F_COPY 0x01
+#define STRING_LIST_STR_F_FREE 0x02
+  int flags;
   TAILQ_ENTRY(string_list_node) entry;
 };
 
-typedef TAILQ_HEAD(,string_list_node) string_list;
+typedef struct{
+  TAILQ_HEAD(,string_list_node) list;
+#define STRING_LIST_F_LOCK 0x01
+  int flags;
+  pthread_mutex_t mutex;
+} string_list;
 
-#define string_list_init(head) TAILQ_INIT(head)
+#define string_list_have_to_lock(list) (list->flags & STRING_LIST_F_LOCK)
 
-static struct string_list_node *string_list_append(string_list *l,const char *str) {
-  struct string_list_node *node = NULL;
-  rd_calloc_struct(&node, sizeof(*node), 
-    -1, str, &node->str,
-    RD_MEM_END_TOKEN);
-  
+static void string_list_init(string_list *list) {
+  TAILQ_INIT(&list->list);
+  if(string_list_have_to_lock(list)) {
+    pthread_mutex_init(&list->mutex,NULL);    
+  }
+}
+
+static struct string_list_node *string_list_append(string_list *l,char *str,
+                                                    size_t len,int flags) {
+  const size_t alloc_size = sizeof(struct string_list_node) 
+                            + ((flags & STRING_LIST_STR_F_COPY) ? len : 0);
+  struct string_list_node *node = calloc(1,alloc_size);
+  if(flags & STRING_LIST_STR_F_COPY) {
+    memcpy(&node[1],str,len);
+  }
+
   if(node) {
-    node->len = strlen(node->str);
-    TAILQ_INSERT_TAIL(l,node,entry);
+    node->str = flags & STRING_LIST_STR_F_COPY ? (void *)&node[1] : str;
+    node->len = len;
+    node->flags = flags;
+    TAILQ_INSERT_TAIL(&l->list,node,entry);
   }
 
   return node;
 }
 
-#define string_list_foreach(var,head) TAILQ_FOREACH(var,head,entry)
+static struct string_list_node *string_list_append_const(string_list *l,
+                                const char *str,size_t len,int flags) {
+  // couldn't free a const field
+  assert(flags & ~STRING_LIST_STR_F_FREE);
+  
+  // Const casting
+  char *_str;
+  memcpy(&_str,&str,sizeof(str));
+
+  return string_list_append(l,_str,len,flags);
+}
+
+static void string_list_foreach_arg(string_list *list,
+                void (*function)(char *str,size_t len,void *arg),void *arg) {
+  struct string_list_node *var;
+
+  if(string_list_have_to_lock(list)) {
+    pthread_mutex_lock(&list->mutex);
+  }
+
+  TAILQ_FOREACH(var,&list->list,entry){
+    function(var->str,var->len,arg);
+  }
+
+  if(string_list_have_to_lock(list)) {
+    pthread_mutex_unlock(&list->mutex);
+  }
+}
 
 #if 0
 static void string_list_done(string_list *l) {
@@ -162,15 +209,16 @@ static void rb_monitor_leader_push_sensors_cb(int rc,const char *value,const voi
   }
 }
 
+static void rb_monitor_push_sensor(char *str,size_t len,void *_arg) {
+  struct rb_monitor_zk *rb_mzk = _arg;
+  rdlog(LOG_DEBUG,"uploading sensor [%s]",str);
+    rb_zk_queue_push(rb_mzk->zk_handler,ZOOKEEPER_TASKS_PATH_LEAF,str,len,
+      rb_monitor_leader_push_sensors_cb, rb_mzk);
+}
+
 static void rb_monitor_leader_push_sensors(void *opaque) {
   struct rb_monitor_zk *rb_mzk = rb_monitor_zk_casting(opaque);
-  struct string_list_node *i=NULL;
-  
-  TAILQ_FOREACH(i,&rb_mzk->sensors_list,entry) {
-    rdlog(LOG_DEBUG,"uploading sensor [%s]",i->str);
-    rb_zk_queue_push(rb_mzk->zk_handler,ZOOKEEPER_TASKS_PATH_LEAF,i->str,i->len,
-      rb_monitor_leader_push_sensors_cb, rb_mzk);
-  }
+  string_list_foreach_arg(&rb_mzk->sensors_list,rb_monitor_push_sensor,rb_mzk);
 }
 
 /*
@@ -243,7 +291,8 @@ static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
       continue;
     }
 
-    void *rc = string_list_append(&monitor_zk->sensors_list,sensor_str);
+    void *rc = string_list_append_const(&monitor_zk->sensors_list,sensor_str,
+      strlen(sensor_str),STRING_LIST_STR_F_COPY);
     if(rc == NULL) {
       rdlog(LOG_ERR,"Can't append ZK sensor %d to string list (out of memory?)",i);
       continue;
