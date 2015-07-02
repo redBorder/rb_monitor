@@ -128,7 +128,8 @@ void rb_zk_pop_data_cb(int rc, const char *value, int value_len,
   }
 
   /// @TODO real treatment
-  rdlog(LOG_INFO,"Received data %*s",value_len,value);
+  rdlog(LOG_DEBUG,"Received data %*s",value_len,value);
+
 }
 
 void rb_zk_pop_delete_completed_cb(int rc,const void *data) {
