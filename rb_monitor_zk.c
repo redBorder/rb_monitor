@@ -261,6 +261,7 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   struct rb_monitor_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
     rdlog(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
+    return NULL;
   }
 
 #ifdef RB_MONITOR_ZK_MAGIC

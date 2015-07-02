@@ -579,6 +579,7 @@ static void rb_zk_queue_get_element(int rc, const char *value,int value_len,
     qelm->error_cb(qelm->rb_zk,qelm,
       "Error getting queue element",rc,qelm->opaque);
     rb_zk_queue_element_decref(qelm);
+    return;
   }
 
   if(qelm->data_cb) {
@@ -820,6 +821,7 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
   struct rb_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
     rdlog(LOG_ERR,"Can't allocate zookeeper handler (out of memory?)");
+    return NULL;
   }
 
 #ifdef RB_ZK_MAGIC
