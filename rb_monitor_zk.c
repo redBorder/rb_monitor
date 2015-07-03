@@ -19,6 +19,7 @@
 #include "rb_monitor_zk.h"
 
 #include "rb_zk.h"
+#include "rb_sensor.h"
 
 #include <librd/rdlog.h>
 #include <librd/rdtimer.h>
@@ -174,11 +175,14 @@ struct rb_monitor_zk {
   char *zk_host;
   time_t pop_watcher_timeout,push_timeout;
 
+  string_list pop_sensors_list;
   string_list push_sensors_list;
 
   /// @TODO reset function that set to 0 this fields
   char *my_leader_node;
   int i_am_leader;
+
+  rd_fifoq_t *workers_queue;
 
   struct rb_zk *zk_handler;
 };
@@ -210,16 +214,44 @@ void rb_zk_pop_error_cb(struct rb_zk *rb_zk,struct rb_zk_queue_element *qelm,
   sensors_queue_poll_loop_start((struct rb_monitor_zk *)rb_zk_queue_element_opaque(qelm));
 }
 
+/// @TODO quick hack, need to resolve in a better way
+void queueSensor(struct json_object *value,rd_fifoq_t *queue);
+
+static void rb_monitor_zk_add_sensor_to_monitor_queue(char *str,size_t len,void *opaque) {
+  struct rb_monitor_zk *rb_mzk = rb_monitor_zk_casting(opaque);
+  enum json_tokener_error jerr;
+  assert(rb_mzk->workers_queue);
+
+  json_object *obj = json_tokener_parse_verbose(str,&jerr);
+  if(NULL == obj) {
+    rdlog(LOG_ERR,"Can't parse zookeeper received JSON: %s",json_tokener_error_desc(jerr));
+    return;
+  }
+
+  queueSensor(obj,rb_mzk->workers_queue);
+}
+
+static void rb_monitor_zk_add_popped_sensors_to_monitor_queue(struct rb_monitor_zk *rb_mzk) {
+  string_list laux;
+  string_list_init(&laux,0);
+
+  string_list_move(&laux,&rb_mzk->pop_sensors_list);
+  string_list_foreach_arg_free(&laux,rb_monitor_zk_add_sensor_to_monitor_queue,rb_mzk);
+}
+
 void rb_zk_pop_data_cb(int rc, const char *value, int value_len, 
   const struct Stat *stat, const void *data) {
+  struct rb_monitor_zk *rb_mzk = rb_monitor_zk_const_casting(data);
 
   if(rc < 0) {
     rdlog(LOG_ERR,"Error getting data [rc=%d]",rc);
   }
 
-  /// @TODO real treatment
-  rdlog(LOG_DEBUG,"Received data %*s",value_len,value);
-
+  rdlog(LOG_DEBUG,"Received data %*.s",value_len,value);
+  string_list_append_const(&rb_mzk->pop_sensors_list,value,value_len,
+                                            STRING_LIST_STR_F_COPY);
+  rd_thread_func_call1(rb_mzk->worker,rb_monitor_zk_add_popped_sensors_to_monitor_queue,
+                                                                        rb_mzk);
 }
 
 void rb_zk_pop_delete_completed_cb(int rc,const void *data) {
@@ -318,8 +350,6 @@ static void*zk_mon_watcher(void *_context) {
 
 static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
                                                   json_object *zk_sensors) {
-  string_list_init(&monitor_zk->push_sensors_list,0);
-
   int i=0;
   for(i=0;i<json_object_array_length(zk_sensors);++i) {
     json_object *value = json_object_array_get_idx(zk_sensors, i);
@@ -346,10 +376,12 @@ static size_t rb_monitor_zk_parse_sensors(struct rb_monitor_zk *monitor_zk,
 }
 
 struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
-  uint64_t push_timeout,json_object *zk_sensors) {
+  uint64_t push_timeout,json_object *zk_sensors,rd_fifoq_t *workers_queue) {
   char strerror_buf[BUFSIZ];
 
   assert(host);
+  assert(zk_sensors);
+  assert(workers_queue);
 
   struct rb_monitor_zk *_zk = calloc(1,sizeof(*_zk));
   if(NULL == _zk){
@@ -368,6 +400,9 @@ struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
   rd_thread_create(&_zk->worker, NULL, NULL, zk_mon_watcher, _zk);
   rd_timer_init(&_zk->timer,RD_TIMER_RECURR,_zk->worker,rb_monitor_leader_push_sensors,_zk);
 
+  _zk->workers_queue = workers_queue;
+  string_list_init(&_zk->pop_sensors_list,STRING_LIST_F_LOCK);
+  string_list_init(&_zk->push_sensors_list,0);
   rb_monitor_zk_parse_sensors(_zk,zk_sensors);
 
   if(NULL == _zk->zk_handler) {
