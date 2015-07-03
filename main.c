@@ -1230,7 +1230,10 @@ int main(int argc, char  *argv[])
 
 	assert(default_config);
 	pthread_t * pd_thread = NULL;
-	rd_fifoq_t queue = {{0}};
+	rd_fifoq_t queue;
+	memset(&queue,0,sizeof(queue)); // Needed even with init()
+	rd_fifoq_init(&queue);
+	worker_info.queue = &queue;
 	json_bool ret;
 
 	assert(default_config);
@@ -1301,14 +1304,12 @@ int main(int argc, char  *argv[])
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
 		rdlog(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting");
 	}else{
-		rd_fifoq_init(&queue);
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
 			rdlog(LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.");
 		}else{
 			rdlog(LOG_INFO,"Main thread started successfuly. Starting workers threads.");
-			worker_info.queue = &queue;
 			for(int i=0;i<main_info.threads;++i){
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
 			}
