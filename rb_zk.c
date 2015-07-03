@@ -583,7 +583,7 @@ static void rb_zk_queue_get_element(int rc, const char *value,int value_len,
   }
 
   if(qelm->data_cb) {
-    qelm->data_cb(rc,value,value_len,stat,qelm);
+    qelm->data_cb(rc,value,value_len,stat,qelm->opaque);
   }
 
   const int adelete_rc = zoo_adelete(qelm->rb_zk->handler,
