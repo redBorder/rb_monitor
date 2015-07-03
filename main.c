@@ -1150,9 +1150,10 @@ void * worker(void *_info){
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
-		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,1)) && run){
-			rdlog(LOG_DEBUG,"Pop element %p",elm->rfqe_ptr);
+		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,100)) && run){
+			rdlog(LOG_DEBUG,"Pop element %p from queue %p",elm->rfqe_ptr,worker_info->queue);
 			struct rb_sensor *sensor = elm->rfqe_ptr;
+			assert(sensor);
 #ifdef RB_SENSOR_MAGIC
 			assert(RB_SENSOR_MAGIC == sensor->magic);
 #endif
@@ -1165,7 +1166,6 @@ void * worker(void *_info){
 			rd_fifoq_elm_release(worker_info->queue,elm);
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
-		sleep(worker_info->sleep_worker);
 	}
 
 	throw_msg_count = atoi(worker_info->max_kafka_fails);
