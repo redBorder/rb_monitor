@@ -1193,20 +1193,24 @@ void * worker(void *_info){
 	return _info; // just avoiding warning.
 }
 
+void queueSensor(struct json_object *value,rd_fifoq_t *queue) {
+	struct rb_sensor *sensor = calloc(1,sizeof(*sensor));
+	if(!sensor) {
+		rdlog(LOG_ERR,"Can't allocate sensor (out of memory?)");
+	} else {
+#ifdef RB_SENSOR_MAGIC
+		sensor->magic = RB_SENSOR_MAGIC;
+#endif
+		sensor->json_sensor = value;
+		rdlog(LOG_DEBUG,"Push element %p->%p",sensor,sensor->json_sensor);
+		rd_fifoq_add(queue,sensor);
+	}
+}
+
 void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
-		rdlog(LOG_DEBUG,"Push element %p",value);
-		struct rb_sensor *sensor = calloc(1,sizeof(*sensor));
-		if(!sensor) {
-			rdlog(LOG_ERR,"Can't allocate sensor (out of memory?)");
-		} else {
-#ifdef RB_SENSOR_MAGIC
-			sensor->magic = RB_SENSOR_MAGIC;
-#endif
-			sensor->json_sensor = value;
-			rd_fifoq_add(queue,sensor);
-		}
+		queueSensor(value,queue);
 	}
 }
 
