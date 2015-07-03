@@ -94,6 +94,15 @@ struct rb_zk_mutex {
 
 typedef TAILQ_HEAD(,rb_zk_mutex) rb_zk_mutex_list;
 #define rb_zk_mutex_list_init(list) TAILQ_INIT(list)
+
+static void rb_zk_mutex_done(struct rb_zk *zk,struct rb_zk_mutex *mutex);
+static void rb_zk_mutex_list_done(rb_zk_mutex_list *list) {
+  struct rb_zk_mutex *mutex,*aux;
+  TAILQ_FOREACH_SAFE(mutex,aux,list,list_entry) {
+    rb_zk_mutex_done(mutex->context,mutex);
+  }
+}
+
 #define rb_zk_mutex_list_foreach(i,list) TAILQ_FOREACH(i,list,list_entry)
 #define rb_zk_mutex_list_foreach_safe(i,aux,list) \
                                 TAILQ_FOREACH_SAFE(i,aux,list,list_entry)
@@ -600,6 +609,11 @@ static void rb_zk_queue_get_element(int rc, const char *value,int value_len,
 
 static void rb_zk_queue_child_watcher(zhandle_t *zh, int type, int state, 
                                     const char *path, void *watcherCtx) {
+  if(type != ZOO_CHILD_EVENT) {
+    rdlog(LOG_ERR,"Received an event != zhild event. returning.");
+    return;
+  }
+
   struct rb_zk_queue_element *qelm = rb_zk_queue_element_const_cast(watcherCtx);
 
   if(!qelm->should_ignore_watcher) {
@@ -846,6 +860,17 @@ struct rb_zk *rb_zk_init(char *host,int zk_timeout) {
   return _zk;
 }
 
-void stop_zk(struct rb_zk *zk);
+void rb_zk_done(struct rb_zk *_zk) {
+  rd_thread_kill_join(_zk->zk_thread,NULL);
+  const int close_rc = zookeeper_close(_zk->handler);
+  if(close_rc != 0) {
+    rdlog(LOG_ERR,"Error closing ZK connection [rc=%d]",close_rc);
+  }
+  rb_zk_mutex_list_done(&_zk->leaders_nodes_list);
+  rb_zk_mutex_list_done(&_zk->pending_leaders);
+  rd_avl_destroy(&_zk->leaders_avl);
+  free(_zk);
+
+}
 
 #endif
