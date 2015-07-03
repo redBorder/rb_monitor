@@ -48,6 +48,12 @@ struct string_list_node {
   TAILQ_ENTRY(string_list_node) entry;
 };
 
+static void string_list_node_done(struct string_list_node *node) {
+  if(node->flags & STRING_LIST_STR_F_FREE)
+    free(node->str);
+  free(node);
+}
+
 typedef struct{
   TAILQ_HEAD(,string_list_node) list;
 #define STRING_LIST_F_LOCK 0x01
@@ -68,17 +74,19 @@ static void string_list_init(string_list *list,int flags) {
 
 static struct string_list_node *string_list_append(string_list *l,char *str,
                                                     size_t len,int flags) {
-  const size_t alloc_size = sizeof(struct string_list_node) 
-                            + ((flags & STRING_LIST_STR_F_COPY) ? len : 0);
-  struct string_list_node *node = calloc(1,alloc_size);
-  if(flags & STRING_LIST_STR_F_COPY) {
-    memcpy(&node[1],str,len);
-  }
+  struct string_list_node *node = NULL;
+  const size_t alloc_size = sizeof(*node) 
+                            + ((flags & STRING_LIST_STR_F_COPY) ? len + 1 : 0);
+  node = calloc(1,alloc_size);
 
   if(node) {
     node->str = flags & STRING_LIST_STR_F_COPY ? (void *)&node[1] : str;
     node->len = len;
     node->flags = flags;
+    if(flags & STRING_LIST_STR_F_COPY) {
+      memcpy(node->str,str,len);
+      node->str[len]='\0';
+    }
     TAILQ_INSERT_TAIL(&l->list,node,entry);
   }
 
@@ -97,20 +105,53 @@ static struct string_list_node *string_list_append_const(string_list *l,
   return string_list_append(l,_str,len,flags);
 }
 
-static void string_list_foreach_arg(string_list *list,
-                void (*function)(char *str,size_t len,void *arg),void *arg) {
-  struct string_list_node *var;
+static void string_list_foreach_arg0(string_list *list,
+        void (*function)(char *str,size_t len,void *arg),void *arg,int _free) {
+  struct string_list_node *var,*aux;
 
   if(string_list_have_to_lock(list)) {
     pthread_mutex_lock(&list->mutex);
   }
 
-  TAILQ_FOREACH(var,&list->list,entry){
+  TAILQ_FOREACH_SAFE(var,aux,&list->list,entry){
     function(var->str,var->len,arg);
+    if(_free) {
+      string_list_node_done(var);
+    }
   }
 
   if(string_list_have_to_lock(list)) {
     pthread_mutex_unlock(&list->mutex);
+  }
+}
+
+static void string_list_foreach_arg_free(string_list *list,
+                void (*function)(char *str,size_t len,void *arg),void *arg) {
+  string_list_foreach_arg0(list,function,arg,1);
+}
+
+static void string_list_foreach_arg(string_list *list,
+                void (*function)(char *str,size_t len,void *arg),void *arg) {
+  string_list_foreach_arg0(list,function,arg,0);
+}
+
+/// Moves all elements of l2 into the end of l1
+static void string_list_move(string_list *l1,string_list *l2) {
+  if(string_list_have_to_lock(l1)) {
+    pthread_mutex_lock(&l1->mutex);
+  }
+  if(string_list_have_to_lock(l2)) {
+    pthread_mutex_lock(&l2->mutex);
+  }
+
+  TAILQ_CONCAT(&l1->list,&l2->list,entry);
+  TAILQ_INIT(&l2->list);
+
+  if(string_list_have_to_lock(l2)) {
+    pthread_mutex_unlock(&l2->mutex);
+  }
+  if(string_list_have_to_lock(l1)) {
+    pthread_mutex_unlock(&l1->mutex);
   }
 }
 
