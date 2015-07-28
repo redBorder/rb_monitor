@@ -1199,16 +1199,15 @@ int main(int argc, char  *argv[])
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
 
-	debug_set_debug_level(worker_info.debug);
-	debug_set_output_flags(worker_info.debug_output_flags);
-
-
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
 		Log(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
 	}else{
 		assert(NULL!=config);
 		parse_json_config(config,&worker_info,&main_info); // overwrite some or all default values.
 	}
+
+	debug_set_debug_level(worker_info.debug);
+	debug_set_output_flags(worker_info.debug_output_flags);
 
 	snmp_sess_init(&worker_info.default_session); /* set defaults */
 	worker_info.default_session.version  = SNMP_VERSION_1;
