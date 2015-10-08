@@ -46,6 +46,7 @@
 #include <librdkafka/rdkafka.h>
 #include <math.h>
 #include <matheval.h>
+#include <librbhttp/librb-http.h>
 
 #ifndef NDEBUG
 #include <ctype.h>
@@ -109,6 +110,11 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"sleep_worker\": 2,"
     "\"kafka_broker\": \"localhost\","
     "\"kafka_topic\": \"SNMP\","
+    "\"http_max_total_connections\":4,"
+    "\"http_timeout\": 10000,"
+    "\"http_connttimeout\": 3000 ,"
+    "\"http_verbose\": 0,"
+    "\"rb_http_max_messages\": 512 ,"
   "}";
 
 /// SHARED Info needed by threads.
@@ -117,12 +123,18 @@ struct _worker_info{
 	pthread_mutex_t snmp_session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
 	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
+	const char * http_endpoint;
 	rd_kafka_conf_t * rk_conf;
 	rd_kafka_topic_conf_t * rkt_conf;
 	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
 	struct monitor_values_tree * monitor_values_tree;
+	int64_t http_max_total_connections;
+	int64_t http_timeout;
+	int64_t http_connttimeout;
+	int64_t http_verbose;
+	int64_t rb_http_max_messages;
 };
 
 struct _sensor_data{
@@ -139,6 +151,7 @@ struct _sensor_data{
 struct _perthread_worker_info{
 	rd_kafka_t * rk;
 	rd_kafka_topic_t *rkt;
+	const char * http_endpoint;
 	int thread_ok;
 	struct _sensor_data sensor_data;
 };
@@ -174,6 +187,8 @@ void printHelp(const char * progName){
 		"\n",
 		progName);
 }
+
+static struct rb_http_handler_s * handler = NULL;
 
 static void parse_rdkafka_keyval_config(rd_kafka_conf_t *rk_conf,rd_kafka_topic_conf_t *rkt_conf,
 													const char *key,const char *value){
@@ -317,9 +332,33 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->sleep_worker = json_object_get_int64(val);
 		}
+		else if (0 == strncmp(key, "http_endpoint", strlen("http_endpoint")))
+		{
+			worker_info->http_endpoint	= json_object_get_string(val);
+		}
 		else if (0==strncmp(key, CONFIG_RDKAFKA_KEY, strlen(CONFIG_RDKAFKA_KEY)))
 		{
 			parse_rdkafka_config_json(worker_info,key,val);
+		}
+		else if(0==strncmp(key,"http_max_total_connections",sizeof "http_max_total_connections"-1))
+		{
+			worker_info->http_max_total_connections = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"http_timeout",sizeof "http_timeout"-1))
+		{
+			worker_info->http_timeout = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"http_connttimeout",sizeof "http_connttimeout"-1))
+		{
+			worker_info->http_connttimeout = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"http_verbose",sizeof "http_verbose"-1))
+		{
+			worker_info->http_verbose = json_object_get_int64(val);
+		}
+		else if(0==strncmp(key,"rb_http_max_messages",sizeof "rb_http_max_messages"-1))
+		{
+			worker_info->rb_http_max_messages = json_object_get_int64(val);
 		}
 		else
 		{
@@ -656,6 +695,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
 		uint64_t kafka=1,nonzero=0,timestamp_given=0,integer=0;
+		uint64_t http = 1;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
 		double number;int valid_double;
@@ -690,6 +730,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				timestamp_given=json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
 				kafka = json_object_get_int64(val2);
+			} else if (0 == strncmp(key2, "kafka", strlen("http"))) {
+				http = json_object_get_int64(val2);
 			}else if(0==strcmp(key2,"integer")){
 				integer = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
@@ -745,7 +787,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
 						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,
-						pt_worker_info->sensor_data.enrichment,kafka,integer);
+						pt_worker_info->sensor_data.enrichment,kafka || http,integer);
 					}
 					else
 					{
@@ -756,7 +798,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					pt_worker_info->sensor_data.enrichment,kafka,timestamp_given,type_fn,&memctx,integer);
+					pt_worker_info->sensor_data.enrichment,kafka || http,timestamp_given,type_fn,&memctx,integer);
 				}
 
 				if(nonzero && rd_dz(number))
@@ -764,6 +806,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					rdlog(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.",json_object_get_string(val));
 					bad_names[bad_names_pos++] = name;
 					kafka=0;
+					http = 0;
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){ // @TODO sepparate in it's own function
 				const char * operation = (char *)json_object_get_string(val);
@@ -774,6 +817,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						rdlog(LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping",
 							operation,bad_names[i]);
 						kafka=op_ok=0;
+						http = op_ok = 0;
 					}
 				}
 
@@ -966,8 +1010,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-							if(kafka && new_mv)
-								rd_lru_push(valueslist,(void *)new_mv);
+							if ((kafka || http) && new_mv)
+								rd_lru_push(valueslist, (void *)new_mv);
 						}
 						if(op_ok && splitop){
 							sum+=number;
@@ -995,8 +1039,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-							if(kafka && new_mv)
-								rd_lru_push(valueslist,(void *)new_mv);
+							if ((kafka || http) && new_mv) {
+								rd_lru_push(valueslist, (void *)new_mv);
+							}
 						}
 					}
 
@@ -1017,19 +1062,43 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 		} /* foreach monitor attribute */
 
-		if(kafka){
-			const struct monitor_value * monitor_value = NULL; 
-			while((monitor_value = rd_lru_pop(valueslist)))
-			{
-				struct printbuf* printbuf= print_monitor_value(monitor_value);
-				if(likely(NULL!=printbuf)){
-					//char * str_to_kafka = printbuf->buf;
-					//printbuf->buf=NULL;
-					if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
-					{
+		if (http && worker_info->http_endpoint != NULL) {
+
+			char http_max_total_connections[sizeof("18446744073709551616")];
+			char http_timeout[sizeof("18446744073709551616L")];
+			char http_connttimeout[sizeof("18446744073709551616L")];
+			char http_verbose[sizeof("18446744073709551616L")];
+			char rb_http_max_messages[sizeof("18446744073709551616L")];
+			char *err = NULL;
+			size_t errsize = 0;
+
+			snprintf(http_max_total_connections,sizeof(int64_t),"%"PRId64"",worker_info->http_max_total_connections);
+			snprintf(http_timeout,sizeof(int64_t),"%"PRId64"",worker_info->http_timeout);
+			snprintf(http_connttimeout,sizeof(int64_t),"%"PRId64"",worker_info->http_connttimeout);
+			snprintf(http_verbose,sizeof(int64_t),"%"PRId64"",worker_info->http_verbose);
+			snprintf(rb_http_max_messages,sizeof(int64_t),"%"PRId64"",worker_info->rb_http_max_messages);
+
+			rb_http_handler_set_opt(handler, "HTTP_MAX_TOTAL_CONNECTIONS",
+						http_max_total_connections, err, errsize);
+			rb_http_handler_set_opt(handler, "HTTP_TIMEOUT",
+						http_timeout, err, errsize);
+		        rb_http_handler_set_opt(handler, "HTTP_CONNTTIMEOUT",
+						http_connttimeout, err, errsize);
+		        rb_http_handler_set_opt(handler, "HTTP_VERBOSE",
+						http_verbose, err, errsize);
+		        rb_http_handler_set_opt(handler, "RB_HTTP_MAX_MESSAGES",
+						rb_http_max_messages, err, errsize);
+		}
+		const struct monitor_value * monitor_value = NULL;
+		while((monitor_value = rd_lru_pop(valueslist))) {
+			struct printbuf* printbuf= print_monitor_value(monitor_value);
+			if(likely(NULL!=printbuf)){
+				if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
+				{
+					if(kafka){
 						rdlog(LOG_DEBUG,"[Kafka] %s",printbuf->buf);
 						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
-								RD_KAFKA_MSG_F_FREE,
+								RD_KAFKA_MSG_F_COPY,
 								/* Payload and length */
 								printbuf->buf, printbuf->bpos,
 								/* Optional key and its length */
@@ -1045,18 +1114,25 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message");
 						}
+						rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
+					} /* if kafka */
+					if (http && worker_info->http_endpoint != NULL) {
+							rdlog(LOG_DEBUG,"[HTTP] %s\n",printbuf->buf);
+							rb_http_produce(handler, printbuf->buf,
+									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
 					}
-					printbuf_free(printbuf);
-					printbuf = NULL;
+//					if ((http && worker_info->http_endpoint != NULL) || kafka) {
+//						printbuf->buf=NULL; // rdkafka will free it
+//					}
+
 				}else{ /* if(printbuf) after malloc */
 					rdlog(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping");
 				}
 			} /* for i in splittoks */
+			printbuf_free(printbuf);
+		/*	printbuf = NULL;*/
+		}
 
-			rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
-
-
-		} /* if kafka */
 
 		rd_lru_destroy(valueslist);
 	} /* foreach monitor parameter */
@@ -1118,10 +1194,41 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 	return aok;
 }
 
+static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_code,
+                         long http_status, const char *status_code_str, char *buff,
+                         size_t bufsiz, void *opaque) {
+
+        if (status_code != 0) {
+                printf("CURL CODE: %d\n", status_code);
+        }
+
+        if (status_code == 0 && http_status != 200) {
+                printf("HTTP STATUS: %ld\n", http_status);
+        }
+
+        if (buff != NULL)
+                printf("MESSAGE: %s\n", buff);
+
+        if (opaque != NULL)
+                printf("OPAQUE: %p\n", opaque);
+
+        (void) rb_http_handler;
+        (void) bufsiz;
+        (void) status_code_str;
+}
+
+
+
+void *get_report_thread() {
+	while (rb_http_get_reports(handler, msg_callback, 100) || run);
+
+	return NULL;
+}
 
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
+	pthread_t pthread_report;
 	rd_kafka_conf_t * conf = rd_kafka_conf_dup(worker_info->rk_conf);
 	rd_kafka_topic_conf_t * topic_conf = rd_kafka_topic_conf_dup(worker_info->rkt_conf);
 	char errstr[256];
@@ -1146,7 +1253,17 @@ void * worker(void *_info){
 	}
 	pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
 
-	rdlog(LOG_INFO,"Thread %lu connected successfuly.",pthread_self());
+	char *err = NULL;
+	size_t errsize = 0;
+	if (worker_info->http_endpoint != NULL) {
+		handler = rb_http_handler_create(worker_info->http_endpoint, err, errsize);
+	}
+
+	if(pthread_create(&pthread_report, NULL, get_report_thread, NULL)) {
+		fprintf(stderr, "Error creating thread\n");
+	}
+	rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
+	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
@@ -1189,6 +1306,15 @@ void * worker(void *_info){
 
 	rd_kafka_topic_destroy(pt_worker_info.rkt);
 	rd_kafka_destroy(pt_worker_info.rk);
+	if (worker_info->http_endpoint != NULL) {
+		if(pthread_join(pthread_report, NULL)) {
+			fprintf(stderr, "Error joining thread\n");
+			//return 2;
+
+		}
+		rdlog(LOG_INFO, "[Thread] pthread_report finishing. \n");
+		rb_http_handler_destroy(handler, NULL, 0);
+	}
 
 	return _info; // just avoiding warning.
 }
@@ -1333,5 +1459,6 @@ int main(int argc, char  *argv[])
 	json_object_put(config_file);
 	rd_fifoq_destroy(&queue);
 	closelog();
+
 	return ret;
 }
