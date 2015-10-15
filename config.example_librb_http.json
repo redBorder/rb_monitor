@@ -9,12 +9,17 @@
     "timeout": 1,
     "max_snmp_fails": 2,
     "max_kafka_fails": 2,
-    "sleep_main_thread": 1,
+    "sleep_main_thread": 10,
     "sleep_worker_thread": 1,
     "kafka_broker": "192.168.101.201",
     "http_endpoint": "http://localhost:8080/librb-http",
     "kafka_topic": "rb_monitor",
     "kafka_timeout": 2,
+    "http_max_total_connections":4,
+    "http_timeout": 10000,
+    "http_connttimeout": 3000,
+    "http_verbose": 0,
+    "rb_http_max_messages":512,
   }
   ,
   "sensors":
