@@ -1121,10 +1121,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							rb_http_produce(handler, printbuf->buf,
 									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
 					}
-//					if ((http && worker_info->http_endpoint != NULL) || kafka) {
-//						printbuf->buf=NULL; // rdkafka will free it
-//					}
-
 				}else{ /* if(printbuf) after malloc */
 					rdlog(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping");
 				}
