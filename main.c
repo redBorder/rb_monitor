@@ -110,11 +110,6 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"sleep_worker\": 2,"
     "\"kafka_broker\": \"localhost\","
     "\"kafka_topic\": \"SNMP\","
-    "\"http_max_total_connections\":4,"
-    "\"http_timeout\": 10000,"
-    "\"http_connttimeout\": 3000 ,"
-    "\"http_verbose\": 0,"
-    "\"rb_http_max_messages\": 512 ,"
   "}";
 
 /// SHARED Info needed by threads.
