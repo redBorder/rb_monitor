@@ -28,6 +28,10 @@
 #include "rb_monitor_zk.h"
 #endif
 
+#ifdef HAVE_RBHTTP
+#include <librbhttp/librb-http.h>
+#endif
+
 #include <math.h>
 #include <librd/rdfloat.h>
 #include <librd/rdlog.h>
@@ -46,10 +50,14 @@
 #include <librdkafka/rdkafka.h>
 #include <math.h>
 #include <matheval.h>
-#include <librbhttp/librb-http.h>
 
 #ifndef NDEBUG
 #include <ctype.h>
+#endif
+
+#ifdef HAVE_RBHTTP
+/// @TODO move to global config, and all HTTP related
+static struct rb_http_handler_s * handler = NULL;
 #endif
 
 
@@ -115,7 +123,11 @@ struct _worker_info{
 	pthread_mutex_t snmp_session_mutex;
 	const char * community,*kafka_broker,*kafka_topic;
 	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
+
+#ifdef HAVE_RBHTTP
 	const char * http_endpoint;
+#endif
+
 	rd_kafka_conf_t * rk_conf;
 	rd_kafka_topic_conf_t * rkt_conf;
 	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
@@ -179,8 +191,6 @@ void printHelp(const char * progName){
 		"\n",
 		progName);
 }
-
-static struct rb_http_handler_s * handler = NULL;
 
 static void parse_rdkafka_keyval_config(rd_kafka_conf_t *rk_conf,rd_kafka_topic_conf_t *rkt_conf,
 													const char *key,const char *value){
@@ -326,7 +336,12 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		}
 		else if (0 == strncmp(key, "http_endpoint", strlen("http_endpoint")))
 		{
+#ifdef HAVE_RBHTTP
 			worker_info->http_endpoint	= json_object_get_string(val);
+#else
+			rdlog(LOG_CRIT,"Can't specify %s parameter if does not have support",
+				key);
+#endif
 		}
 		else if (0==strncmp(key, CONFIG_RDKAFKA_KEY, strlen(CONFIG_RDKAFKA_KEY)))
 		{
@@ -737,7 +752,11 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* foreach */
 
-		if (worker_info->kafka_broker == NULL && worker_info->http_endpoint == NULL) {
+		if (worker_info->kafka_broker == NULL 
+#ifdef HAVE_RBHTTP
+			&& worker_info->http_endpoint == NULL
+#endif
+			) {
 			send = 0;
 			rdlog(LOG_ERR,"[ERROR] 'kafka_broker' or 'http_endpoint' not set in configuration file.\n");
 		}
@@ -1053,6 +1072,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 		} /* foreach monitor attribute */
 
+#ifdef HAVE_RBHTTP
 		if (send && worker_info->http_endpoint != NULL) {
 
 			char http_max_total_connections[sizeof("18446744073709551616")];
@@ -1080,6 +1100,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		        rb_http_handler_set_opt(handler, "RB_HTTP_MAX_MESSAGES",
 						rb_http_max_messages, err, errsize);
 		}
+#endif
+
 		const struct monitor_value * monitor_value = NULL;
 		while((monitor_value = rd_lru_pop(valueslist))) {
 			struct printbuf* printbuf= print_monitor_value(monitor_value);
@@ -1107,11 +1129,13 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						}
 						rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
 					} /* if kafka */
+#ifdef HAVE_RBHTTP
 					if (send && worker_info->http_endpoint != NULL) {
 							rdlog(LOG_DEBUG,"[HTTP] %s\n",printbuf->buf);
 							rb_http_produce(handler, printbuf->buf,
 									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
 					}
+#endif
 				}else{ /* if(printbuf) after malloc */
 					rdlog(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping");
 				}
@@ -1181,6 +1205,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 	return aok;
 }
 
+#ifdef HAVE_RBHTTP
 static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_code,
                          long http_status, const char *status_code_str, char *buff,
                          size_t bufsiz, void *opaque) {
@@ -1204,19 +1229,22 @@ static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_c
         (void) status_code_str;
 }
 
-
-
 void *get_report_thread() {
 	while (rb_http_get_reports(handler, msg_callback, 100) || run);
 
 	return NULL;
 }
+#endif
 
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	pthread_t pthread_report;
 	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
+#ifdef HAVE_RBHTTP
+	pthread_t pthread_report;
+	char *err = NULL;
+	size_t errsize = 0;
+#endif
 
 	rd_init();
 
@@ -1244,8 +1272,7 @@ void * worker(void *_info){
 		rd_kafka_topic_conf_destroy(worker_info->rkt_conf);
 	}
 
-	char *err = NULL;
-	size_t errsize = 0;
+#ifdef HAVE_RBHTTP
 	if (worker_info->http_endpoint != NULL) {
 		handler = rb_http_handler_create(worker_info->http_endpoint, err, errsize);
 
@@ -1254,6 +1281,8 @@ void * worker(void *_info){
 		}
 			rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
 	}
+#endif
+
 	rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
@@ -1306,6 +1335,7 @@ void * worker(void *_info){
 		rd_kafka_destroy(pt_worker_info.rk);
     }
 
+#ifdef HAVE_RBHTTP
 	if (worker_info->http_endpoint != NULL) {
 		if(pthread_join(pthread_report, NULL)) {
 			fprintf(stderr, "Error joining thread\n");
@@ -1315,6 +1345,7 @@ void * worker(void *_info){
 		rdlog(LOG_INFO, "[Thread] pthread_report finishing. \n");
 		rb_http_handler_destroy(handler, NULL, 0);
 	}
+#endif
 
 	return _info; // just avoiding warning.
 }
