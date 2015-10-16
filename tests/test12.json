@@ -28,7 +28,7 @@
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [        
-        {"name": "load_1", "system":  "echo ';'", "unit": "%", "kafka": 1, "name_split_suffix":"_per_instance", "split":";", "split_op":"sum"},
+        {"name": "load_1", "system":  "echo ';'", "unit": "%", "send": 1, "name_split_suffix":"_per_instance", "split":";", "split_op":"sum"},
       ]
     }
   ]

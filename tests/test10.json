@@ -31,8 +31,8 @@
 
         {"name":"cpu_usr_int", "system":"echo '8'", "unit":"%", "group_id":"1", "group_name":"first_group", "integer":1},
         {"name":"cpu_usr", "system":"echo '8'", "unit":"%", "group_id":"1", "group_name":"first_group"},
-        {"name":"cpu_usr_v_int", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":1, "group_id":"1", "group_name":"first_group", "integer":1},
-        {"name":"cpu_usr_v", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":1, "group_id":"1", "group_name":"first_group"},
+        {"name":"cpu_usr_v_int", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "send":1, "group_id":"1", "group_name":"first_group", "integer":1},
+        {"name":"cpu_usr_v", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "send":1, "group_id":"1", "group_name":"first_group"},
       ]
     }
   ]

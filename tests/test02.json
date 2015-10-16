@@ -27,12 +27,12 @@
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [        
-// This line will be sended: "kafka:1"
-        {"name": "load_1", "system":  "echo 3", "unit": "%", "kafka": 1},
-// This line will be sended too: the default behaviour is kafka:1
+// This line will be sended: "send:1"
+        {"name": "load_1", "system":  "echo 3", "unit": "%", "send": 1},
+// This line will be sended too: the default behaviour is send:1
         {"name": "load_5", "system": "echo 2", "unit": "%",},
 // This line will NOT be sended
-        {"name": "load_15", "system": "echo 2", "unit": "%", "kafka": 0},
+        {"name": "load_15", "system": "echo 2", "unit": "%", "send": 0},
         
       ]
     }

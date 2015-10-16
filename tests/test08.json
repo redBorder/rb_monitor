@@ -28,8 +28,8 @@
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [
-        {"name":"cpu_usr", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":0},
-        {"name":"cpu_sys", "system":"echo '10;20;;40;50;;;80'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":0},
+        {"name":"cpu_usr", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "send":0},
+        {"name":"cpu_sys", "system":"echo '10;20;;40;50;;;80'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "send":0},
         {"name":"cpu", "op":"cpu_usr+cpu_sys", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "split_op":"mean", "instance_prefix":"snort-"},
       ]
     }

@@ -28,8 +28,8 @@ correct vector operation result. */
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [
-        {"name":"cpu_usr", "system":"echo '1;2;3;4;5;6;7;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"cpu-", "kafka":0},
-        {"name":"cpu_sys", "system":"echo '10;20;30;40;50;60;70;80'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"cpu-", "kafka":0},
+        {"name":"cpu_usr", "system":"echo '1;2;3;4;5;6;7;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"cpu-", "send":0},
+        {"name":"cpu_sys", "system":"echo '10;20;30;40;50;60;70;80'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"cpu-", "send":0},
         {"name":"cpu", "op":"cpu_usr+cpu_sys", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "split_op":"mean", "instance_prefix":"cpu-"},
       ]
     }

@@ -27,10 +27,10 @@
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [        
-//        {"name": "load_5", "oid": "UCD-SNMP-MIB::laLoad.2", "unit": "%", "kafka": 1 },
-//        {"name": "load_15", "oid": "UCD-SNMP-MIB::laLoad.3", "unit": "%", "kafka": 1},
-        {"name": "load_5", "system":  "echo 3", "unit": "%", "kafka": 1 },
-        {"name": "load_15", "system": "echo 2", "unit": "%", "kafka": 1},
+//        {"name": "load_5", "oid": "UCD-SNMP-MIB::laLoad.2", "unit": "%", "send": 1 },
+//        {"name": "load_15", "oid": "UCD-SNMP-MIB::laLoad.3", "unit": "%", "send": 1},
+        {"name": "load_5", "system":  "echo 3", "unit": "%", "send": 1 },
+        {"name": "load_15", "system": "echo 2", "unit": "%", "send": 1},
       ]
     }
   ]

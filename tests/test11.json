@@ -28,8 +28,8 @@
       "community" : "public",
       "monitors": /* this field MUST be the last! */
       [
-        {"name":"cpu_usr_v", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "kafka":1, "group_id":"1", "group_name":"first_group", "split_op":"sum"},
-        {"name":"cpu_usr_v", "system":"echo '21;22;;24;25;;;28'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "split_op":"sum", "instance_prefix":"snort-", "kafka":1, "group_id":"2", "group_name":"second_group"},
+        {"name":"cpu_usr_v", "system":"echo '1;2;;4;5;;;8'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "instance_prefix":"snort-", "send":1, "group_id":"1", "group_name":"first_group", "split_op":"sum"},
+        {"name":"cpu_usr_v", "system":"echo '21;22;;24;25;;;28'", "name_split_suffix":"_per_instance", "unit":"%", "split":";", "split_op":"sum", "instance_prefix":"snort-", "send":1, "group_id":"2", "group_name":"second_group"},
       ]
     }
   ]
