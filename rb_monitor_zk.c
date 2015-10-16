@@ -18,6 +18,8 @@
 
 #include "rb_monitor_zk.h"
 
+#ifdef HAVE_ZOOKEEPER
+
 #include "rb_zk.h"
 #include "rb_sensor.h"
 
@@ -422,3 +424,5 @@ err:
   /// @TODO error treatment
   return NULL;
 }
+
+#endif /* HAVE_ZOOKEEPER */
