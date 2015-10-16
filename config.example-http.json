@@ -1,0 +1,46 @@
+/* Basic config file: vectors operations */
+
+{
+  "conf": {
+    "debug": 8, /* See syslog error levels */
+    "syslog": 0,
+    "stdout": 1,
+    "threads": 1,
+    "timeout": 1,
+    "max_snmp_fails": 2,
+    "sleep_main_thread": 10,
+    "sleep_worker_thread": 1,
+    "http_endpoint": "http://localhost:8080/librb-http",
+    "http_max_total_connections":4,
+    "http_timeout": 10000,
+    "http_connttimeout": 3000,
+    "http_verbose": 0,
+    "rb_http_max_messages":512,
+  }
+  ,
+  "sensors":
+  
+  [
+    {
+      "sensor_id":1,
+      "timeout":2000,
+      "sensor_name": "sensor-arriba",
+      "sensor_ip": "192.168.101.121", /* This field is better after sensor_name, so we can debug it */
+      "community" : "redBorder",
+      "monitors": /* this field MUST be the last! */
+      [
+         /*                             IPS monitoring variables                             */
+         /* Each ones return a %f;%f;%f... vector                                            */
+         /* Attributes:                                                                      */
+         /* name_split_suffix => monitor suffix that tell we are in a per_instance parameter */
+         /*             split => per instance split character                                */
+         /*   instance_prefix => per instance                                                */
+         /*   split_op        => Operation thorugh all vector elements                       */
+        {"name":"v1", "system":"echo ' 1; 2; 3; 4; 5; 6; 7; 8'", "name_split_suffix":"_per_instance", "unit":"%", "kafka":1, "split":";", "split_op":"sum", "instance_prefix":"prefix-"},
+        {"name":"v2", "system":"echo '10;20;30;40;50;60;70;80'", "name_split_suffix":"_per_instance", "unit":"%", "kafka":1, "split":";", "split_op":"mean", "instance_prefix":"prefix-"},
+        {"name":"v_sum", "op":"v1+v2", "name_split_suffix":"_per_instance", "unit":"%", "kafka":1, "split":";", "split_op":"sum", "instance_prefix":"prefix-"},
+        {"name":"v_mean", "op":"v1+v2", "name_split_suffix":"_per_instance", "unit":"%", "kafka":1, "split":";", "split_op":"mean", "instance_prefix":"prefix-"},
+      ]
+    },
+  ]
+}
