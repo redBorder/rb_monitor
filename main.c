@@ -105,11 +105,8 @@ const char * str_default_config = /* "conf:" */ "{"
     "\"threads\": 10,"
     "\"timeout\": 5,"
     "\"max_snmp_fails\": 2,"
-    "\"max_kafka_fails\": 2,"
     "\"sleep_main\": 10,"
     "\"sleep_worker\": 2,"
-    "\"kafka_broker\": \"localhost\","
-    "\"kafka_topic\": \"SNMP\","
   "}";
 
 /// SHARED Info needed by threads.
