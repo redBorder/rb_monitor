@@ -722,7 +722,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				timestamp_given=json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
 				kafka = json_object_get_int64(val2);
-			} else if (0 == strncmp(key2, "kafka", strlen("http"))) {
+			} else if (0 == strncmp(key2, "http", strlen("http"))) {
 				http = json_object_get_int64(val2);
 			}else if(0==strcmp(key2,"integer")){
 				integer = json_object_get_int64(val2);
