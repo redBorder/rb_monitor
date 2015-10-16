@@ -400,7 +400,7 @@ static inline void check_setted(const void *ptr,int *aok,const char *errmsg,cons
 // @todo pass just a monitor_value with all precached possible.
 int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,
-	const char *(*type)(void),const json_object *enrichment,int kafka,int integer)
+	const char *(*type)(void),const json_object *enrichment,int send, int integer)
 {
 	int aok = 1;
 	if(likely(libmatheval_append(libmatheval_variables,name,value)))
@@ -429,7 +429,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		
 		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-		if(kafka && new_mv)
+		if(send && new_mv)
 			rd_lru_push(valueslist,(void *)new_mv);
 	}
 	else
@@ -446,7 +446,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 // @todo make a call to process_novector_monitor
 int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
-	const char * instance_prefix,const char * name_split_suffix,const char * splitop,const json_object *enrichment,int kafka,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
+	const char * instance_prefix,const char * name_split_suffix,const char * splitop,const json_object *enrichment,int send,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
 {
 	assert(worker_info);
 	assert(sensor_data);
@@ -551,7 +551,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 						if(new_mv)
 						{
 							last_valid_timestamp = timestamp;
-							if(kafka)
+							if(send)
 								rd_lru_push(valueslist,(void *)new_mv);
 						}
 					}
@@ -626,7 +626,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-				if(kafka && new_mv)
+				if(send && new_mv)
 					rd_lru_push(valueslist,(void *)new_mv);
 			}
 		}
@@ -686,8 +686,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	for(int i=0; aok && run && i<json_object_array_length(monitors);++i){
 		const char * name=NULL,*name_split_suffix = NULL,*instance_prefix=NULL,*group_id=NULL,*group_name=NULL;
 		json_object *monitor_parameters_array = json_object_array_get_idx(monitors, i);
-		uint64_t kafka=1,nonzero=0,timestamp_given=0,integer=0;
-		uint64_t http = 1;
+		uint64_t send = 1, nonzero=0,timestamp_given=0,integer=0;
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
 		double number;int valid_double;
@@ -720,10 +719,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				nonzero = 1;
 			}else if(0==strcmp(key2,"timestamp_given")){
 				timestamp_given=json_object_get_int64(val2);
-			}else if(0==strncmp(key2,"kafka",strlen("kafka")) || 0==strncmp(key2,"name",strlen("name"))){
-				kafka = json_object_get_int64(val2);
-			} else if (0 == strncmp(key2, "http", strlen("http"))) {
-				http = json_object_get_int64(val2);
+			} else if (0 == strncmp(key2, "send", strlen("send"))) {
+				send = json_object_get_int64(val2);
 			}else if(0==strcmp(key2,"integer")){
 				integer = json_object_get_int64(val2);
 			}else if(0==strncmp(key2,"oid",strlen("oid")) || 0==strncmp(key2,"op",strlen("op"))){
@@ -740,11 +737,10 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* foreach */
 
-		if (worker_info->kafka_broker == NULL)
-			kafka = 0;
-		if (worker_info->http_endpoint == NULL)
-			http = 0;
-
+		if (worker_info->kafka_broker == NULL && worker_info->http_endpoint == NULL) {
+			send = 0;
+			rdlog(LOG_ERR,"[ERROR] 'kafka_broker' or 'http_endpoint' not set in configuration file.\n");
+		}
 		if(unlikely(NULL==sensor_data->sensor_name)){
 			rdlog(LOG_ERR,"sensor name not setted. Skipping.");
 			break;
@@ -784,7 +780,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
 						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,
-						pt_worker_info->sensor_data.enrichment,kafka || http,integer);
+						pt_worker_info->sensor_data.enrichment,send,integer);
 					}
 					else
 					{
@@ -795,15 +791,14 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{ 
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					pt_worker_info->sensor_data.enrichment,kafka || http,timestamp_given,type_fn,&memctx,integer);
+					pt_worker_info->sensor_data.enrichment,send,timestamp_given,type_fn,&memctx,integer);
 				}
 
 				if(nonzero && rd_dz(number))
 				{
 					rdlog(LOG_ALERT,"value oid=%s is 0, but nonzero setted. skipping.",json_object_get_string(val));
 					bad_names[bad_names_pos++] = name;
-					kafka=0;
-					http = 0;
+					send = 0;
 				}
 			}else if(0==strncmp(key,"op",strlen("op"))){ // @TODO sepparate in it's own function
 				const char * operation = (char *)json_object_get_string(val);
@@ -813,8 +808,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					if(strstr(bad_names[i],operation)){
 						rdlog(LOG_NOTICE,"OP %s Uses a previously bad marked value variable (%s). Skipping",
 							operation,bad_names[i]);
-						kafka=op_ok=0;
-						http = op_ok = 0;
+						send = op_ok = 0;
 					}
 				}
 
@@ -1007,7 +1001,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							}
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-							if ((kafka || http) && new_mv)
+							if ((send) && new_mv)
 								rd_lru_push(valueslist, (void *)new_mv);
 						}
 						if(op_ok && splitop){
@@ -1036,7 +1030,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-							if ((kafka || http) && new_mv) {
+							if ((send) && new_mv) {
 								rd_lru_push(valueslist, (void *)new_mv);
 							}
 						}
@@ -1059,7 +1053,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 		} /* foreach monitor attribute */
 
-		if (http && worker_info->http_endpoint != NULL) {
+		if (send && worker_info->http_endpoint != NULL) {
 
 			char http_max_total_connections[sizeof("18446744073709551616")];
 			char http_timeout[sizeof("18446744073709551616L")];
@@ -1092,8 +1086,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			if(likely(NULL!=printbuf)){
 				if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
 				{
-					if(kafka){
-						rdlog(LOG_DEBUG,"[Kafka] %s",printbuf->buf);
+					if(send && worker_info->kafka_broker != NULL){
+						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf); 
 						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
 								RD_KAFKA_MSG_F_COPY,
 								/* Payload and length */
@@ -1113,7 +1107,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						}
 						rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
 					} /* if kafka */
-					if (http && worker_info->http_endpoint != NULL) {
+					if (send && worker_info->http_endpoint != NULL) {
 							rdlog(LOG_DEBUG,"[HTTP] %s\n",printbuf->buf);
 							rb_http_produce(handler, printbuf->buf,
 									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
@@ -1245,6 +1239,9 @@ void * worker(void *_info){
 			pt_worker_info.thread_ok=0;
 		}
 		pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
+	} else {
+		rd_kafka_conf_destroy(worker_info->rk_conf);
+		rd_kafka_topic_conf_destroy(worker_info->rkt_conf);
 	}
 
 	char *err = NULL;
@@ -1282,31 +1279,33 @@ void * worker(void *_info){
 
 	if (worker_info->kafka_broker!=NULL) {
 		throw_msg_count = atoi(worker_info->max_kafka_fails);
-	}
 
-	while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) ))
-	{
-		if(prev_msg_left == msg_left) { /* Send no messages in a second? probably, the broker has fall down */
-			throw_msg_count--;
-		} else {
-			if (worker_info->kafka_broker!=NULL) {
-				throw_msg_count = atoi(worker_info->max_kafka_fails);
+
+		while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) ))
+		{
+			if(prev_msg_left == msg_left) { /* Send no messages in a second? probably, the broker has fall down */
+				throw_msg_count--;
+			} else {
+				if (worker_info->kafka_broker!=NULL) {
+					throw_msg_count = atoi(worker_info->max_kafka_fails);
+				}
 			}
+			rdlog(LOG_INFO,
+				"Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
+				msg_left,throw_msg_count);
+			prev_msg_left = msg_left;
+			#ifndef NDEBUG
+			if (worker_info->kafka_broker!=NULL) {
+				rd_kafka_poll(pt_worker_info.rk,1);
+			}
+			#endif
+			sleep(worker_info->timeout/1000 + 1);
 		}
-		rdlog(LOG_INFO,
-			"Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
-			msg_left,throw_msg_count);
-		prev_msg_left = msg_left;
-		#ifndef NDEBUG
-		if (worker_info->kafka_broker!=NULL) {
-			rd_kafka_poll(pt_worker_info.rk,1);
-		}
-		#endif
-		sleep(worker_info->timeout/1000 + 1);
-	}
+		
+		rd_kafka_topic_destroy(pt_worker_info.rkt);
+		rd_kafka_destroy(pt_worker_info.rk);
+    }
 
-	rd_kafka_topic_destroy(pt_worker_info.rkt);
-	rd_kafka_destroy(pt_worker_info.rk);
 	if (worker_info->http_endpoint != NULL) {
 		if(pthread_join(pthread_report, NULL)) {
 			fprintf(stderr, "Error joining thread\n");
