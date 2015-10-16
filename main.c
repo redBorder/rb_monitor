@@ -1194,8 +1194,8 @@ static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_c
                 printf("HTTP STATUS: %ld\n", http_status);
         }
 
-        if (buff != NULL)
-                printf("MESSAGE: %s\n", buff);
+        if (buff == NULL)
+                printf("ERROR: There is not message to send.\n");
 
         if (opaque != NULL)
                 printf("OPAQUE: %p\n", opaque);
