@@ -1176,22 +1176,18 @@ static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_c
                          size_t bufsiz, void *opaque) {
 
         if (status_code != 0) {
-                printf("CURL CODE: %d\n", status_code);
+            rdlog(LOG_ERR,"Curl returned %d code for one message: %s\n", status_code, status_code_str);
         }
 
         if (status_code == 0 && http_status != 200) {
-                printf("HTTP STATUS: %ld\n", http_status);
+            rdlog(LOG_ERR,"HTTP server returned %ld STATUS.\n", http_status);
         }
-
-        if (buff == NULL)
-                printf("ERROR: There is not message to send.\n");
-
-        if (opaque != NULL)
-                printf("OPAQUE: %p\n", opaque);
 
         (void) rb_http_handler;
         (void) bufsiz;
         (void) status_code_str;
+        (void) buff;
+        (void) opaque;
 }
 
 void *get_report_thread(void *http_handler) {
