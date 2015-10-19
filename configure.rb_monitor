@@ -21,7 +21,7 @@ mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wundef"
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wswitch-default -Wmissing-declarations" 
 
 mkl_toggle_option "Standard" WITH_ZOOKEEPER "--enable-zookeeper"   "Apache Zookeeper support" "n"
-mkl_toggle_option "Standard" WITH_RBHTTP    "--enable-rbhttp"      "redBorder HTTP library to send monitors over POST messages" "y"
+mkl_toggle_option "Standard" WITH_RBHTTP    "--enable-rbhttp"      "redBorder HTTP library to send monitors over POST messages" "n"
 
 function checks {
     mkl_define_set "OS name" "osName" "`uname`"
