@@ -870,8 +870,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 					if(vector_variables_count>0)
 					{
-						/* +6: to add _99999 to all variables */
-						str_op = calloc(strlen(operation)+6*vector_variables_count,sizeof(char)); // @TODO more descriptive name
+						/* +6: to add _pos_99999 to all variables */
+						str_op = calloc(strlen(operation)+10*vector_variables_count,sizeof(char)); // @TODO more descriptive name
 					}
 					else
 					{
