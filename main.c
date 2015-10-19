@@ -55,12 +55,6 @@
 #include <ctype.h>
 #endif
 
-#ifdef HAVE_RBHTTP
-/// @TODO move to global config, and all HTTP related
-static struct rb_http_handler_s * handler = NULL;
-#endif
-
-
 #define START_SPLITTEDTOKS_SIZE 64 /* @TODO: test for low values, forcing reallocation */
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */
 #define MAX_VECTOR_OP_VARIABLES 64 /* Maximum variables in a vector operation */
@@ -126,8 +120,12 @@ struct _worker_info{
 
 #ifdef HAVE_RBHTTP
 	const char * http_endpoint;
+	struct rb_http_handler_s *http_handler;
+	pthread_t pthread_report;
 #endif
 
+	rd_kafka_t * rk;
+	rd_kafka_topic_t * rkt;
 	rd_kafka_conf_t * rk_conf;
 	rd_kafka_topic_conf_t * rkt_conf;
 	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
@@ -153,9 +151,6 @@ struct _sensor_data{
 };
 
 struct _perthread_worker_info{
-	rd_kafka_t * rk;
-	rd_kafka_topic_t *rkt;
-	const char * http_endpoint;
 	int thread_ok;
 	struct _sensor_data sensor_data;
 };
@@ -1072,36 +1067,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 			}
 		} /* foreach monitor attribute */
 
-#ifdef HAVE_RBHTTP
-		if (send && worker_info->http_endpoint != NULL) {
-
-			char http_max_total_connections[sizeof("18446744073709551616")];
-			char http_timeout[sizeof("18446744073709551616L")];
-			char http_connttimeout[sizeof("18446744073709551616L")];
-			char http_verbose[sizeof("18446744073709551616L")];
-			char rb_http_max_messages[sizeof("18446744073709551616L")];
-			char *err = NULL;
-			size_t errsize = 0;
-
-			snprintf(http_max_total_connections,sizeof(int64_t),"%"PRId64"",worker_info->http_max_total_connections);
-			snprintf(http_timeout,sizeof(int64_t),"%"PRId64"",worker_info->http_timeout);
-			snprintf(http_connttimeout,sizeof(int64_t),"%"PRId64"",worker_info->http_connttimeout);
-			snprintf(http_verbose,sizeof(int64_t),"%"PRId64"",worker_info->http_verbose);
-			snprintf(rb_http_max_messages,sizeof(int64_t),"%"PRId64"",worker_info->rb_http_max_messages);
-
-			rb_http_handler_set_opt(handler, "HTTP_MAX_TOTAL_CONNECTIONS",
-						http_max_total_connections, err, errsize);
-			rb_http_handler_set_opt(handler, "HTTP_TIMEOUT",
-						http_timeout, err, errsize);
-		        rb_http_handler_set_opt(handler, "HTTP_CONNTTIMEOUT",
-						http_connttimeout, err, errsize);
-		        rb_http_handler_set_opt(handler, "HTTP_VERBOSE",
-						http_verbose, err, errsize);
-		        rb_http_handler_set_opt(handler, "RB_HTTP_MAX_MESSAGES",
-						rb_http_max_messages, err, errsize);
-		}
-#endif
-
 		const struct monitor_value * monitor_value = NULL;
 		while((monitor_value = rd_lru_pop(valueslist))) {
 			struct printbuf* printbuf= print_monitor_value(monitor_value);
@@ -1110,7 +1075,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(send && worker_info->kafka_broker != NULL){
 						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf); 
-						if(likely(0==rd_kafka_produce(pt_worker_info->rkt, RD_KAFKA_PARTITION_UA,
+						if(likely(0==rd_kafka_produce(worker_info->rkt, RD_KAFKA_PARTITION_UA,
 								RD_KAFKA_MSG_F_COPY,
 								/* Payload and length */
 								printbuf->buf, printbuf->bpos,
@@ -1127,12 +1092,12 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 						{
 							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message");
 						}
-						rd_kafka_poll(pt_worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
+						rd_kafka_poll(worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
 					} /* if kafka */
 #ifdef HAVE_RBHTTP
-					if (send && worker_info->http_endpoint != NULL) {
+					if (worker_info->http_handler != NULL) {
 							rdlog(LOG_DEBUG,"[HTTP] %s\n",printbuf->buf);
-							rb_http_produce(handler, printbuf->buf,
+							rb_http_produce(worker_info->http_handler, printbuf->buf,
 									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
 					}
 #endif
@@ -1229,8 +1194,9 @@ static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_c
         (void) status_code_str;
 }
 
-void *get_report_thread() {
-	while (rb_http_get_reports(handler, msg_callback, 100) || run);
+void *get_report_thread(void *http_handler) {
+
+	while (rb_http_get_reports(http_handler, msg_callback, 100) || run);
 
 	return NULL;
 }
@@ -1239,51 +1205,9 @@ void *get_report_thread() {
 void * worker(void *_info){
 	struct _worker_info * worker_info = (struct _worker_info*)_info;
 	struct _perthread_worker_info pt_worker_info;
-	unsigned int msg_left,prev_msg_left=0,throw_msg_count;
-#ifdef HAVE_RBHTTP
-	pthread_t pthread_report;
-	char *err = NULL;
-	size_t errsize = 0;
-#endif
 
-	rd_init();
+	pt_worker_info.thread_ok = 1;
 
-	if (worker_info->kafka_broker!=NULL) {
-		rd_kafka_conf_t * conf = rd_kafka_conf_dup(worker_info->rk_conf);
-		rd_kafka_topic_conf_t * topic_conf = rd_kafka_topic_conf_dup(worker_info->rkt_conf);
-		rd_kafka_conf_set_dr_cb(conf,msg_delivered);
-		char errstr[256];
-		pt_worker_info.thread_ok = 1;
-		if (!(pt_worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf,errstr, sizeof(errstr)))) {
-			rdlog(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
-			pt_worker_info.thread_ok=0;
-		}
-
-		//if(pt_worker_info.thread_ok && worker_info->debug_output_flags | DEBUG_SYSLOG)
-		//	rd_kafka_set_logger(pt_worker_info.rk,rd_kafka_log_syslog);
-
-		if (rd_kafka_brokers_add(pt_worker_info.rk, worker_info->kafka_broker) == 0) {
-			rdlog(LOG_ERR,"No valid brokers specified\n");
-			pt_worker_info.thread_ok=0;
-		}
-		pt_worker_info.rkt = rd_kafka_topic_new(pt_worker_info.rk, worker_info->kafka_topic, topic_conf);
-	} else {
-		rd_kafka_conf_destroy(worker_info->rk_conf);
-		rd_kafka_topic_conf_destroy(worker_info->rkt_conf);
-	}
-
-#ifdef HAVE_RBHTTP
-	if (worker_info->http_endpoint != NULL) {
-		handler = rb_http_handler_create(worker_info->http_endpoint, err, errsize);
-
-		if(pthread_create(&pthread_report, NULL, get_report_thread, NULL)) {
-			fprintf(stderr, "Error creating thread\n");
-		}
-			rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
-	}
-#endif
-
-	rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(pt_worker_info.thread_ok && run){
 		rd_fifoq_elm_t * elm;
@@ -1305,47 +1229,6 @@ void * worker(void *_info){
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
 	}
-
-	if (worker_info->kafka_broker!=NULL) {
-		throw_msg_count = atoi(worker_info->max_kafka_fails);
-
-
-		while(throw_msg_count && (msg_left = rd_kafka_outq_len (pt_worker_info.rk) ))
-		{
-			if(prev_msg_left == msg_left) { /* Send no messages in a second? probably, the broker has fall down */
-				throw_msg_count--;
-			} else {
-				if (worker_info->kafka_broker!=NULL) {
-					throw_msg_count = atoi(worker_info->max_kafka_fails);
-				}
-			}
-			rdlog(LOG_INFO,
-				"Waiting for messages to send. Still %u messages to be exported. %u retries left.\n",
-				msg_left,throw_msg_count);
-			prev_msg_left = msg_left;
-			#ifndef NDEBUG
-			if (worker_info->kafka_broker!=NULL) {
-				rd_kafka_poll(pt_worker_info.rk,1);
-			}
-			#endif
-			sleep(worker_info->timeout/1000 + 1);
-		}
-		
-		rd_kafka_topic_destroy(pt_worker_info.rkt);
-		rd_kafka_destroy(pt_worker_info.rk);
-    }
-
-#ifdef HAVE_RBHTTP
-	if (worker_info->http_endpoint != NULL) {
-		if(pthread_join(pthread_report, NULL)) {
-			fprintf(stderr, "Error joining thread\n");
-			//return 2;
-
-		}
-		rdlog(LOG_INFO, "[Thread] pthread_report finishing. \n");
-		rb_http_handler_destroy(handler, NULL, 0);
-	}
-#endif
 
 	return _info; // just avoiding warning.
 }
@@ -1458,6 +1341,82 @@ int main(int argc, char  *argv[])
 	main_info.syslog_indent = "rb_monitor";
 	openlog(main_info.syslog_indent, 0, LOG_USER);
 
+	rd_init();
+
+	if (worker_info.kafka_broker!=NULL) {
+		rd_kafka_conf_set_dr_cb(worker_info.rk_conf,msg_delivered);
+		char errstr[BUFSIZ];
+		if (!(worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER,
+		                worker_info.rk_conf,errstr, sizeof(errstr)))) {
+			rdlog(LOG_ERR,"Error calling kafka_new producer: %s\n",errstr);
+			exit(1);
+		}
+
+		//if(worker_info->debug_output_flags | DEBUG_SYSLOG)
+		//	rd_kafka_set_logger(worker_info.rk,rd_kafka_log_syslog);
+
+		if (rd_kafka_brokers_add(worker_info.rk, worker_info.kafka_broker) == 0) {
+			rdlog(LOG_ERR,"No valid brokers specified\n");
+			exit(1);
+		}
+		worker_info.rkt = rd_kafka_topic_new(worker_info.rk, worker_info.kafka_topic,
+			worker_info.rkt_conf);
+
+		worker_info.rk_conf = NULL;
+		worker_info.rkt_conf = NULL;
+	} else {
+		// Not needed
+		rd_kafka_conf_destroy(worker_info.rk_conf);
+		rd_kafka_topic_conf_destroy(worker_info.rkt_conf);
+	}
+
+#ifdef HAVE_RBHTTP
+	if (worker_info.http_endpoint != NULL) {
+		char err[BUFSIZ];
+		worker_info.http_handler = rb_http_handler_create(worker_info.http_endpoint,
+			err, sizeof(err));
+
+		if(NULL == worker_info.http_handler) {
+			rdlog(LOG_CRIT,"Couldn't create HTTP handler: %s",err);
+			exit(1);
+		}
+
+		if (worker_info.http_endpoint != NULL) {
+			char err[BUFSIZ];
+
+			char http_max_total_connections[sizeof("18446744073709551616")];
+			char http_timeout[sizeof("18446744073709551616L")];
+			char http_connttimeout[sizeof("18446744073709551616L")];
+			char http_verbose[sizeof("18446744073709551616L")];
+			char rb_http_max_messages[sizeof("18446744073709551616L")];
+
+			snprintf(http_max_total_connections,sizeof(int64_t),"%"PRId64"",worker_info.http_max_total_connections);
+			snprintf(http_timeout,sizeof(int64_t),"%"PRId64"",worker_info.http_timeout);
+			snprintf(http_connttimeout,sizeof(int64_t),"%"PRId64"",worker_info.http_connttimeout);
+			snprintf(http_verbose,sizeof(int64_t),"%"PRId64"",worker_info.http_verbose);
+			snprintf(rb_http_max_messages,sizeof(int64_t),"%"PRId64"",worker_info.rb_http_max_messages);
+
+			rb_http_handler_set_opt(worker_info.http_handler, "HTTP_MAX_TOTAL_CONNECTIONS",
+						http_max_total_connections, err, sizeof(err));
+			rb_http_handler_set_opt(worker_info.http_handler, "HTTP_TIMEOUT",
+					http_timeout, err, sizeof(err));
+			rb_http_handler_set_opt(worker_info.http_handler, "HTTP_CONNTTIMEOUT",
+					http_connttimeout, err, sizeof(err));
+			rb_http_handler_set_opt(worker_info.http_handler, "HTTP_VERBOSE",
+					http_verbose, err, sizeof(err));
+			rb_http_handler_set_opt(worker_info.http_handler, "RB_HTTP_MAX_MESSAGES",
+					rb_http_max_messages, err, sizeof(err));
+		}
+
+		if(pthread_create(&worker_info.pthread_report, NULL, get_report_thread,
+		                worker_info.http_handler)) {
+			fprintf(stderr, "Error creating thread\n");
+		} else {
+			rdlog(LOG_INFO, "[Thread] Created pthread_report thread. \n");
+		}
+	}
+#endif /* HAVE_RBHTTP */
+
 	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
 		rdlog(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting");
 	}else{
@@ -1483,6 +1442,35 @@ int main(int argc, char  *argv[])
 			free(pd_thread);
 		}
 	}
+
+	if (worker_info.rk!=NULL) {
+		int msg_left = 0;
+		while((msg_left = rd_kafka_outq_len (worker_info.rk) ))
+		{
+			rdlog(LOG_INFO,
+				"Waiting for messages to send. Still %u messages to be exported.\n",
+				msg_left);
+
+			rd_kafka_poll(worker_info.rk,1000);
+		}
+
+		rd_kafka_topic_destroy(worker_info.rkt);
+		rd_kafka_destroy(worker_info.rk);
+		worker_info.rkt = NULL;
+		worker_info.rk = NULL;
+    }
+
+#ifdef HAVE_RBHTTP
+	if (worker_info.http_endpoint != NULL) {
+		if(pthread_join(worker_info.pthread_report, NULL)) {
+			fprintf(stderr, "Error joining thread\n");
+			//return 2;
+
+		}
+		rdlog(LOG_INFO, "[Thread] pthread_report finishing. \n");
+		rb_http_handler_destroy(worker_info.http_handler, NULL, 0);
+	}
+#endif
 
 	pthread_mutex_destroy(&worker_info.snmp_session_mutex);
 	json_object_put(default_config);
