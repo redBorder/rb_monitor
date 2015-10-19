@@ -64,7 +64,7 @@ function checks {
     fi
     
     if [ "x$WITH_RBHTTP" == "xy" ]; then
-        mkl_lib_check "rbhttp" HAVE_RBHTTP fail CC "-lrbhttp" \
+        mkl_lib_check "rbhttp" HAVE_RBHTTP fail CC "-lrbhttp -lrd" \
             "#include <librbhttp/librb-http.h>"
         mkl_define_set "HTTP Support" "HAVE_RBHTTP" "1"
     fi
