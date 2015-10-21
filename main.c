@@ -1075,7 +1075,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(send && worker_info->kafka_broker != NULL){
 						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf); 
-						if(likely(0==rd_kafka_produce(worker_info->rkt, RD_KAFKA_PARTITION_UA,
+						if(unlikely(0!=rd_kafka_produce(worker_info->rkt, RD_KAFKA_PARTITION_UA,
 								RD_KAFKA_MSG_F_COPY,
 								/* Payload and length */
 								printbuf->buf, printbuf->bpos,
@@ -1084,15 +1084,13 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								/* Message opaque, provided in
 								 * delivery report callback as
 								 * msg_opaque. */
-								NULL))){
-							printbuf->buf=NULL; // rdkafka will free it
-						}
-
-						else
+								NULL)))
 						{
-							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message");
+							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message: %s",
+								rd_kafka_err2str(rd_kafka_errno2err(errno)));
 						}
-						rd_kafka_poll(worker_info->rk, worker_info->kafka_timeout); /* Check for callbacks */
+						/* Check for delivery reports */
+						rd_kafka_poll(worker_info->rk, worker_info->kafka_timeout); 
 					} /* if kafka */
 #ifdef HAVE_RBHTTP
 					if (worker_info->http_handler != NULL) {
