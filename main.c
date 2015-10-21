@@ -1089,8 +1089,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message: %s",
 								rd_kafka_err2str(rd_kafka_errno2err(errno)));
 						}
-						/* Check for delivery reports */
-						rd_kafka_poll(worker_info->rk, worker_info->kafka_timeout); 
 					} /* if kafka */
 #ifdef HAVE_RBHTTP
 					if (worker_info->http_handler != NULL) {
@@ -1104,7 +1102,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 			} /* for i in splittoks */
 			printbuf_free(printbuf);
-		/*	printbuf = NULL;*/
 		}
 
 
@@ -1248,6 +1245,16 @@ void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	}
 }
 
+static void *rdkafka_delivery_reports_poll_f(void * void_worker_info) {
+	struct _worker_info *worker_info = void_worker_info;
+
+	while(run) {
+		rd_kafka_poll(worker_info->rk,500);
+	}
+
+	return NULL;
+}
+
 int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
@@ -1257,6 +1264,7 @@ int main(int argc, char  *argv[])
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
 	int debug_severity = LOG_INFO;
+	pthread_t rdkafka_delivery_reports_poll_thread;
 	
 	memset(&worker_info,0,sizeof(worker_info));
 	worker_info.rk_conf  = rd_kafka_conf_new();
@@ -1358,6 +1366,9 @@ int main(int argc, char  *argv[])
 
 		worker_info.rk_conf = NULL;
 		worker_info.rkt_conf = NULL;
+
+		pthread_create(&rdkafka_delivery_reports_poll_thread,NULL,
+			rdkafka_delivery_reports_poll_f,&worker_info);
 	} else {
 		// Not needed
 		rd_kafka_conf_destroy(worker_info.rk_conf);
@@ -1439,6 +1450,7 @@ int main(int argc, char  *argv[])
 
 	if (worker_info.rk!=NULL) {
 		int msg_left = 0;
+		pthread_join(rdkafka_delivery_reports_poll_thread,NULL);
 		while((msg_left = rd_kafka_outq_len (worker_info.rk) ))
 		{
 			rdlog(LOG_INFO,
