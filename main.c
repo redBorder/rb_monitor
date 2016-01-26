@@ -29,7 +29,9 @@
 #endif
 
 #ifdef HAVE_RBHTTP
-#include <librbhttp/librb-http.h>
+#include <librbhttp/rb_http_handler.h>
+#define RB_HTTP_NORMAL_MODE  0
+#define RB_HTTP_CHUNKED_MODE 1
 #endif
 
 #include <math.h>
@@ -132,6 +134,9 @@ struct _worker_info{
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
 	struct monitor_values_tree * monitor_values_tree;
+#ifdef HAVE_RBHTTP
+	int64_t http_mode;
+#endif
 	int64_t http_max_total_connections;
 	int64_t http_timeout;
 	int64_t http_connttimeout;
@@ -361,6 +366,26 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		else if(0==strncmp(key,"rb_http_max_messages",sizeof "rb_http_max_messages"-1))
 		{
 			worker_info->rb_http_max_messages = json_object_get_int64(val);
+		}
+		else if(0==strcmp(key,"rb_http_mode"))
+		{
+			const char *sval = json_object_get_string(val);
+			if(NULL == sval)
+			{
+				rdlog(LOG_ERR,"Invalid rb_http_mode");
+			}
+			else if (0==strcmp(sval,"normal"))
+			{
+				worker_info->http_mode = RB_HTTP_NORMAL_MODE;
+			}
+			else if (0 == strcmp(sval,"deflated"))
+			{
+				worker_info->http_mode = CHUNKED_MODE;
+			}
+			else
+			{
+				rdlog(LOG_ERR,"Invalid rb_http_mode %s",sval);
+			}
 		}
 		else
 		{
@@ -1343,7 +1368,7 @@ int main(int argc, char  *argv[])
 	main_info.syslog_indent = "rb_monitor";
 	openlog(main_info.syslog_indent, 0, LOG_USER);
 
-	rd_init();
+	// rd_init();
 
 	if (worker_info.kafka_broker!=NULL) {
 		rd_kafka_conf_set_dr_cb(worker_info.rk_conf,msg_delivered);
@@ -1388,6 +1413,8 @@ int main(int argc, char  *argv[])
 
 		if (worker_info.http_endpoint != NULL) {
 			char err[BUFSIZ];
+			char aux[BUFSIZ];
+			int rc = 0;
 
 			char http_max_total_connections[sizeof("18446744073709551616")];
 			char http_timeout[sizeof("18446744073709551616L")];
@@ -1411,7 +1438,18 @@ int main(int argc, char  *argv[])
 					http_verbose, err, sizeof(err));
 			rb_http_handler_set_opt(worker_info.http_handler, "RB_HTTP_MAX_MESSAGES",
 					rb_http_max_messages, err, sizeof(err));
+
+			snprintf(aux,sizeof(aux),"%"PRId64, worker_info.http_mode);
+
+			rc = rb_http_handler_set_opt(worker_info.http_handler, "RB_HTTP_MODE",
+				aux, err, sizeof(err));
+			if (0 != rc) {
+				rdlog(LOG_ERR,"Couldn't set RB_HTTP_MODE %"PRId64"(%s): %s",
+					worker_info.http_mode, aux, err);
+			}
 		}
+
+		rb_http_handler_run(worker_info.http_handler);
 
 		if(pthread_create(&worker_info.pthread_report, NULL, get_report_thread,
 		                worker_info.http_handler)) {
