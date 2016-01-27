@@ -69,6 +69,8 @@
 #define CONFIG_RDKAFKA_KEY "rdkafka."
 #define CONFIG_ZOOKEEPER_KEY "zookeeper"
 
+#define  ENABLE_RBHTTP_CONFIGURE_OPT "--enable-rbhttp"
+
 const char * OPERATIONS = "+-*/&^|";
 
 static inline void swap(void **a,void **b){
@@ -136,6 +138,7 @@ struct _worker_info{
 	struct monitor_values_tree * monitor_values_tree;
 #ifdef HAVE_RBHTTP
 	int64_t http_mode;
+	int64_t http_insecure;
 #endif
 	int64_t http_max_total_connections;
 	int64_t http_timeout;
@@ -339,8 +342,8 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 #ifdef HAVE_RBHTTP
 			worker_info->http_endpoint	= json_object_get_string(val);
 #else
-			rdlog(LOG_CRIT,"Can't specify %s parameter if does not have support",
-				key);
+			rdlog(LOG_ERR,"rb_monitor does not have librbhttp support, so %s key is invalid. Please compile it with %s",
+					key,ENABLE_RBHTTP_CONFIGURE_OPT);
 #endif
 		}
 		else if (0==strncmp(key, CONFIG_RDKAFKA_KEY, strlen(CONFIG_RDKAFKA_KEY)))
@@ -363,12 +366,17 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			worker_info->http_verbose = json_object_get_int64(val);
 		}
+		else if(0==strcmp(key,"http_insecure"))
+		{
+			worker_info->http_insecure = json_object_get_int64(val);
+		}
 		else if(0==strncmp(key,"rb_http_max_messages",sizeof "rb_http_max_messages"-1))
 		{
 			worker_info->rb_http_max_messages = json_object_get_int64(val);
 		}
 		else if(0==strcmp(key,"rb_http_mode"))
 		{
+#ifdef HAVE_RBHTTP
 			const char *sval = json_object_get_string(val);
 			if(NULL == sval)
 			{
@@ -386,6 +394,10 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 			{
 				rdlog(LOG_ERR,"Invalid rb_http_mode %s",sval);
 			}
+#else
+			rdlog(LOG_ERR,"rb_monitor does not have librbhttp support, so %s key is invalid. Please compile it with %s",
+					key,ENABLE_RBHTTP_CONFIGURE_OPT);
+#endif
 		}
 		else
 		{
@@ -1413,8 +1425,8 @@ int main(int argc, char  *argv[])
 		}
 
 		if (worker_info.http_endpoint != NULL) {
-			char err[BUFSIZ];
 			char aux[BUFSIZ];
+			char err[BUFSIZ];
 			int rc = 0;
 
 			char http_max_total_connections[sizeof("18446744073709551616")];
@@ -1447,6 +1459,11 @@ int main(int argc, char  *argv[])
 			if (0 != rc) {
 				rdlog(LOG_ERR,"Couldn't set RB_HTTP_MODE %"PRId64"(%s): %s",
 					worker_info.http_mode, aux, err);
+			}
+
+			if (worker_info.http_insecure) {
+				rb_http_handler_set_opt(worker_info.http_handler,
+					"HTTP_INSECURE", "1", err, sizeof(err));
 			}
 		}
 
