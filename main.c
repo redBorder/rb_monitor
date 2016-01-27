@@ -1346,6 +1346,7 @@ int main(int argc, char  *argv[])
 
 	signal(SIGINT, sigproc);
 	signal(SIGTERM, sigproc);
+	signal(SIGHUP, SIG_IGN);
 
 	if(FALSE==json_object_object_get_ex(config_file,"conf",&config)){
 		rdlog(LOG_WARNING,"Could not fetch \"conf\" object from config file. Using default config instead.");
