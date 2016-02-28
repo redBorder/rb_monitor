@@ -368,7 +368,12 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		}
 		else if(0==strcmp(key,"http_insecure"))
 		{
+#ifdef HAVE_RBHTTP
 			worker_info->http_insecure = json_object_get_int64(val);
+#else
+			rdlog(LOG_ERR,"rb_monitor does not have librbhttp support, so %s key is invalid. Please compile it with %s",
+					key,ENABLE_RBHTTP_CONFIGURE_OPT);
+#endif
 		}
 		else if(0==strncmp(key,"rb_http_max_messages",sizeof "rb_http_max_messages"-1))
 		{
