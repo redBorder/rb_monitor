@@ -697,7 +697,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 /* @warning This function assumes ALL fields of sensor_data will be populated */
 int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
-			json_object * monitors)
+			json_object * monitors, rd_lru_t *ret)
 {
 	int aok=1;
 	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
@@ -1113,34 +1113,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		while((monitor_value = rd_lru_pop(valueslist))) {
 			struct printbuf* printbuf= print_monitor_value(monitor_value);
 			if(likely(NULL!=printbuf)){
-				if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
+				if(likely(send && sensor_data->peername
+					&& sensor_data->sensor_name
+					&& sensor_data->community))
 				{
-					if(send && worker_info->kafka_broker != NULL){
-						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf);
-						if(unlikely(0!=rd_kafka_produce(worker_info->rkt, RD_KAFKA_PARTITION_UA,
-								RD_KAFKA_MSG_F_COPY,
-								/* Payload and length */
-								printbuf->buf, printbuf->bpos,
-								/* Optional key and its length */
-								NULL, 0,
-								/* Message opaque, provided in
-								 * delivery report callback as
-								 * msg_opaque. */
-								NULL)))
-						{
-							rdlog(LOG_ERR,"[Kafka] Cannot produce kafka message: %s",
-								rd_kafka_err2str(rd_kafka_errno2err(errno)));
-						}
-					} /* if kafka */
-#ifdef HAVE_RBHTTP
-					if (worker_info->http_handler != NULL) {
-							rdlog(LOG_DEBUG,"[HTTP] %s\n",printbuf->buf);
-							rb_http_produce(worker_info->http_handler, printbuf->buf,
-									printbuf->bpos, RB_HTTP_MESSAGE_F_COPY, NULL, 0, NULL);
+					char *dup = strdup(printbuf->buf);
+					if (NULL == dup) {
+						rdlog(LOG_ERR, "Couldn't dup!");
+					} else {
+						rd_lru_push(ret, dup);
 					}
-#endif
-				}else{ /* if(printbuf) after malloc */
-					rdlog(LOG_ALERT,"Cannot allocate memory for printbuf. Skipping");
 				}
 			} /* for i in splittoks */
 			printbuf_free(printbuf);
@@ -1159,7 +1141,9 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 	return aok;
 }
 
-int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
+int process_sensor(struct _worker_info * worker_info,
+				struct _perthread_worker_info *pt_worker_info,
+				json_object *sensor_info, rd_lru_t *ret) {
 	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
 	pt_worker_info->sensor_data.timeout = worker_info->timeout;
 	json_object * monitors = NULL;
@@ -1202,7 +1186,8 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		"[CONFIG] Monitors not setted in sensor ",sensor_name);
 
 	if(aok)
-		aok = process_sensor_monitors(worker_info, pt_worker_info, monitors);
+		aok = process_sensor_monitors(worker_info, pt_worker_info,
+								monitors, ret);
 
 	return aok;
 }
@@ -1235,8 +1220,83 @@ void *get_report_thread(void *http_handler) {
 }
 #endif
 
+static int worker_process_sensor_send_message(struct _worker_info * worker_info,
+							char *msg) {
+	if(worker_info->kafka_broker != NULL) {
+		rdlog(LOG_DEBUG,"[Kafka] %s\n",msg);
+		const int produce_rc =  rd_kafka_produce(
+			worker_info->rkt, RD_KAFKA_PARTITION_UA,
+			RD_KAFKA_MSG_F_COPY,
+			/* Payload and length */
+			/// @TODO cache len
+			msg, strlen(msg),
+			/* Optional key and its length */
+			NULL, 0,
+			/* Message opaque, provided in delivery report
+			 * callback as
+			 * msg_opaque. */
+			NULL);
+		if (0!=produce_rc) {
+			rdlog(LOG_ERR,
+				"[Kafka] Cannot produce kafka message: %s",
+				rd_kafka_err2str(rd_kafka_errno2err(errno)));
+		}
+	} /* if kafka */
+
+#ifdef HAVE_RBHTTP
+	if (worker_info->http_handler != NULL) {
+		char err[BUFSIZ];
+		rdlog(LOG_DEBUG,"[HTTP] %s\n",msg);
+		const int produce_rc = rb_http_produce(
+			worker_info->http_handler, msg, strlen(msg),
+			RB_HTTP_MESSAGE_F_COPY, err, sizeof(err), NULL);
+		if (0!=produce_rc) {
+			rdlog(LOG_ERR, "[HTTP] Cannot produce message: %s",
+									err);
+		}
+	}
+#endif
+	free(msg);
+	return 0;
+}
+
+static int worker_process_sensor_send_messages(struct _worker_info *worker_info,
+					rd_lru_t *msgs) {
+	char *msg = NULL;
+	while((msg = rd_lru_pop(msgs))) {
+		worker_process_sensor_send_message(worker_info, msg);
+	}
+
+	return 0;
+}
+
+static int worker_process_sensor(struct _worker_info * worker_info,
+				struct _perthread_worker_info *pt_worker_info,
+				struct rb_sensor *sensor) {
+	rd_lru_t *messages = rd_lru_new(); /// @TODO not use an lru!
+
+	assert(sensor);
+#ifdef RB_SENSOR_MAGIC
+	assert(RB_SENSOR_MAGIC == sensor->magic);
+#endif
+
+
+	json_object * sensor_info = sensor->json_sensor;
+	process_sensor(worker_info, pt_worker_info, sensor_info, messages);
+	if(sensor->flags & RB_SENSOR_F_FREE) {
+		json_object_put(sensor->json_sensor);
+	}
+	free(sensor);
+
+	worker_process_sensor_send_messages(worker_info, messages);
+
+	rd_lru_destroy(messages);
+
+	return 0;
+}
+
 void * worker(void *_info){
-	struct _worker_info * worker_info = (struct _worker_info*)_info;
+	struct _worker_info *worker_info = _info;
 	struct _perthread_worker_info pt_worker_info;
 
 	pt_worker_info.thread_ok = 1;
@@ -1246,19 +1306,12 @@ void * worker(void *_info){
 		rd_fifoq_elm_t * elm;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,100)) && run){
-			rdlog(LOG_DEBUG,"Pop element %p from queue %p",elm->rfqe_ptr,worker_info->queue);
 			struct rb_sensor *sensor = elm->rfqe_ptr;
-			assert(sensor);
-#ifdef RB_SENSOR_MAGIC
-			assert(RB_SENSOR_MAGIC == sensor->magic);
-#endif
-			json_object * sensor_info = sensor->json_sensor;
-			process_sensor(worker_info,&pt_worker_info,sensor_info);
-			if(sensor->flags & RB_SENSOR_F_FREE) {
-				json_object_put(sensor->json_sensor);
-			}
-			free(sensor);
 			rd_fifoq_elm_release(worker_info->queue,elm);
+			rdlog(LOG_DEBUG,"Pop element %p from queue %p",
+				sensor, worker_info->queue);
+			worker_process_sensor(worker_info, &pt_worker_info,
+									sensor);
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
 	}
