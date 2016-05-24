@@ -31,6 +31,18 @@
 # Debug files
 *.dSYM/
 
+# Coverage
+/coverage.info
+/coverage.out.html/
+*.gcno
+*.gcda
+
+
+# mklove
 *.d
 /config.h
+/Makefile.config
+/config.cache
+/config.log
+/config.log.old
 /rb_monitor
