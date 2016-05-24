@@ -1342,6 +1342,9 @@ static void *rdkafka_delivery_reports_poll_f(void * void_worker_info) {
 	return NULL;
 }
 
+/// @TODO please delete this, is ugly
+#ifndef UNDER_TEST
+
 int main(int argc, char  *argv[])
 {
 	char *configPath=NULL;
@@ -1592,3 +1595,5 @@ int main(int argc, char  *argv[])
 
 	return ret;
 }
+
+#endif /* UNDER_TEST */

@@ -22,6 +22,7 @@ mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wundef"
 
 mkl_toggle_option "Standard" WITH_ZOOKEEPER "--enable-zookeeper"   "Apache Zookeeper support" "n"
 mkl_toggle_option "Standard" WITH_RBHTTP    "--enable-rbhttp"      "redBorder HTTP library to send monitors over POST messages" "n"
+mkl_toggle_option "Debug" WITH_COVERAGE "--enable-coverage" "Coverage build" "n"
 
 # Check for snmp library
 # Arg1: Name
@@ -85,5 +86,17 @@ function checks {
         mkl_lib_check "rbhttp" HAVE_RBHTTP fail CC "-lrbhttp -lrd" \
             "#include <librbhttp/rb_http_handler.h>"
         mkl_define_set "HTTP Support" "HAVE_RBHTTP" "1"
+    fi
+
+    # Enable assertions if we compile with no optimizations and we are not doing
+    # coverage testing
+    if [[ "x$WITHOUT_OPTIMIZATION" != "xy" || "x$WITH_COVERAGE" != "xy" ]]; then
+      mkl_mkvar_append CPPFLAGS CPPFLAGS "-DNDEBUG"
+    fi
+
+    # Enable coverage tests
+    if [[ "x$WITH_COVERAGE" != "xn" ]]; then
+      mkl_mkvar_append CPPFLAGS CPPFLAGS "--coverage"
+      mkl_mkvar_append LDFLAGS LDFLAGS "--coverage"
     fi
 }
