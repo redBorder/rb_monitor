@@ -40,14 +40,14 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 		#ifdef SNMP_SESS_MAGIC
 		session->magic=SNMP_SESS_MAGIC;
 		#endif
-		
+
 		session->sessp = snmp_sess_open(initial_session);
 
 		if(session->sessp)
 		{
 			/* just a pointer to opaque structure. It does not allocate anything */
 			struct snmp_session *ss = snmp_sess_session(session->sessp);
-			
+
 			assert(ss);
 			ss->community = (u_char *)strdup(config->community);
 			ss->community_len = strlen(config->community);
@@ -86,10 +86,10 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	int ret = 0;
 	assert(value_buf);
 	assert(number);
-	
+
 	if (status != STAT_SUCCESS)
 	{
-		rdlog(LOG_ERR,"Snmp error: %s", 
+		rdlog(LOG_ERR,"Snmp error: %s",
 			snmp_api_errstring(snmp_sess_session(session->sessp)->s_snmp_errno));
 		//rdlog(LOG_ERR,"Error in packet.Reason: %s\n",snmp_errstring(response->errstat));
 	}
@@ -101,14 +101,14 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 	{
 		rdlog(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
 		const size_t effective_len = RD_MIN(value_buf_len,response->variables->val_len);
-	
+
 		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
-		{ 
+		{
 			case ASN_GAUGE:
 			case ASN_INTEGER:
 				snprintf(value_buf,value_buf_len,"%ld",*response->variables->val.integer);
 				*number = *response->variables->val.integer;
-				ret = 1;		
+				ret = 1;
 				break;
 			case ASN_OCTET_STR:
 				/* We don't know if it's a double inside a string; We try to convert and save */
@@ -122,7 +122,7 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
 				rdlog(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d",response->variables->type,__LINE__);
 		};
 	}
-	
+
 	if(response)
 		snmp_free_pdu(response);
 	return ret;

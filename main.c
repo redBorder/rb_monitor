@@ -185,7 +185,7 @@ void printHelp(const char * progName){
 		"Usage: %s [-c path/to/config/file] [-g] [-v]"
 		"\n"
 		" Options:\n"
-		"  -g           Go Daemon\n" 
+		"  -g           Go Daemon\n"
 		"  -c <config>  Path to configuration file\n"
 		"  -d           Debug\n"
 		"\n"
@@ -197,7 +197,7 @@ void printHelp(const char * progName){
 
 static void parse_rdkafka_keyval_config(rd_kafka_conf_t *rk_conf,rd_kafka_topic_conf_t *rkt_conf,
 													const char *key,const char *value){
-	// Extracted from Magnus Edenhill's kafkacat 
+	// Extracted from Magnus Edenhill's kafkacat
 	rd_kafka_conf_res_t res;
 	char errstr[512];
 
@@ -244,7 +244,7 @@ static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_in
 		} else {
 			rdlog(LOG_ERR,"Don't know what zookeeper config.%s key means.",key);
 		}
-		
+
 		if(errno!=0)
 		{
 			rdlog(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
@@ -268,7 +268,7 @@ static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_in
 
 json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
 	                                          struct _main_info *main_info){
-	
+
 	int ret = TRUE;
 	json_object_object_foreach(config, key, val){
 		errno = 0;
@@ -280,9 +280,9 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 #if 0
 			/// @TODO recover
-			if(json_object_get_int64(val)) 
+			if(json_object_get_int64(val))
 				worker_info->debug_output_flags |= DEBUG_STDOUT;
-			else                           
+			else
 				worker_info->debug_output_flags &= ~DEBUG_STDOUT;
 #endif
 		}
@@ -290,7 +290,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 #if 0
 			/// @TODO recover
-			if(json_object_get_int64(val)) 
+			if(json_object_get_int64(val))
 				worker_info->debug_output_flags |= DEBUG_SYSLOG;
 			else
 				worker_info->debug_output_flags &= ~DEBUG_SYSLOG;
@@ -408,7 +408,7 @@ json_bool parse_json_config(json_object * config,struct _worker_info *worker_inf
 		{
 			rdlog(LOG_ERR,"Don't know what config.%s key means.",key);
 		}
-		
+
 		if(errno!=0)
 		{
 			rdlog(LOG_ERR,"Could not parse %s value: %s",key,strerror(errno));
@@ -478,7 +478,7 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.integer=integer;
 		monitor_value.type = type;
 		monitor_value.enrichment = enrichment;
-		
+
 		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 		if(send && new_mv)
@@ -514,7 +514,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	assert(memctx);
 
 	time_t last_valid_timestamp=0;
-	
+
 	int aok=1;
 	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
 					        // i.e., just many splittok.
@@ -554,7 +554,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		if(*tok)
 		{
 			char * tok_name = rd_memctx_calloc(memctx,name_len+strlen(GROUP_SEP)+7+strlen(VECTOR_SEP)+7,sizeof(char)); /* +7: space to allocate _65535 */
-			
+
 			if(timestamp_given)
 			{
 				char * aux;
@@ -578,7 +578,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			if(tok && *tok)
 			{
 
-				errno=0;			
+				errno=0;
 				double tok_f = toDouble(tok);
 				if(errno==0)
 				{
@@ -586,7 +586,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 						snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
 					else
 						snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
-					
+
 					if(likely(0!=libmatheval_append(libmatheval_variables,tok_name,atof(tok))))
 					{
 						monitor_value.timestamp = timestamp;
@@ -597,7 +597,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 						monitor_value.instance_valid = 1;
 						monitor_value.value=tok_f;
 						monitor_value.string_value=tok;
-			
+
 						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 						if(new_mv)
@@ -629,7 +629,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 		{
 			rdlog(LOG_DEBUG,"Not seeing value %s(%d)",name,count);
 		}
-	
+
 		count++;
 		tok = nexttok;
 	} /* while(tok) */
@@ -651,7 +651,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			rdlog(LOG_WARNING,"Splitop %s unknow in monitor parameter %s",splitop,name);
 		}
 
-		
+
 		const int splitop_is_valid = isfinite(result);
 
 		if(splitop_is_valid)
@@ -687,7 +687,7 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 			if(rd_dz(sum))
 				rdlog(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%u)",name,sum,mean_count);
 		}
-		
+
 	}
 
 	return aok;
@@ -745,8 +745,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		const int need_double=1; // maybe you don't want a double
 
 		rd_lru_t * valueslist    = rd_lru_new();
-		
-		
+
+
 		/* First pass: get attributes except op: and oid:*/
 		json_object_object_foreach(monitor_parameters_array,key2,val2)
 		{
@@ -755,7 +755,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				splittok = json_object_get_string(val2);
 			}else if(0==strncmp(key2,"split_op",strlen("split_op"))){
 				splitop = json_object_get_string(val2);
-			}else if(0==strncmp(key2,"name",strlen("name")+1)){ 
+			}else if(0==strncmp(key2,"name",strlen("name")+1)){
 				name = json_object_get_string(val2);
 			}else if(0==strncmp(key2,"name_split_suffix",strlen("name_split_suffix"))){
 				name_split_suffix = json_object_get_string(val2);
@@ -789,7 +789,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* foreach */
 
-		if (worker_info->kafka_broker == NULL 
+		if (worker_info->kafka_broker == NULL
 #ifdef HAVE_RBHTTP
 			&& worker_info->http_endpoint == NULL
 #endif
@@ -844,7 +844,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					}
 				}
 				else /* We have a vector here */
-				{ 
+				{
 					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
 					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
 					pt_worker_info->sensor_data.enrichment,send,timestamp_given,type_fn,&memctx,integer);
@@ -982,8 +982,8 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 								strcpy(mathname+namelen+strlen(VECTOR_SEP),suffix+1);
 							}
 						}
-						
-						
+
+
 
 						void * const f = evaluator_create ((char *)str_op); /* really it has to be (void *). See libmatheval doc. */
 					                                                       /* also, we have to create a new one for each iteration */
@@ -992,7 +992,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							rdlog(LOG_ERR,"Operation not valid: %s",str_op);
 							op_ok = 0;
 						}
-						
+
 						if(op_ok){
 							char ** evaluator_variables;int evaluator_variables_count,vars_pos;
 							evaluator_get_variables(f,&evaluator_variables,&evaluator_variables_count);
@@ -1028,7 +1028,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							char val_buf[64];
 							sprintf(val_buf,"%lf",number);
 
-							
+
 							if(vectors_len>1)
 							{
 								char name_buf[1024];
@@ -1081,7 +1081,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 							sprintf(split_op_result,"%lf",number);
 							monitor_value.name = name;
 							monitor_value.value=number;
-							monitor_value.instance_valid = 0;							
+							monitor_value.instance_valid = 0;
 							monitor_value.string_value=split_op_result;
 
 							const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
@@ -1116,7 +1116,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				if(likely(sensor_data->peername && sensor_data->sensor_name && sensor_data->community))
 				{
 					if(send && worker_info->kafka_broker != NULL){
-						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf); 
+						rdlog(LOG_DEBUG,"[Kafka] %s\n",printbuf->buf);
 						if(unlikely(0!=rd_kafka_produce(worker_info->rkt, RD_KAFKA_PARTITION_UA,
 								RD_KAFKA_MSG_F_COPY,
 								/* Payload and length */
@@ -1157,7 +1157,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		delete_libmatheval_stuffs(libmatheval_variables);
 	}
 	return aok;
-} 
+}
 
 int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_info *pt_worker_info,json_object *sensor_info){
 	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
@@ -1191,7 +1191,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 	}
 
 	const char *sensor_name = pt_worker_info->sensor_data.sensor_name;
-	
+
 	check_setted(pt_worker_info->sensor_data.sensor_name,&aok,
 		"[CONFIG] Sensor_name not setted in ",NULL);
 	check_setted(pt_worker_info->sensor_data.peername,&aok,
@@ -1200,7 +1200,7 @@ int process_sensor(struct _worker_info * worker_info,struct _perthread_worker_in
 		"[CONFIG] Community not setted in sensor ",sensor_name);
 	check_setted(monitors,&aok,
 		"[CONFIG] Monitors not setted in sensor ",sensor_name);
-	
+
 	if(aok)
 		aok = process_sensor_monitors(worker_info, pt_worker_info, monitors);
 
@@ -1307,7 +1307,7 @@ int main(int argc, char  *argv[])
 	struct _main_info main_info = {0};
 	int debug_severity = LOG_INFO;
 	pthread_t rdkafka_delivery_reports_poll_thread;
-	
+
 	memset(&worker_info,0,sizeof(worker_info));
 	worker_info.rk_conf  = rd_kafka_conf_new();
 	worker_info.rkt_conf = rd_kafka_topic_conf_new();

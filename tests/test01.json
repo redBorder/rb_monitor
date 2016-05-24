@@ -17,7 +17,7 @@
   }
   ,
   "sensors":
-  
+
   [
     {
       "sensor_id":1,
@@ -26,7 +26,7 @@
       "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
       "community" : "public",
       "monitors": /* this field MUST be the last! */
-      [        
+      [
 //        {"name": "load_5", "oid": "UCD-SNMP-MIB::laLoad.2", "unit": "%", "send": 1 },
 //        {"name": "load_15", "oid": "UCD-SNMP-MIB::laLoad.3", "unit": "%", "send": 1},
         {"name": "load_5", "system":  "echo 3", "unit": "%", "send": 1 },

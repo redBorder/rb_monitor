@@ -1,4 +1,4 @@
-/* vector arithmetics. NOTE: You must set split_op in order to get the 
+/* vector arithmetics. NOTE: You must set split_op in order to get the
 correct vector operation result. */
 
 {
@@ -18,7 +18,7 @@ correct vector operation result. */
   }
   ,
   "sensors":
-  
+
   [
     {
       "sensor_id":1,

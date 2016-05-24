@@ -30,7 +30,7 @@ struct monitor_snmp_new_session_config{
 
 struct monitor_snmp_session;
 
-/** 
+/**
 	Adapt the snmp response in string and double responses.
 	@param value_buf   Return buffer where the response will be saved (text format)
 	@param number      If possible, the response will be saved in double format here

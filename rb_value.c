@@ -44,13 +44,13 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 	dst->bad_value           = src->bad_value;
 	dst->value               = src->value;
 	dst->integer             = src->integer;
-	if(src->string_value) 
+	if(src->string_value)
 		dst->string_value    = rd_memctx_strdup(&dst->memctx,src->string_value);
-	if(src->unit) 
+	if(src->unit)
 		dst->unit            = rd_memctx_strdup(&dst->memctx,src->unit);
-	if(src->group_name) 
+	if(src->group_name)
 		dst->group_name      = rd_memctx_strdup(&dst->memctx,src->group_name);
-	if(src->group_id) 
+	if(src->group_id)
 		dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
 	dst->enrichment          = src->enrichment;
 }
@@ -61,8 +61,8 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 	json_object *enrichment = (json_object *)_enrichment;
 
 	char *key; struct json_object *val; struct lh_entry *entry;
-	for(entry = json_object_get_object(enrichment)->head; 
-		(entry ? (key = (char*)entry->k, val = (struct json_object*)entry->v, entry) : 0); 
+	for(entry = json_object_get_object(enrichment)->head;
+		(entry ? (key = (char*)entry->k, val = (struct json_object*)entry->v, entry) : 0);
 		entry = entry->next){
 	//json_object_object_foreach(enrichment,key,val) {
 		const json_type type = json_object_get_type(val);
@@ -89,7 +89,7 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 				break;
 			}
 			case json_type_null:
-			{	
+			{
 				sprintbuf(printbuf, ",\"%s\":null",key);
 				break;
 			}
@@ -141,9 +141,9 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type());
 		if(monitor_value->unit)
 			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_value->unit);
-		if(monitor_value->group_name) 
+		if(monitor_value->group_name)
 			sprintbuf(printbuf, ",\"group_name\":\"%s\"", monitor_value->group_name);
-		if(monitor_value->group_id)   
+		if(monitor_value->group_id)
 			sprintbuf(printbuf, ",\"group_id\":%s", monitor_value->group_id);
 		if(monitor_value->enrichment)
 			print_monitor_value_enrichment(printbuf,monitor_value->enrichment);

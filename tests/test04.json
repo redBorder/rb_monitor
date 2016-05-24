@@ -17,7 +17,7 @@
   }
   ,
   "sensors":
-  
+
   [
     {
       "sensor_id":1,
@@ -26,7 +26,7 @@
       "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
       "community" : "public",
       "monitors": /* this field MUST be the last! */
-      [        
+      [
 // This line will be sended: "send:1"
         {"name": "load_1", "system":  "echo 3", "unit": "%", "send": 1},
 // This line will be sended too: the default behaviour is send:1
@@ -36,7 +36,7 @@
 // This line include an operation
 	{"name": "100load_15", "op":"100*load_15", "unit": "%"},
 // This line include an operation with two variables
-	{"name": "operation", "op":"load_5*load_1", "unit": "%"},         
+	{"name": "operation", "op":"load_5*load_1", "unit": "%"},
       ]
     }
   ]

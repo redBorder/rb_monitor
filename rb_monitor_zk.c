@@ -71,14 +71,14 @@ static void string_list_init(string_list *list,int flags) {
 
   list->flags = flags;
   if(string_list_have_to_lock(list)) {
-    pthread_mutex_init(&list->mutex,NULL);    
+    pthread_mutex_init(&list->mutex,NULL);
   }
 }
 
 static struct string_list_node *string_list_append(string_list *l,char *str,
                                                     size_t len,int flags) {
   struct string_list_node *node = NULL;
-  const size_t alloc_size = sizeof(*node) 
+  const size_t alloc_size = sizeof(*node)
                             + ((flags & STRING_LIST_STR_F_COPY) ? len + 1 : 0);
   node = calloc(1,alloc_size);
 
@@ -100,7 +100,7 @@ static struct string_list_node *string_list_append_const(string_list *l,
                                 const char *str,size_t len,int flags) {
   // couldn't free a const field
   assert(flags & ~STRING_LIST_STR_F_FREE);
-  
+
   // Const casting
   char *_str;
   memcpy(&_str,&str,sizeof(str));
@@ -241,7 +241,7 @@ static void rb_monitor_zk_add_popped_sensors_to_monitor_queue(struct rb_monitor_
   string_list_foreach_arg_free(&laux,rb_monitor_zk_add_sensor_to_monitor_queue,rb_mzk);
 }
 
-void rb_zk_pop_data_cb(int rc, const char *value, int value_len, 
+void rb_zk_pop_data_cb(int rc, const char *value, int value_len,
   const struct Stat *stat, const void *data) {
   struct rb_monitor_zk *rb_mzk = rb_monitor_zk_const_casting(data);
 
@@ -258,7 +258,7 @@ void rb_zk_pop_data_cb(int rc, const char *value, int value_len,
 
 void rb_zk_pop_delete_completed_cb(int rc,const void *data) {
   struct rb_monitor_zk *rbmzk = rb_monitor_zk_const_casting(data);
-  
+
   if(rc < 0) {
     rdlog(LOG_ERR,"Error deleting [rc=%d]",rc);
   } else {
@@ -346,7 +346,7 @@ static void*zk_mon_watcher(void *_context) {
   return NULL;
 }
 
-/* 
+/*
  * RB_MONITOR ZOOKEEPER STRUCT (pt 2)
  */
 

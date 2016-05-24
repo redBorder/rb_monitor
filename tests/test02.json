@@ -17,7 +17,7 @@
   }
   ,
   "sensors":
-  
+
   [
     {
       "sensor_id":1,
@@ -26,14 +26,14 @@
       "sensor_ip": "localhost", /* This field is better after sensor_name, so we can debug it */
       "community" : "public",
       "monitors": /* this field MUST be the last! */
-      [        
+      [
 // This line will be sended: "send:1"
         {"name": "load_1", "system":  "echo 3", "unit": "%", "send": 1},
 // This line will be sended too: the default behaviour is send:1
         {"name": "load_5", "system": "echo 2", "unit": "%",},
 // This line will NOT be sended
         {"name": "load_15", "system": "echo 2", "unit": "%", "send": 0},
-        
+
       ]
     }
   ]

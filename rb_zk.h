@@ -21,7 +21,7 @@
 #include "config.h"
 #include <zookeeper/zookeeper.h>
 
-/// @TODO document all callbacks localities, in what thread will be them 
+/// @TODO document all callbacks localities, in what thread will be them
 /// executed
 struct rb_zk;
 struct rb_zk *rb_zk_init(char *host,int timeout);
@@ -48,7 +48,7 @@ const char *rb_zk_mutex_path(struct rb_zk_mutex *mutex);
 	*/
 int rb_zk_mutex_obtained(struct rb_zk_mutex *mutex);
 
-/** Callback called when a mutex status change (i.e. is obtained). 
+/** Callback called when a mutex status change (i.e. is obtained).
 	It will be called in rb_zk own thread.
 	@param mutex Mutex affected
 	@param opaque Mutex opaque
@@ -73,7 +73,7 @@ typedef void (*rb_mutex_error_cb)(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex
 	*/
 int rb_zk_create_recursive_node(struct rb_zk *rb_zk,const char *path,int flags);
 
-/// redBorder Zookeeper queue element basic type. It contains all the pop() 
+/// redBorder Zookeeper queue element basic type. It contains all the pop()
 /// configuration
 struct rb_zk_queue_element;
 
@@ -92,7 +92,7 @@ typedef void (*rb_zk_queue_error_cb_t)(struct rb_zk *rb_zk,
 	@param path      Queue path the element is related.
 	@param error_cb  Queue error callback. It will be called in rb_zk own thread.
 	@param data_cb   Data complete callback. It will be called in rb_zk own thread.
-	@param delete_cb Lock deleted (and pop completed) callback. 
+	@param delete_cb Lock deleted (and pop completed) callback.
 	@param opaque    Queue element opaque
     @return New queue element.
 	*/
@@ -118,7 +118,7 @@ typedef void (*rb_zk_push_callback)(struct rb_zk *zk,const char *path,int rc,con
     @param path     Queue path
     @param value    Value to push
     @param valuelen Length of value
-    @param cb       Callback to execute at completion. 
+    @param cb       Callback to execute at completion.
     @param opaque   Opaque of queue element.
     */
 void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,

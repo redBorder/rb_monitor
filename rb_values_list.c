@@ -59,12 +59,12 @@ static int monitor_value_cmp(const void *_v1,const void*_v2)
 struct monitor_values_tree * new_monitor_values_tree()
 {
 	rd_memctx_init(&memctx,"monitor_values",RD_MEMCTX_F_LOCK | RD_MEMCTX_F_TRACK);
-	
+
 	struct monitor_values_tree * ret = rd_memctx_calloc(&memctx,1,sizeof(struct monitor_values_tree));
 	#ifdef MONITOR_VALUES_TREE_MAGIC
 	ret->magic = MONITOR_VALUES_TREE_MAGIC;
 	#endif
-	ret->avl = rd_avl_init(NULL,monitor_value_cmp,RD_AVL_F_LOCKS);	
+	ret->avl = rd_avl_init(NULL,monitor_value_cmp,RD_AVL_F_LOCKS);
 
 	return ret;
 }
@@ -91,7 +91,7 @@ struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const s
 		#endif
 
 		rd_memctx_init(&dst->memctx,NULL,RD_MEMCTX_F_LOCK | RD_MEMCTX_F_TRACK);
-	
+
 		monitor_value_copy(dst,src);
 		RD_AVL_INSERT(tree->avl,dst,avl_node);
 	}

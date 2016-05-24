@@ -17,7 +17,7 @@
   }
   ,
   "sensors":
-  
+
   [
     {
       "sensor_id":1,
@@ -28,7 +28,7 @@
       "monitors": /* this field MUST be the last! */
       [
         /* just a simple shell command */
-        
+
         {"name": "current_dir", "system": "pwd"},
       ]
     },
