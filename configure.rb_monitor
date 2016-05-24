@@ -46,7 +46,7 @@ function checks {
         "#include <pthread.h>
          void *f();void *f(){return pthread_mutex_init;}"
 
-    mkl_lib_check json HAVE_JSON_C fail CC "-ljson" \
+    mkl_lib_check json HAVE_JSON_C fail CC "-ljson-c" \
         "#include <json/json.h>"
 
     # Check that librdkafka is available, and allow to link it statically.
@@ -60,7 +60,8 @@ function checks {
     mkl_lib_check --static=-lrd "librd" "" fail CC "-lrd -lrt -lz" \
        "#include <librd/rd.h>"
 
-    mkl_lib_check --static=-lm "libmath" "" fail CC "-lm"
+    mkl_lib_check --static=-lm "libmath" "" fail CC "-lm" \
+       "#include <math.h>"
 
     mkl_lib_check --static=-lmatheval "libmatheval" "" fail CC "-lmatheval" \
        "#include <matheval.h>"
@@ -82,7 +83,7 @@ function checks {
 
     if [ "x$WITH_RBHTTP" == "xy" ]; then
         mkl_lib_check "rbhttp" HAVE_RBHTTP fail CC "-lrbhttp -lrd" \
-            "#include <librbhttp/librb-http.h>"
+            "#include <librbhttp/rb_http_handler.h>"
         mkl_define_set "HTTP Support" "HAVE_RBHTTP" "1"
     fi
 }
