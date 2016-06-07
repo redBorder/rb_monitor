@@ -1,6 +1,4 @@
 
-include Makefile.config
-
 BIN = rb_monitor
 
 SRCS = main.c rb_snmp.c rb_value.c rb_values_list.c rb_zk.c rb_monitor_zk.c
