@@ -28,4 +28,7 @@ test: $(PROGNAME)
 	  sh test.sh ${PROGNAME} $$test; \
         done
 
+rpm: clean
+	$(MAKE) -C packaging/rpm
+
 -include $(DEPS)

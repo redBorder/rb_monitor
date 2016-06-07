@@ -1,0 +1,13 @@
+{
+  "conf": {
+    "debug": 0,
+    "threads": 4,
+    "timeout": 5,
+    "max_fails": 2,
+    "sleep_main_thread": 10,
+    "sleep_worker_thread": 2,
+    "kafka_broker": "127.0.0.1",
+    "kafka_topic": "rb_monitor",
+    "kafka_partition": 0
+  }
+}
