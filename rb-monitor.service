@@ -1,0 +1,9 @@
+[Unit]
+Description=data events via SNMP or scripting to json/kafka
+
+[Service]
+ExecStart=/usr/bin/rb_monitor -c /etc/rb-monitor/config.json
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

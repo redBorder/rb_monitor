@@ -24,9 +24,10 @@ make
 %install
 DESTDIR=%{buildroot} make install
 mkdir -p %{buildroot}/etc/init
-cp rb-monitor.init %{buildroot}/etc/init/rb-monitor.conf
+mkdir -p %{buildroot}/usr/share/rb_monitor
 mkdir -p %{buildroot}/etc/rb-monitor
-cp config.json %{buildroot}/etc/rb-monitor
+install -D -m 644 rb-monitor.service %{buildroot}/usr/lib/systemd/system/rb-monitor.service
+install -D -m 644 config.json %{buildroot}/usr/share/rb_monitor
 
 %clean
 rm -rf %{buildroot}
@@ -36,10 +37,10 @@ rm -rf %{buildroot}
 
 %files
 %defattr(755,root,root)
-/opt/rb/bin/rb_monitor
+/usr/bin/rb_monitor
 %defattr(644,root,root)
-/opt/rb/etc/rb-monitor/config.json
-/etc/init/rb-monitor.conf
+/usr/share/rb_monitor/config.json
+/usr/lib/systemd/system/rb-monitor.service
 
 %changelog
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
