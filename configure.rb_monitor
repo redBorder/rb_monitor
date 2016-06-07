@@ -18,10 +18,23 @@ mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wundef"
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wjump-misses-init" # New in gcc 4.5
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wdouble-promotion" # New in gcc 4.6
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wunused-local-typedefs" # New in gcc 4.7
-#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wswitch-default -Wmissing-declarations" 
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wswitch-default -Wmissing-declarations"
 
 mkl_toggle_option "Standard" WITH_ZOOKEEPER "--enable-zookeeper"   "Apache Zookeeper support" "n"
 mkl_toggle_option "Standard" WITH_RBHTTP    "--enable-rbhttp"      "redBorder HTTP library to send monitors over POST messages" "n"
+
+# Check for snmp library
+# Arg1: Name
+# Arg2: -l<> flags
+# Arg3: fail / cont
+function check_snmp {
+    DISPLAY_NAME=$1
+    SNMP_LDFLAG=$2
+    ACTION=$3
+    mkl_lib_check --static=$2 "$1" HAVE_NET_SNMP $3 CC "$2" \
+       "#include <net-snmp/net-snmp-config.h>
+       #include <net-snmp/net-snmp-includes.h>"
+}
 
 function checks {
     mkl_define_set "OS name" "osName" "`uname`"
@@ -30,7 +43,7 @@ function checks {
     mkl_lib_check "pcap" "" fail CC "-lpcap"
 
     mkl_lib_check pthread HAVE_LIBPTHREAD fail CC "-lpthread" \
-        "#include <pthread.h> 
+        "#include <pthread.h>
          void *f();void *f(){return pthread_mutex_init;}"
 
     mkl_lib_check json HAVE_JSON_C fail CC "-ljson" \
@@ -47,14 +60,18 @@ function checks {
     mkl_lib_check --static=-lrd "librd" "" fail CC "-lrd -lrt -lz" \
        "#include <librd/rd.h>"
 
+    mkl_lib_check --static=-lm "libmath" "" fail CC "-lm"
+
     mkl_lib_check --static=-lmatheval "libmatheval" "" fail CC "-lmatheval" \
        "#include <matheval.h>"
 
-    mkl_lib_check --static=-lsnmp "net_snmp" "" fail CC "-lsnmp" \
-       "#include <net-snmp/net-snmp-config.h>
-       #include <net-snmp/net-snmp-includes.h>"
+    check_snmp "net_snmp" -lsnmp "cont"
+    if [[ "x$HAVE_NET_SNMP" != "xy" ]]; then
+        # Centos >6
+        check_snmp "net_snmp" -lnetsnmp "fail"
+    fi
 
-    # Optionals libs 
+    # Optionals libs
     mkl_meta_set "zookeeper" "desc" "Zookeeper development libraries"
     mkl_meta_set "zookeeper" "deb" "libzookeeper-mt-dev"
     if [ "x$WITH_ZOOKEEPER" == "xy" ]; then
@@ -62,7 +79,7 @@ function checks {
             "#include <zookeeper/zookeeper.h>"
         mkl_define_set "Zookeeper Support" "HAVE_ZOOKEEPER" "1"
     fi
-    
+
     if [ "x$WITH_RBHTTP" == "xy" ]; then
         mkl_lib_check "rbhttp" HAVE_RBHTTP fail CC "-lrbhttp -lrd" \
             "#include <librbhttp/librb-http.h>"
