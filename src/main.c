@@ -742,7 +742,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 		const char * splittok=NULL,*splitop=NULL;
 		const char * unit=NULL;
 		double number;int valid_double;
-		const int need_double=1; // maybe you don't want a double
 
 		rd_lru_t * valueslist    = rd_lru_new();
 
@@ -824,7 +823,7 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else if(!splittok)
 				{
-					if(!need_double || valid_double)
+					if(valid_double)
 					{
 						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
 						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,
