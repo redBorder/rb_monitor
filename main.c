@@ -789,14 +789,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 
 		} /* foreach */
 
-		if (worker_info->kafka_broker == NULL
-#ifdef HAVE_RBHTTP
-			&& worker_info->http_endpoint == NULL
-#endif
-			) {
-			send = 0;
-			rdlog(LOG_ERR,"[ERROR] 'kafka_broker' or 'http_endpoint' not set in configuration file.\n");
-		}
 		if(unlikely(NULL==sensor_data->sensor_name)){
 			rdlog(LOG_ERR,"sensor name not setted. Skipping.");
 			break;
