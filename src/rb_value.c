@@ -29,7 +29,6 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 	assert(dst);
 	dst->timestamp           = src->timestamp;
 	dst->sensor_id           = src->sensor_id;
-	dst->sensor_id_valid     = src->sensor_id_valid;
 	if(src->sensor_name)
 		dst->sensor_name     = rd_memctx_strdup(&dst->memctx,src->sensor_name);
 	if(src->name)
@@ -123,7 +122,7 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 		// @TODO use printbuf_memappend_fast instead! */
 		sprintbuf(printbuf, "{");
 		sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
-		if(monitor_value->sensor_id_valid)
+		if(monitor_value->sensor_id)
 			sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
 		if(monitor_value->sensor_name)
 			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
