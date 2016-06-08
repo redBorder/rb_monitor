@@ -42,7 +42,6 @@ struct monitor_value{
 	#endif
 
 	/* config.json extracted */
-	bool sensor_id_valid;
 	int sensor_id;
 	const char * sensor_name;
 	const char * name;            // Intern name: *__gid__*__pos__

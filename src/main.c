@@ -152,15 +152,9 @@ struct _sensor_data{
 	const char * peername;
 	json_object * enrichment;
 	const char * sensor_name;
-	bool sensor_id_valid;
 	uint64_t sensor_id;
 	const char * community;
 	long snmp_version;
-};
-
-struct _perthread_worker_info{
-	int thread_ok;
-	struct _sensor_data sensor_data;
 };
 
 struct _main_info{
@@ -465,7 +459,6 @@ int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_dat
 		monitor_value.timestamp = time(NULL);
 		monitor_value.sensor_name = sensor_data->sensor_name;
 		monitor_value.sensor_id = sensor_data->sensor_id;
-		monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 		monitor_value.name = name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
@@ -525,7 +518,6 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
 	monitor_value.sensor_name = sensor_data->sensor_name;
-	monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 	monitor_value.sensor_id = sensor_data->sensor_id;
 	monitor_value.bad_value = 0;
 	monitor_value.unit=unit;
@@ -695,12 +687,16 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
 
 
 
-/* @warning This function assumes ALL fields of sensor_data will be populated */
-int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_worker_info *pt_worker_info,
-			json_object * monitors, rd_lru_t *ret)
-{
+/** Process all monitors in sensor, returning result in ret
+  @param worker_info All workers info
+  @param sensor_data Data of current sensor
+  @param monitors Array of monitors to ask
+  @param ret Message returning function
+  @warning This function assumes ALL fields of sensor_data will be populated */
+int process_sensor_monitors(struct _worker_info *worker_info,
+		struct _sensor_data *sensor_data, json_object *monitors,
+		rd_lru_t *ret) {
 	int aok=1;
-	struct _sensor_data *sensor_data = &pt_worker_info->sensor_data;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
 	struct monitor_snmp_session * snmp_sessp=NULL;
 	rd_memctx_t memctx;
@@ -825,9 +821,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				{
 					if(valid_double)
 					{
-						process_novector_monitor(worker_info,sensor_data, libmatheval_variables,
-						name,value_buf,number, valueslist,unit,group_name,group_id,type_fn,
-						pt_worker_info->sensor_data.enrichment,send,integer);
+						process_novector_monitor(
+							worker_info,
+							sensor_data,
+							libmatheval_variables,
+							name, value_buf, number,
+							valueslist, unit,
+							group_name, group_id,
+							type_fn,
+							sensor_data->enrichment,
+							send,integer);
 					}
 					else
 					{
@@ -836,9 +839,16 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 				}
 				else /* We have a vector here */
 				{
-					process_vector_monitor(worker_info,sensor_data, libmatheval_variables,name,value_buf,
-					splittok, valueslist,unit,group_id,group_name,instance_prefix,name_split_suffix,splitop,
-					pt_worker_info->sensor_data.enrichment,send,timestamp_given,type_fn,&memctx,integer);
+					process_vector_monitor(worker_info,
+						sensor_data,
+						libmatheval_variables,
+						name,value_buf, splittok,
+						valueslist, unit, group_id,
+						group_name, instance_prefix,
+						name_split_suffix, splitop,
+						sensor_data->enrichment, send,
+						timestamp_given, type_fn,
+						&memctx,integer);
 				}
 
 				if(nonzero && rd_dz(number))
@@ -919,7 +929,6 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 					monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 					#endif
 					monitor_value.timestamp = time(NULL);
-					monitor_value.sensor_id_valid = sensor_data->sensor_id_valid;
 					monitor_value.sensor_id = sensor_data->sensor_id;
 					monitor_value.sensor_name = sensor_data->sensor_name;
 					monitor_value.instance_prefix = instance_prefix;
@@ -1133,52 +1142,52 @@ int process_sensor_monitors(struct _worker_info *worker_info,struct _perthread_w
 }
 
 int process_sensor(struct _worker_info * worker_info,
-				struct _perthread_worker_info *pt_worker_info,
 				json_object *sensor_info, rd_lru_t *ret) {
-	memset(&pt_worker_info->sensor_data,0,sizeof(pt_worker_info->sensor_data));
-	pt_worker_info->sensor_data.timeout = worker_info->timeout;
+	struct _sensor_data sensor_data;
+	memset(&sensor_data,0,sizeof(sensor_data));
+	sensor_data.timeout = worker_info->timeout;
 	json_object * monitors = NULL;
 	int aok = 1;
 
 	json_object_object_foreach(sensor_info, key, val){
 		if(0==strncmp(key,"timeout",strlen("timeout"))){
-			pt_worker_info->sensor_data.timeout = json_object_get_int64(val)*1e6; /* convert ms -> s */
+			sensor_data.timeout = json_object_get_int64(val)*1e6; /* convert ms -> s */
 		}else if (0==strncmp(key,"sensor_name",strlen("sensor_name"))){
-			pt_worker_info->sensor_data.sensor_name = json_object_get_string(val);
+			sensor_data.sensor_name = json_object_get_string(val);
 		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
-			pt_worker_info->sensor_data.sensor_id = json_object_get_int64(val);
-			pt_worker_info->sensor_data.sensor_id_valid = json_object_get_int64(val);
+			sensor_data.sensor_id = json_object_get_int64(val);
 		}else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip"))){
-			pt_worker_info->sensor_data.peername = json_object_get_string(val);
+			sensor_data.peername = json_object_get_string(val);
 		}else if(0==strncmp(key,"community",strlen("community"))){
-			pt_worker_info->sensor_data.community = json_object_get_string(val);
+			sensor_data.community = json_object_get_string(val);
 		}else if(0==strncmp(key,"snmp_version",strlen("snmp_version"))){
 			const char *string_version = json_object_get_string(val);
-			pt_worker_info->sensor_data.snmp_version = net_snmp_version(string_version,pt_worker_info->sensor_data.sensor_name);
+			sensor_data.snmp_version = net_snmp_version(string_version,sensor_data.sensor_name);
 		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
 			monitors = val;
 		}else if(0==strncmp(key,"enrichment", strlen("enrichment"))){
-			pt_worker_info->sensor_data.enrichment = val;
+			sensor_data.enrichment = val;
 		}else {
 			rdlog(LOG_ERR,"Cannot parse %s argument",key);
 			aok=0;
 		}
 	}
 
-	const char *sensor_name = pt_worker_info->sensor_data.sensor_name;
+	const char *sensor_name = sensor_data.sensor_name;
 
-	check_setted(pt_worker_info->sensor_data.sensor_name,&aok,
+	check_setted(sensor_data.sensor_name,&aok,
 		"[CONFIG] Sensor_name not setted in ",NULL);
-	check_setted(pt_worker_info->sensor_data.peername,&aok,
+	check_setted(sensor_data.peername,&aok,
 		"[CONFIG] Peername not setted in sensor ",sensor_name);
-	check_setted(pt_worker_info->sensor_data.community,&aok,
+	check_setted(sensor_data.community,&aok,
 		"[CONFIG] Community not setted in sensor ",sensor_name);
 	check_setted(monitors,&aok,
 		"[CONFIG] Monitors not setted in sensor ",sensor_name);
 
-	if(aok)
-		aok = process_sensor_monitors(worker_info, pt_worker_info,
+	if(aok) {
+		aok = process_sensor_monitors(worker_info, &sensor_data,
 								monitors, ret);
+	}
 
 	return aok;
 }
@@ -1262,7 +1271,6 @@ static int worker_process_sensor_send_messages(struct _worker_info *worker_info,
 }
 
 static int worker_process_sensor(struct _worker_info * worker_info,
-				struct _perthread_worker_info *pt_worker_info,
 				struct rb_sensor *sensor) {
 	rd_lru_t *messages = rd_lru_new(); /// @TODO not use an lru!
 
@@ -1273,7 +1281,7 @@ static int worker_process_sensor(struct _worker_info * worker_info,
 
 
 	json_object * sensor_info = sensor->json_sensor;
-	process_sensor(worker_info, pt_worker_info, sensor_info, messages);
+	process_sensor(worker_info, sensor_info, messages);
 	if(sensor->flags & RB_SENSOR_F_FREE) {
 		json_object_put(sensor->json_sensor);
 	}
@@ -1288,12 +1296,9 @@ static int worker_process_sensor(struct _worker_info * worker_info,
 
 void * worker(void *_info){
 	struct _worker_info *worker_info = _info;
-	struct _perthread_worker_info pt_worker_info;
-
-	pt_worker_info.thread_ok = 1;
 
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
-	while(pt_worker_info.thread_ok && run){
+	while(run){
 		rd_fifoq_elm_t * elm;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,100)) && run){
@@ -1301,8 +1306,7 @@ void * worker(void *_info){
 			rd_fifoq_elm_release(worker_info->queue,elm);
 			rdlog(LOG_DEBUG,"Pop element %p from queue %p",
 				sensor, worker_info->queue);
-			worker_process_sensor(worker_info, &pt_worker_info,
-									sensor);
+			worker_process_sensor(worker_info, sensor);
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
 	}
