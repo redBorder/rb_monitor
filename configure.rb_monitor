@@ -12,6 +12,7 @@ mkl_mkvar_append CPPFLAGS CPPFLAGS "-D_GNU_SOURCE"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wunused -Wcast-align -Wdisabled-optimization -Winit-self"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wlogical-op -Wmissing-include-dirs -Wstrict-overflow=5"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-Wundef"
+mkl_mkvar_append CPPFLAGS CPPFLAGS "-I. -Isrc/"
 
 
 #mkl_mkvar_append CPPFLAGS CPPFLAGS "-ftrack-macro-expansion=2 -Wextra -Wcast-qual -Wshadow -Wsign-conversion"

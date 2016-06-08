@@ -1,7 +1,8 @@
 
 BIN = rb_monitor
 
-SRCS = main.c rb_snmp.c rb_value.c rb_values_list.c rb_zk.c rb_monitor_zk.c
+SRCS = $(addprefix src/, \
+	main.c rb_snmp.c rb_value.c rb_values_list.c rb_zk.c rb_monitor_zk.c)
 OBJS = $(SRCS:.c=.o)
 TESTS_C = $(wildcard tests/0*.c)
 
@@ -68,9 +69,11 @@ tests/%.drd.xml: tests/%.test
 tests/%.xml: tests/%.test
 	CMOCKA_XML_FILE="$@" CMOCKA_MESSAGE_OUTPUT=XML "./$<" &>/dev/null
 
-#tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
-tests/%.test: tests/%.o $(filter-out main.o,$(OBJS)) tests/json_test.o main.c
-	$(CC) $(CPPFLAGS) $(LDFLAGS) $(filter-out main.c,$^) -o $@ $(LIBS) -lcmocka
+tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
+tests/%.test: tests/%.o $(filter-out src/main.o,$(OBJS)) tests/json_test.o \
+								src/main.c
+	$(CC) $(CPPFLAGS) $(LDFLAGS) $(filter-out src/main.c,$^) -o $@ $(LIBS) \
+									-lcmocka
 
 check_coverage:
 	@( if [[ "x$(WITH_COVERAGE)" == "xn" ]]; then \
