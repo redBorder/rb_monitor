@@ -10,7 +10,9 @@ BuildRequires: gcc librd-devel net-snmp-devel json-c-devel librdkafka-devel libm
 
 Summary: Get data events via SNMP or scripting and send results in json over kafka.
 Group:   Development/Libraries/C and C++
-Requires: librd
+Requires: librd0 libmatheval libpcap librdkafka1 net-snmp
+Requires(pre): shadow-utils
+
 %description
 %{summary}
 
@@ -23,7 +25,6 @@ make
 
 %install
 DESTDIR=%{buildroot} make install
-mkdir -p %{buildroot}/etc/init
 mkdir -p %{buildroot}/usr/share/rb_monitor
 mkdir -p %{buildroot}/etc/rb-monitor
 install -D -m 644 rb-monitor.service %{buildroot}/usr/lib/systemd/system/rb-monitor.service
@@ -31,6 +32,13 @@ install -D -m 644 config.json %{buildroot}/usr/share/rb_monitor
 
 %clean
 rm -rf %{buildroot}
+
+%pre
+getent group rb-monitor >/dev/null || groupadd -r rb-monitor
+getent passwd rb-monitor >/dev/null || \
+    useradd -r -g rb-monitor -d / -s /sbin/nologin \
+    -c "User of rb_monitor service" rb-monitor
+exit 0
 
 %post -p /sbin/ldconfig
 %postun -p /sbin/ldconfig
