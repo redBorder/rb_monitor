@@ -53,14 +53,10 @@
 #include <ctype.h>
 #endif
 
-#define CONFIG_RDKAFKA_KEY "rdkafka."
-#define CONFIG_ZOOKEEPER_KEY "zookeeper"
+static const char CONFIG_RDKAFKA_KEY[] = "rdkafka.";
+static const char CONFIG_ZOOKEEPER_KEY[] = "zookeeper";
 
-#define  ENABLE_RBHTTP_CONFIGURE_OPT "--enable-rbhttp"
-
-static inline void swap(void **a,void **b){
-	void * temp=*b;*b=*a; *a=temp;
-}
+static const char ENABLE_RBHTTP_CONFIGURE_OPT[] = "--enable-rbhttp";
 
 #ifndef SIMPLEQ_FOREACH_SAFE
 /*
@@ -76,7 +72,7 @@ for ((elm) = SIMPLEQ_FIRST(head) ;                    \
 #endif
 
 /// Fallback config in json format
-const char * str_default_config = /* "conf:" */ "{"
+static const char *str_default_config = /* "conf:" */ "{"
     "\"debug\": 100,"
     "\"syslog\":0,"
     "\"stdout\":1,"
@@ -95,8 +91,9 @@ struct _main_info{
 #endif
 };
 
-int run = 1;
-void sigproc(int sig) {
+static int run = 1;
+
+static void sigproc(int sig) {
   static int called = 0;
 
   if(called++) return;
@@ -104,7 +101,7 @@ void sigproc(int sig) {
   (void)sig;
 }
 
-void printHelp(const char * progName){
+static void printHelp(const char * progName){
 	fprintf(stderr,
 		"Usage: %s [-c path/to/config/file] [-g] [-v]"
 		"\n"
@@ -189,8 +186,7 @@ static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_in
 }
 #endif
 
-
-json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
+static json_bool parse_json_config(json_object * config,struct _worker_info *worker_info,
 	                                          struct _main_info *main_info){
 
 	int ret = TRUE;
@@ -379,7 +375,7 @@ static void msg_callback(struct rb_http_handler_s *rb_http_handler, int status_c
         (void) opaque;
 }
 
-void *get_report_thread(void *http_handler) {
+static void *get_report_thread(void *http_handler) {
 
 	while (rb_http_get_reports(http_handler, msg_callback, 100) || run);
 
@@ -461,7 +457,7 @@ static int worker_process_sensor(struct _worker_info * worker_info,
 	return 0;
 }
 
-void * worker(void *_info){
+static void *worker(void *_info){
 	struct _worker_info *worker_info = _info;
 
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
@@ -481,7 +477,7 @@ void * worker(void *_info){
 	return _info; // just avoiding warning.
 }
 
-void queueSensor(struct json_object *value,rd_fifoq_t *queue) {
+static void queueSensor(struct json_object *value,rd_fifoq_t *queue) {
 	struct rb_sensor *sensor = calloc(1,sizeof(*sensor));
 	if(!sensor) {
 		rdlog(LOG_ERR,"Can't allocate sensor (out of memory?)");
@@ -495,7 +491,7 @@ void queueSensor(struct json_object *value,rd_fifoq_t *queue) {
 	}
 }
 
-void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
+static void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
 		queueSensor(value,queue);
