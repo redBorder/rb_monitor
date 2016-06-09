@@ -16,6 +16,8 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "config.h"
+
 #include "rb_sensor.h"
 
 #include "rb_snmp.h"
@@ -34,15 +36,35 @@
 
 static const char *OPERATIONS = "+-*/&^|";
 
-struct _sensor_data{
-	uint64_t timeout;
-	const char * peername;
-	json_object * enrichment;
-	const char * sensor_name;
-	uint64_t sensor_id;
-	const char * community;
-	long snmp_version;
+/// Sensor data
+typedef struct {
+	uint64_t timeout;        ///< Requests timeout
+	char *peername;          ///< Requests sensor peername (ip/addr)
+	json_object *enrichment; ///< Enrichment to use in monitors
+	char *sensor_name;       ///< Sensor name to append in monitors
+	uint64_t sensor_id;      ///< Sensor id to append in monitors
+	char *community;         ///< SNMP community
+	long snmp_version;       ///< SNMP version
+} sensor_data_t;
+
+/// Sensor to monitor
+struct rb_sensor_s {
+#ifndef NDEBUG
+#define RB_SENSOR_MAGIC 0xB30A1CB30A1CL
+	uint64_t magic;
+#endif
+
+	sensor_data_t data;              ///< Data of sensor
+	/// @TODO make a monitors array!
+	json_object *monitors;           ///< Monitors to ask for
+	int refcnt;                      ///< Reference counting
 };
+
+#ifdef RB_SENSOR_MAGIC
+void assert_rb_sensor(rb_sensor_t *sensor) {
+	assert(RB_SENSOR_MAGIC == sensor->magic);
+}
+#endif
 
 /** strtod conversion plus set errno=EINVAL if no conversion is possible
   @param str input string
@@ -83,7 +105,7 @@ static void check_setted(const void *ptr, bool *aok, const char *errmsg,
 */
 
 // @todo pass just a monitor_value with all precached possible.
-static int process_novector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
+static int process_novector_monitor(struct _worker_info *worker_info,sensor_data_t * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,const char * value_buf,double value, rd_lru_t *valueslist,	const char * unit, const char * group_name,const char * group_id,
 	const char *(*type)(void),const json_object *enrichment,int send, int integer)
 {
@@ -128,7 +150,7 @@ static int process_novector_monitor(struct _worker_info *worker_info,struct _sen
 
 // @todo pass just a monitor_value with all precached possible.
 // @todo make a call to process_novector_monitor
-static int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
+static int process_vector_monitor(struct _worker_info *worker_info,sensor_data_t * sensor_data, struct libmatheval_stuffs* libmatheval_variables,
 	const char *name,char * value_buf, const char *splittok, rd_lru_t *valueslist,const char *unit,const char *group_id,const char *group_name,
 	const char * instance_prefix,const char * name_split_suffix,const char * splitop,const json_object *enrichment,int send,int timestamp_given,const char *(*type)(void),rd_memctx_t *memctx,int integer)
 {
@@ -333,7 +355,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,struct _senso
   @param ret Message returning function
   @warning This function assumes ALL fields of sensor_data will be populated */
 static bool process_sensor_monitors(struct _worker_info *worker_info,
-		struct _sensor_data *sensor_data, json_object *monitors,
+		sensor_data_t *sensor_data, json_object *monitors,
 		rd_lru_t *ret) {
 	bool aok = true;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
@@ -780,41 +802,61 @@ static bool process_sensor_monitors(struct _worker_info *worker_info,
 	return aok;
 }
 
+/** Parse a JSON child with a provided callback
+  @param base Base object
+  @param child_key Child's key
+  @param cb Callback to use against c-json child object
+  @return child parsed with cb, or default value
+  */
 #define PARSE_CJSON_CHILD0(base, child_key, cb, default_value) ({              \
 		json_object *value = NULL;                                     \
 		json_object_object_get_ex(base, child_key, &value);            \
 		value ? cb(value) : default_value;                             \
 	})
 
+/// Convenience macro to parse a int64 child
 #define PARSE_CJSON_CHILD_INT64(base, child_key, default_value)                \
 	PARSE_CJSON_CHILD0(base, child_key, json_object_get_int64,             \
 		default_value)
 
+/// Convenience function to get a string chuld duplicated
+static char *json_object_get_dup_string(json_object *json) {
+	const char *ret = json_object_get_string(json);
+	return ret ? strdup(ret) : NULL;
+}
+
+/// Convenience macro to get a string chuld duplicated
 #define PARSE_CJSON_CHILD_STR(base, child_key, default_value)                  \
-	PARSE_CJSON_CHILD0(base, child_key, json_object_get_string,            \
+	PARSE_CJSON_CHILD0(base, child_key, json_object_get_dup_string,        \
 		default_value)
 
-static void sensor_common_attrs_parse_json(struct _sensor_data *sensor_data,
-					/* const */ json_object *sensor_info,
-					json_object **monitors) {
-	sensor_data->timeout = PARSE_CJSON_CHILD_INT64(sensor_info, "timeout",
-									0);
-	sensor_data->sensor_id = PARSE_CJSON_CHILD_INT64(sensor_info,
+/** Fill sensor information
+  @param sensor Sensor to store information
+  @param sensor_info JSON describing sensor
+  */
+static void sensor_common_attrs_parse_json(rb_sensor_t *sensor,
+					/* const */ json_object *sensor_info) {
+	sensor->data.timeout = PARSE_CJSON_CHILD_INT64(sensor_info, "timeout",
+						(int64_t)sensor->data.timeout);
+	sensor->data.sensor_id = PARSE_CJSON_CHILD_INT64(sensor_info,
 								"sensor_id", 0);
-	sensor_data->sensor_name = PARSE_CJSON_CHILD_STR(sensor_info,
+	sensor->data.sensor_name = PARSE_CJSON_CHILD_STR(sensor_info,
 							"sensor_name", NULL);
-	sensor_data->peername = PARSE_CJSON_CHILD_STR(sensor_info,
+	sensor->data.peername = PARSE_CJSON_CHILD_STR(sensor_info,
 							"sensor_ip", NULL);
-	sensor_data->community = PARSE_CJSON_CHILD_STR(sensor_info,
+	sensor->data.community = PARSE_CJSON_CHILD_STR(sensor_info,
 							"community", NULL);
-	json_object_object_get_ex(sensor_info, "monitors", monitors);
+	json_object_object_get_ex(sensor_info, "monitors", &sensor->monitors);
+	if (sensor->monitors) {
+		json_object_get(sensor->monitors);
+	}
 	json_object_object_get_ex(sensor_info, "enrichment",
-						&sensor_data->enrichment);
+						&sensor->data.enrichment);
 	const char *snmp_version = PARSE_CJSON_CHILD_STR(sensor_info,
 							"snmp_version", NULL);
 	if (snmp_version) {
-		sensor_data->snmp_version = net_snmp_version(snmp_version,
-						sensor_data->sensor_name);
+		sensor->data.snmp_version = net_snmp_version(snmp_version,
+						sensor->data.sensor_name);
 	}
 }
 
@@ -822,20 +864,18 @@ static void sensor_common_attrs_parse_json(struct _sensor_data *sensor_data,
   @param sensor_data Sensor to check
   @todo community and peername are not needed to check until we do SNMP stuffs
   */
-static bool sensor_common_attrs_check_sensor(
-				const struct _sensor_data *sensor_data,
-				const json_object *monitors) {
+static bool sensor_common_attrs_check_sensor(const rb_sensor_t *sensor) {
 	bool aok = true;
 
-	const char *sensor_name = sensor_data->sensor_name;
+	const char *sensor_name = sensor->data.sensor_name;
 
-	check_setted(sensor_data->sensor_name,&aok,
+	check_setted(sensor->data.sensor_name,&aok,
 		"[CONFIG] Sensor_name not setted in ", NULL);
-	check_setted(sensor_data->peername,&aok,
+	check_setted(sensor->data.peername,&aok,
 		"[CONFIG] Peername not setted in sensor ", sensor_name);
-	check_setted(sensor_data->community,&aok,
+	check_setted(sensor->data.community,&aok,
 		"[CONFIG] Community not setted in sensor ", sensor_name);
-	check_setted(monitors,&aok,
+	check_setted(sensor->monitors,&aok,
 		"[CONFIG] Monitors not setted in sensor ", sensor_name);
 
 	return aok;
@@ -846,33 +886,87 @@ static bool sensor_common_attrs_check_sensor(
   @param sensor_info Original JSON to extract information
   @todo recorver sensor_info const (in modern cjson libraries)
   */
-static bool sensor_common_attrs(struct _sensor_data *sensor_data,
-					/* const */ json_object *sensor_info,
-					json_object **monitors) {
-	sensor_common_attrs_parse_json(sensor_data, sensor_info, monitors);
-	return sensor_common_attrs_check_sensor(sensor_data, *monitors);
+static bool sensor_common_attrs(rb_sensor_t *sensor,
+					/* const */ json_object *sensor_info) {
+	sensor_common_attrs_parse_json(sensor, sensor_info);
+	return sensor_common_attrs_check_sensor(sensor);
+}
+
+/** Sets sensor defaults
+  @param worker_info Worker info that contains defaults
+  @param sensor Sensor to store defaults
+  */
+static void sensor_set_defaults(const struct _worker_info *worker_info,
+							rb_sensor_t *sensor) {
+	sensor->data.timeout = worker_info->timeout;
+	sensor->refcnt = 1;
+}
+
+/// @TODO make sensor_info const
+rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
+		const struct _worker_info *worker_info) {
+	rb_sensor_t *ret = calloc(1,sizeof(*ret));
+
+	if (ret) {
+		sensor_set_defaults(worker_info, ret);
+		const bool sensor_ok = sensor_common_attrs(ret, sensor_info);
+		if (!sensor_ok) {
+			rb_sensor_put(ret);
+			ret = NULL;
+		}
+	}
+
+	return ret;
 }
 
 /** Process a sensor
   @param worker_info Worker information needed to process sensor
-  @param sensor_info Sensor in JSON format
+  @param sensor Sensor
   @param ret Messages returned
   @return true if OK, false in other case
   */
-bool process_sensor(struct _worker_info * worker_info, json_object *sensor_info,
+bool process_rb_sensor(struct _worker_info * worker_info, rb_sensor_t *sensor,
 								rd_lru_t *ret) {
-	struct _sensor_data sensor_data;
-	memset(&sensor_data,0,sizeof(sensor_data));
-	sensor_data.timeout = worker_info->timeout;
-	json_object *monitors = NULL;
+	return process_sensor_monitors(worker_info, &sensor->data,
+							sensor->monitors, ret);
+}
 
-	const bool sensor_ok = sensor_common_attrs(&sensor_data, sensor_info,
-								&monitors);
+/** Free allocated memory for sensor
+  @param sensor Sensor to free
+  */
+static void sensor_done(rb_sensor_t *sensor) {
+	free(sensor->data.peername);
+	free(sensor->data.sensor_name);
+	free(sensor->data.community);
+	json_object_put(sensor->monitors);
+	free(sensor);
+}
 
-	if(sensor_ok) {
-		return process_sensor_monitors(worker_info, &sensor_data,
-								monitors, ret);
+void rb_sensor_get(rb_sensor_t *sensor) {
+	ATOMIC_OP(add, fetch, &sensor->refcnt, 1);
+}
+
+void rb_sensor_put(rb_sensor_t *sensor) {
+	if (0 == ATOMIC_OP(sub, fetch, &sensor->refcnt, 1)) {
+		sensor_done(sensor);
 	}
+}
 
-	return sensor_ok;
+/*
+ * SENSORS ARRAY
+ */
+
+/** Create a new array with vsize capacity */
+struct rb_sensor_array *rb_sensors_array_new(size_t vsize) {
+	struct rb_sensor_array *ret = calloc(1, sizeof(*ret)
+						+ vsize*sizeof(*ret->sensors));
+	if (ret) {
+		ret->size = vsize;
+	}
+	return ret;
+}
+
+/** Destroy a sensors array */
+void rb_sensors_array_done(struct rb_sensor_array *array) {
+	free(array);
 }

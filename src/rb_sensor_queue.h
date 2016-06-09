@@ -26,6 +26,15 @@
 /// Sensors queue
 typedef rd_fifoq_t sensor_queue_t;
 
+/** Initialize a new sensor queue
+  @param queue Queue to init
+  */
+void sensor_queue_init(sensor_queue_t *queue);
+/** Destroy a sensor queue
+  @param queue Queue to finish
+  */
+void sensor_queue_done(sensor_queue_t *queue);
+
 /** Queue a sensor
   @param queue Queue
   @param sensor Sensor
