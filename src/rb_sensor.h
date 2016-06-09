@@ -57,17 +57,20 @@ struct _worker_info{
 	int64_t rb_http_max_messages;
 };
 
+typedef struct rb_sensor {
+#ifndef NDEBUG
 #define RB_SENSOR_MAGIC 0xB30A1CB30A1CL
-
-struct rb_sensor {
-#ifdef RB_SENSOR_MAGIC
 	uint64_t magic;
 #endif
 
 	json_object *json_sensor;
 #define RB_SENSOR_F_FREE 0x01
 	int flags;
-};
+} rb_sensor_t;
+
+#ifdef RB_SENSOR_MAGIC
+#define assert_rb_sensor(rb_sensor) assert(RB_SENSOR_MAGIC == rb_sensor->magic)
+#endif
 
 bool process_sensor(struct _worker_info *worker_info, json_object *sensor_info,
 								rd_lru_t *ret);
