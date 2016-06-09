@@ -22,6 +22,7 @@
 
 #include "rb_zk.h"
 #include "rb_sensor.h"
+#include "rb_sensor_queue.h"
 
 #include <librd/rdlog.h>
 #include <librd/rdtimer.h>
@@ -216,9 +217,6 @@ void rb_zk_pop_error_cb(struct rb_zk *rb_zk,struct rb_zk_queue_element *qelm,
   sensors_queue_poll_loop_start((struct rb_monitor_zk *)rb_zk_queue_element_opaque(qelm));
 }
 
-/// @TODO quick hack, need to resolve in a better way
-void queueSensor(struct json_object *value,rd_fifoq_t *queue);
-
 static void rb_monitor_zk_add_sensor_to_monitor_queue(char *str,size_t len,void *opaque) {
   struct rb_monitor_zk *rb_mzk = rb_monitor_zk_casting(opaque);
   enum json_tokener_error jerr;
@@ -230,7 +228,7 @@ static void rb_monitor_zk_add_sensor_to_monitor_queue(char *str,size_t len,void 
     return;
   }
 
-  queueSensor(obj,rb_mzk->workers_queue);
+  queue_sensor(rb_mzk->workers_queue, obj);
 }
 
 static void rb_monitor_zk_add_popped_sensors_to_monitor_queue(struct rb_monitor_zk *rb_mzk) {

@@ -20,6 +20,7 @@
 
 #include "rb_sensor.h"
 #include "rb_values_list.h"
+#include "rb_sensor_queue.h"
 
 #ifdef HAVE_ZOOKEEPER
 #include "rb_monitor_zk.h"
@@ -42,7 +43,6 @@
 #include <assert.h>
 #include <pthread.h>
 #include <signal.h>
-#include <librd/rdqueue.h>
 #include <librd/rdthread.h>
 #include <librd/rdmem.h>
 #include <librd/rdlru.h>
@@ -457,18 +457,18 @@ static int worker_process_sensor(struct _worker_info * worker_info,
 	return 0;
 }
 
-static void *worker(void *_info){
+/** Worker main function thread
+  @param _info worker info
+  @return provided _info
+  */
+static void *worker(void *_info) {
 	struct _worker_info *worker_info = _info;
 
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(run){
-		rd_fifoq_elm_t * elm;
+		struct rb_sensor *sensor = NULL;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
-		while((elm = rd_fifoq_pop_timedwait(worker_info->queue,100)) && run){
-			struct rb_sensor *sensor = elm->rfqe_ptr;
-			rd_fifoq_elm_release(worker_info->queue,elm);
-			rdlog(LOG_DEBUG,"Pop element %p from queue %p",
-				sensor, worker_info->queue);
+		while((sensor = pop_sensor(worker_info->queue,100)) && run) {
 			worker_process_sensor(worker_info, sensor);
 		}
 		pthread_setcancelstate(PTHREAD_CANCEL_ENABLE,NULL);
@@ -477,24 +477,10 @@ static void *worker(void *_info){
 	return _info; // just avoiding warning.
 }
 
-static void queueSensor(struct json_object *value,rd_fifoq_t *queue) {
-	struct rb_sensor *sensor = calloc(1,sizeof(*sensor));
-	if(!sensor) {
-		rdlog(LOG_ERR,"Can't allocate sensor (out of memory?)");
-	} else {
-#ifdef RB_SENSOR_MAGIC
-		sensor->magic = RB_SENSOR_MAGIC;
-#endif
-		sensor->json_sensor = value;
-		rdlog(LOG_DEBUG,"Push element %p->%p",sensor,sensor->json_sensor);
-		rd_fifoq_add(queue,sensor);
-	}
-}
-
-static void queueSensors(struct json_object * sensors,rd_fifoq_t *queue){
+static void queue_sensors(struct json_object * sensors,rd_fifoq_t *queue){
 	for(int i=0;i<json_object_array_length(sensors);++i){
 		json_object *value = json_object_array_get_idx(sensors, i);
-		queueSensor(value,queue);
+		queue_sensor(queue, value);
 	}
 }
 
@@ -707,7 +693,7 @@ int main(int argc, char  *argv[])
 			}
 
 			while(run){
-				queueSensors(sensors,&queue);
+				queue_sensors(sensors,&queue);
 				sleep(main_info.sleep_main);
 			}
 			rdlog(LOG_INFO,"Leaving, wait for workers...");
