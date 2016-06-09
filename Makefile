@@ -3,7 +3,7 @@ BIN = rb_monitor
 
 SRCS = $(addprefix src/, \
 	main.c rb_snmp.c rb_value.c rb_values_list.c rb_zk.c rb_monitor_zk.c \
-	rb_sensor.c)
+	rb_sensor.c rb_sensor_queue.c)
 OBJS = $(SRCS:.c=.o)
 TESTS_C = $(wildcard tests/0*.c)
 
