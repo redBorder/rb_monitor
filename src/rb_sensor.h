@@ -57,20 +57,55 @@ struct _worker_info{
 	int64_t rb_http_max_messages;
 };
 
-typedef struct rb_sensor {
-#ifndef NDEBUG
-#define RB_SENSOR_MAGIC 0xB30A1CB30A1CL
-	uint64_t magic;
+typedef struct rb_sensor_s rb_sensor_t;
+
+#ifdef NDEBUG
+#define assert_rb_sensor(rb_sensor)
+#else
+void assert_rb_sensor(rb_sensor_t *sensor);
 #endif
 
-	json_object *json_sensor;
-#define RB_SENSOR_F_FREE 0x01
-	int flags;
-} rb_sensor_t;
-
-#ifdef RB_SENSOR_MAGIC
-#define assert_rb_sensor(rb_sensor) assert(RB_SENSOR_MAGIC == rb_sensor->magic)
-#endif
-
-bool process_sensor(struct _worker_info *worker_info, json_object *sensor_info,
+rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
+		const struct _worker_info *worker_info);
+bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
 								rd_lru_t *ret);
+
+/** Increase by 1 the reference counter for sensor
+  @param sensor Sensor
+  */
+void rb_sensor_get(rb_sensor_t *sensor);
+
+/** Decrease the sensor reference counter.
+  @param sensor Sensor
+  */
+void rb_sensor_put(rb_sensor_t *sensor);
+
+/** Sensors array */
+struct rb_sensor_array {
+	size_t size;  ///< Number of elements can hold
+	size_t count; ///< Count of elements
+	rb_sensor_t *sensors[]; ///< Elements
+};
+
+/** Create a new array with count capacity */
+struct rb_sensor_array *rb_sensors_array_new(size_t count);
+
+/** Destroy a sensors array */
+void rb_sensors_array_done(struct rb_sensor_array *array);
+
+/** Checks if a sensor array is full */
+static bool rb_sensors_array_full(struct rb_sensor_array *array) RD_UNUSED;
+static bool rb_sensors_array_full(struct rb_sensor_array *array) {
+	return array->size == array->count;
+}
+
+/** Add a sensor to sensors array */
+static void rb_sensor_array_add(struct rb_sensor_array *array,
+						rb_sensor_t *sensor) RD_UNUSED;
+static void rb_sensor_array_add(struct rb_sensor_array *array,
+						rb_sensor_t *sensor) {
+	if (!rb_sensors_array_full(array)) {
+		array->sensors[array->count++] = sensor;
+	}
+}
+

@@ -31,10 +31,13 @@ void test_sensor(const char *cjson_sensor, check_list_t *checks) {
 	worker_info.monitor_values_tree = new_monitor_values_tree();
 	snmp_sess_init(&worker_info.default_session);
 	struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
-
-	process_sensor(&worker_info, json_sensor, messages);
-	json_list_check(checks, messages);
+	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
 	json_object_put(json_sensor);
+
+	process_rb_sensor(&worker_info, sensor, messages);
+	rb_sensor_put(sensor);
+
+	json_list_check(checks, messages);
 
 	destroy_monitor_values_tree(worker_info.monitor_values_tree);
 	rd_lru_destroy(messages);

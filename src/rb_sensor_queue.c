@@ -16,7 +16,13 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
-
 #include <rb_sensor_queue.h>
 
+void sensor_queue_init(sensor_queue_t *queue) {
+	memset(queue,0,sizeof(*queue)); // Needed even with init()
+	rd_fifoq_init(queue);
+}
+
+void sensor_queue_done(sensor_queue_t *queue) {
+	rd_fifoq_destroy(queue);
+}

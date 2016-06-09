@@ -55,6 +55,7 @@
 
 static const char CONFIG_RDKAFKA_KEY[] = "rdkafka.";
 static const char CONFIG_ZOOKEEPER_KEY[] = "zookeeper";
+static const char CONFIG_SENSORS_KEY[] = "sensors";
 
 static const char ENABLE_RBHTTP_CONFIGURE_OPT[] = "--enable-rbhttp";
 
@@ -433,22 +434,20 @@ static int worker_process_sensor_send_messages(struct _worker_info *worker_info,
 	return 0;
 }
 
-static int worker_process_sensor(struct _worker_info * worker_info,
-				struct rb_sensor *sensor) {
+/** Process sensor
+  @param worker_info Common information to all workers
+  @param sensor Sensor to process
+  @return OK
+  */
+static int worker_process_sensor(struct _worker_info *worker_info,
+							rb_sensor_t *sensor) {
 	rd_lru_t *messages = rd_lru_new(); /// @TODO not use an lru!
 
 	assert(sensor);
-#ifdef RB_SENSOR_MAGIC
-	assert(RB_SENSOR_MAGIC == sensor->magic);
-#endif
+	assert_rb_sensor(sensor);
 
-
-	json_object * sensor_info = sensor->json_sensor;
-	process_sensor(worker_info, sensor_info, messages);
-	if(sensor->flags & RB_SENSOR_F_FREE) {
-		json_object_put(sensor->json_sensor);
-	}
-	free(sensor);
+	process_rb_sensor(worker_info, sensor, messages);
+	rb_sensor_put(sensor);
 
 	worker_process_sensor_send_messages(worker_info, messages);
 
@@ -466,7 +465,7 @@ static void *worker(void *_info) {
 
 	rdlog(LOG_INFO,"Thread %lu connected successfuly\n.",pthread_self());
 	while(run){
-		struct rb_sensor *sensor = NULL;
+		rb_sensor_t *sensor = NULL;
 		pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,NULL);
 		while((sensor = pop_sensor(worker_info->queue,100)) && run) {
 			worker_process_sensor(worker_info, sensor);
@@ -477,10 +476,16 @@ static void *worker(void *_info) {
 	return _info; // just avoiding warning.
 }
 
-static void queue_sensors(struct json_object * sensors,rd_fifoq_t *queue){
-	for(int i=0;i<json_object_array_length(sensors);++i){
-		json_object *value = json_object_array_get_idx(sensors, i);
-		queue_sensor(queue, value);
+/** Queue sensors from array to sensors queue, increasing 1 it's reference
+  counter
+  @param sarray Sensors array
+  @param squeue Sensors queue
+  */
+static void queue_sensors(struct rb_sensor_array *sarray, rd_fifoq_t *squeue) {
+	for(size_t i=0; i<sarray->count; ++i) {
+		rb_sensor_t *sensor = sarray->sensors[i];
+		rb_sensor_get(sensor);
+		queue_sensor(squeue, sensor);
 	}
 }
 
@@ -494,12 +499,58 @@ static void *rdkafka_delivery_reports_poll_f(void * void_worker_info) {
 	return NULL;
 }
 
+/** Parse sensors from config file
+  @param config Sensors list
+  @param sensor_json JSON config
+  @return Sensors array
+  */
+static struct rb_sensor_array * parse_sensors(struct _worker_info *worker_info,
+						struct json_object *config) {
+	struct json_object *json_sensors=NULL;
+	const int get_rc = json_object_object_get_ex(config, CONFIG_SENSORS_KEY,
+								&json_sensors);
+	if (!get_rc) {
+		rdlog(LOG_ERR, "Couldn't obtain %s key. Exiting",
+							CONFIG_SENSORS_KEY);
+		return NULL;
+	}
+
+	if (!json_object_is_type(json_sensors, json_type_array)) {
+		rdlog(LOG_ERR, "Config token %s is not an array",
+			CONFIG_SENSORS_KEY);
+		return NULL;
+	}
+
+	const size_t sensors_length = json_object_array_length(json_sensors);
+	struct rb_sensor_array *ret = rb_sensors_array_new(sensors_length);
+
+	for (size_t i=0; i<sensors_length; ++i) {
+		if (rb_sensors_array_full(ret)) {
+			rdlog(LOG_CRIT,
+				"Sensors array full at %zu, can't add %zu",
+				ret->size, i);
+			break;
+		}
+
+		json_object *json_sensor = json_object_array_get_idx(
+							json_sensors, i);
+		rb_sensor_t *sensor = parse_rb_sensor(json_sensor, worker_info);
+		if (sensor) {
+			rb_sensor_array_add(ret, sensor);
+		}
+	}
+
+	return ret;
+}
+
 int main(int argc, char  *argv[])
 {
+	bool ret;
 	char *configPath=NULL;
 	char opt;
-	struct json_object * config_file=NULL,*config=NULL,*sensors=NULL,*zk=NULL;
-	struct json_object * default_config = json_tokener_parse( str_default_config );
+	struct json_object *config_file=NULL, *config=NULL, *zk=NULL;
+	struct json_object *default_config = json_tokener_parse(
+							str_default_config);
 	struct _worker_info worker_info;
 	struct _main_info main_info = {0};
 	int debug_severity = LOG_INFO;
@@ -509,13 +560,14 @@ int main(int argc, char  *argv[])
 	worker_info.rk_conf  = rd_kafka_conf_new();
 	worker_info.rkt_conf = rd_kafka_topic_conf_new();
 
-	assert(default_config);
 	pthread_t * pd_thread = NULL;
 	rd_fifoq_t queue;
-	memset(&queue,0,sizeof(queue)); // Needed even with init()
-	rd_fifoq_init(&queue);
+	struct rb_sensor_array *sensors_array = NULL;
+	sensor_queue_init(&queue);
+
+	assert(default_config);
+
 	worker_info.queue = &queue;
-	json_bool ret;
 
 	assert(default_config);
 	ret = parse_json_config(default_config,&worker_info,&main_info);
@@ -679,9 +731,8 @@ int main(int argc, char  *argv[])
 	}
 #endif /* HAVE_RBHTTP */
 
-	if(FALSE==json_object_object_get_ex(config_file,"sensors",&sensors)){
-		rdlog(LOG_CRIT,"[EE] Could not fetch \"sensors\" array from config file. Exiting");
-	}else{
+	sensors_array = parse_sensors(&worker_info, config_file);
+	if(sensors_array) {
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
 		if(NULL==pd_thread){
@@ -692,8 +743,8 @@ int main(int argc, char  *argv[])
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
 			}
 
-			while(run){
-				queue_sensors(sensors,&queue);
+			while(run) {
+				queue_sensors(sensors_array,&queue);
 				sleep(main_info.sleep_main);
 			}
 			rdlog(LOG_INFO,"Leaving, wait for workers...");
@@ -704,6 +755,8 @@ int main(int argc, char  *argv[])
 			free(pd_thread);
 		}
 	}
+
+	rb_sensors_array_done(sensors_array);
 
 	if (worker_info.rk!=NULL) {
 		int msg_left = 0;
@@ -738,7 +791,7 @@ int main(int argc, char  *argv[])
 	pthread_mutex_destroy(&worker_info.snmp_session_mutex);
 	json_object_put(default_config);
 	json_object_put(config_file);
-	rd_fifoq_destroy(&queue);
+	sensor_queue_done(&queue);
 	closelog();
 
 	return ret;
