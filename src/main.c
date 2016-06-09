@@ -148,7 +148,7 @@ struct _worker_info{
 };
 
 struct _sensor_data{
-	int timeout;
+	uint64_t timeout;
 	const char * peername;
 	json_object * enrichment;
 	const char * sensor_name;
@@ -429,12 +429,23 @@ static void msg_delivered (rd_kafka_t *rk,
 		rdlog(LOG_DEBUG,"%% Message delivered (%zd bytes)", len);
 }
 
-static inline void check_setted(const void *ptr,int *aok,const char *errmsg,const char *sensor_name)
-{
+/** Checks if a property is set. If not, it will show error message and will
+  set aok to false
+  @param ptr Pointer to check if a property is set.
+  @param aok Return value.
+  @param errmsg Error message
+  @param sensor name Sensor name to give more information.
+  @warning It will never set aok to true.
+*/
+static void check_setted(const void *ptr, bool *aok, const char *errmsg,
+						const char *sensor_name) {
 	assert(aok);
+	assert(errmsg);
+
 	if(*aok && ptr == NULL){
 		*aok = 0;
-		rdlog(LOG_ERR,"%s%s",errmsg,sensor_name?sensor_name:"(some sensor)");
+		rdlog(LOG_ERR, "%s%s", errmsg,
+				sensor_name ? sensor_name : "(some sensor)");
 	}
 }
 
@@ -693,10 +704,10 @@ int process_vector_monitor(struct _worker_info *worker_info,struct _sensor_data 
   @param monitors Array of monitors to ask
   @param ret Message returning function
   @warning This function assumes ALL fields of sensor_data will be populated */
-int process_sensor_monitors(struct _worker_info *worker_info,
+bool process_sensor_monitors(struct _worker_info *worker_info,
 		struct _sensor_data *sensor_data, json_object *monitors,
 		rd_lru_t *ret) {
-	int aok=1;
+	bool aok = true;
 	struct libmatheval_stuffs *libmatheval_variables = new_libmatheval_stuffs(json_object_array_length(monitors)*10);
 	struct monitor_snmp_session * snmp_sessp=NULL;
 	rd_memctx_t memctx;
@@ -1141,55 +1152,101 @@ int process_sensor_monitors(struct _worker_info *worker_info,
 	return aok;
 }
 
-int process_sensor(struct _worker_info * worker_info,
+#define PARSE_CJSON_CHILD0(base, child_key, cb, default_value) ({              \
+		json_object *value = NULL;                                     \
+		json_object_object_get_ex(base, child_key, &value);            \
+		value ? cb(value) : default_value;                             \
+	})
+
+#define PARSE_CJSON_CHILD_INT64(base, child_key, default_value)                \
+	PARSE_CJSON_CHILD0(base, child_key, json_object_get_int64,             \
+		default_value)
+
+#define PARSE_CJSON_CHILD_STR(base, child_key, default_value)                  \
+	PARSE_CJSON_CHILD0(base, child_key, json_object_get_string,            \
+		default_value)
+
+static void sensor_common_attrs_parse_json(struct _sensor_data *sensor_data,
+					/* const */ json_object *sensor_info,
+					json_object **monitors) {
+	sensor_data->timeout = PARSE_CJSON_CHILD_INT64(sensor_info, "timeout",
+									0);
+	sensor_data->sensor_id = PARSE_CJSON_CHILD_INT64(sensor_info,
+								"sensor_id", 0);
+	sensor_data->sensor_name = PARSE_CJSON_CHILD_STR(sensor_info,
+							"sensor_name", NULL);
+	sensor_data->peername = PARSE_CJSON_CHILD_STR(sensor_info,
+							"sensor_ip", NULL);
+	sensor_data->community = PARSE_CJSON_CHILD_STR(sensor_info,
+							"community", NULL);
+	json_object_object_get_ex(sensor_info, "monitors", monitors);
+	json_object_object_get_ex(sensor_info, "enrichment",
+						&sensor_data->enrichment);
+	const char *snmp_version = PARSE_CJSON_CHILD_STR(sensor_info,
+							"snmp_version", NULL);
+	if (snmp_version) {
+		sensor_data->snmp_version = net_snmp_version(snmp_version,
+						sensor_data->sensor_name);
+	}
+}
+
+/** Checks if a sensor is OK
+  @param sensor_data Sensor to check
+  @todo community and peername are not needed to check until we do SNMP stuffs
+  */
+static bool sensor_common_attrs_check_sensor(
+				const struct _sensor_data *sensor_data,
+				const json_object *monitors) {
+	bool aok = true;
+
+	const char *sensor_name = sensor_data->sensor_name;
+
+	check_setted(sensor_data->sensor_name,&aok,
+		"[CONFIG] Sensor_name not setted in ", NULL);
+	check_setted(sensor_data->peername,&aok,
+		"[CONFIG] Peername not setted in sensor ", sensor_name);
+	check_setted(sensor_data->community,&aok,
+		"[CONFIG] Community not setted in sensor ", sensor_name);
+	check_setted(monitors,&aok,
+		"[CONFIG] Monitors not setted in sensor ", sensor_name);
+
+	return aok;
+}
+
+/** Extract sensor common properties to all monitors
+  @param sensor_data Return value
+  @param sensor_info Original JSON to extract information
+  @todo recorver sensor_info const (in modern cjson libraries)
+  */
+static bool sensor_common_attrs(struct _sensor_data *sensor_data,
+					/* const */ json_object *sensor_info,
+					json_object **monitors) {
+	sensor_common_attrs_parse_json(sensor_data, sensor_info, monitors);
+	return sensor_common_attrs_check_sensor(sensor_data, *monitors);
+}
+
+/** Process a sensor
+  @param worker_info Worker information needed to process sensor
+  @param sensor_info Sensor in JSON format
+  @param ret Messages returned
+  @return true if OK, false in other case
+  */
+static bool process_sensor(struct _worker_info * worker_info,
 				json_object *sensor_info, rd_lru_t *ret) {
 	struct _sensor_data sensor_data;
 	memset(&sensor_data,0,sizeof(sensor_data));
 	sensor_data.timeout = worker_info->timeout;
-	json_object * monitors = NULL;
-	int aok = 1;
+	json_object *monitors = NULL;
 
-	json_object_object_foreach(sensor_info, key, val){
-		if(0==strncmp(key,"timeout",strlen("timeout"))){
-			sensor_data.timeout = json_object_get_int64(val)*1e6; /* convert ms -> s */
-		}else if (0==strncmp(key,"sensor_name",strlen("sensor_name"))){
-			sensor_data.sensor_name = json_object_get_string(val);
-		}else if (0==strncmp(key,"sensor_id",strlen("sensor_id"))){
-			sensor_data.sensor_id = json_object_get_int64(val);
-		}else if (0==strncmp(key,"sensor_ip",strlen("sensor_ip"))){
-			sensor_data.peername = json_object_get_string(val);
-		}else if(0==strncmp(key,"community",strlen("community"))){
-			sensor_data.community = json_object_get_string(val);
-		}else if(0==strncmp(key,"snmp_version",strlen("snmp_version"))){
-			const char *string_version = json_object_get_string(val);
-			sensor_data.snmp_version = net_snmp_version(string_version,sensor_data.sensor_name);
-		}else if(0==strncmp(key,"monitors", strlen("monitors"))){
-			monitors = val;
-		}else if(0==strncmp(key,"enrichment", strlen("enrichment"))){
-			sensor_data.enrichment = val;
-		}else {
-			rdlog(LOG_ERR,"Cannot parse %s argument",key);
-			aok=0;
-		}
-	}
+	const bool sensor_ok = sensor_common_attrs(&sensor_data, sensor_info,
+								&monitors);
 
-	const char *sensor_name = sensor_data.sensor_name;
-
-	check_setted(sensor_data.sensor_name,&aok,
-		"[CONFIG] Sensor_name not setted in ",NULL);
-	check_setted(sensor_data.peername,&aok,
-		"[CONFIG] Peername not setted in sensor ",sensor_name);
-	check_setted(sensor_data.community,&aok,
-		"[CONFIG] Community not setted in sensor ",sensor_name);
-	check_setted(monitors,&aok,
-		"[CONFIG] Monitors not setted in sensor ",sensor_name);
-
-	if(aok) {
-		aok = process_sensor_monitors(worker_info, &sensor_data,
+	if(sensor_ok) {
+		return process_sensor_monitors(worker_info, &sensor_data,
 								monitors, ret);
 	}
 
-	return aok;
+	return sensor_ok;
 }
 
 #ifdef HAVE_RBHTTP

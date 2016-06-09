@@ -137,8 +137,8 @@ int net_snmp_version(const char *string_version,const char *sensor_name){
 			return SNMP_VERSION_2c;
 	}
 
-	rdlog(LOG_ERR,"Bad snmp version (%s) in sensor %s",string_version,sensor_name);
-	exit(1);
+	rdlog(LOG_ERR,"Bad snmp version (%s) in sensor %s", string_version,
+								sensor_name);
 	return SNMP_DEFAULT_VERSION;
 }
 
