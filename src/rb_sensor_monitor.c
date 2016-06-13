@@ -299,22 +299,16 @@ struct process_sensor_monitor_ctx {
 static void process_sensor_monitor(struct process_sensor_monitor_ctx *ctx,
 					rb_monitor_t *monitor, rd_lru_t *ret);
 static int process_novector_monitor(struct _worker_info *worker_info,
-	rb_sensor_t *sensor, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name, const char *value_buf, double value,
-	rd_lru_t *valueslist, const char * unit, const char * group_name,
-	const char * group_id, const char *(*type)(void),
-	const json_object *enrichment,int send, int integer);
+		const rb_monitor_t *sensor,
+		struct libmatheval_stuffs* libmatheval_variables,
+		const char *value_buf,
+		double value, rd_lru_t *valueslist, const char *(*type)(void));
 
 static int process_vector_monitor(struct _worker_info *worker_info,
-	rb_sensor_t *sensor,
-	struct libmatheval_stuffs* libmatheval_variables,
-	const char *name, char *value_buf,  const char *splittok,
-	rd_lru_t *valueslist, const char *unit, const char *group_id,
-	const char *group_name,
-	const char *instance_prefix, const char *name_split_suffix,
-	const char *splitop, const json_object *enrichment, int send,
-	int timestamp_given, const char *(*type)(void),
-	rd_memctx_t *memctx, int integer);
+			const rb_monitor_t *monitor,
+			struct libmatheval_stuffs* libmatheval_variables,
+			char *value_buf, rd_lru_t *valueslist,
+			const char *(*type)(void), rd_memctx_t *memctx);
 
 bool process_monitors_array(struct _worker_info *worker_info,
 			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
@@ -426,15 +420,9 @@ static void process_sensor_monitor(
 				using monitor */
 				process_novector_monitor(
 					worker_info,
-					monitor->sensor,
-					libmatheval_variables,
-					monitor->name, value_buf, number,
-					valueslist, monitor->unit,
-					monitor->group_name,
-					monitor->group_id,
-					type_fn,
-					rb_sensor_enrichment(monitor->sensor),
-					monitor->send, monitor->integer);
+					monitor,
+					libmatheval_variables, value_buf,
+					number, valueslist, type_fn);
 			}
 			else
 			{
@@ -448,17 +436,9 @@ static void process_sensor_monitor(
 		{
 			/** @todo delete parameters that could be sent
 				using monitor */
-			process_vector_monitor(worker_info,
-				monitor->sensor,
-				libmatheval_variables,
-				monitor->name, value_buf, monitor->splittok,
-				valueslist, monitor->unit, monitor->group_id,
-				monitor->group_name, monitor->instance_prefix,
-				monitor->name_split_suffix, monitor->splitop,
-				rb_sensor_enrichment(monitor->sensor),
-				monitor->send,
-				monitor->timestamp_given, type_fn,
-				&process_ctx->memctx, monitor->integer);
+			process_vector_monitor(worker_info, monitor,
+				libmatheval_variables, value_buf,
+				valueslist, type_fn, &process_ctx->memctx);
 		}
 
 		if(monitor->nonzero && rd_dz(number))
@@ -767,40 +747,44 @@ static void process_sensor_monitor(
 /** Process a no-vector monitor */
 // @todo pass just a monitor_value with all precached possible.
 static int process_novector_monitor(struct _worker_info *worker_info,
-	rb_sensor_t *sensor, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name, const char *value_buf, double value,
-	rd_lru_t *valueslist, const char *unit, const char *group_name,
-	const char *group_id, const char *(*type)(void),
-	const json_object *enrichment, int send, int integer)
-{
+		const rb_monitor_t *monitor,
+		struct libmatheval_stuffs* libmatheval_variables,
+		const char *value_buf,
+		double value, rd_lru_t *valueslist, const char *(*type)(void)) {
+
 	int aok = 1;
-	if(likely(libmatheval_append(libmatheval_variables,name,value)))
-	{
+	if(likely(libmatheval_append(libmatheval_variables,
+						monitor->name, value))) {
 		struct monitor_value monitor_value;
 		memset(&monitor_value,0,sizeof(monitor_value));
 		#ifdef MONITOR_VALUE_MAGIC
 		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_name = rb_sensor_name(sensor);
-		monitor_value.sensor_id = rb_sensor_id(sensor);
-		monitor_value.name = name;
+		monitor_value.sensor_name = rb_sensor_name(monitor->sensor);
+		monitor_value.sensor_id = rb_sensor_id(monitor->sensor);
+		monitor_value.name = monitor->name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
 		monitor_value.bad_value = 0;
-		monitor_value.value=value;
-		monitor_value.string_value=value_buf;
-		monitor_value.unit=unit;
-		monitor_value.group_name=group_name;
-		monitor_value.group_id=group_id;
-		monitor_value.integer=integer;
+		monitor_value.value = value;
+		monitor_value.string_value = value_buf;
+		monitor_value.unit = monitor->unit;
+		monitor_value.group_name = monitor->group_name;
+		monitor_value.group_id = monitor->group_id;
+		monitor_value.integer = monitor->integer;
 		monitor_value.type = type;
-		monitor_value.enrichment = enrichment;
+		monitor_value.enrichment
+					= rb_sensor_enrichment(monitor->sensor);
 
-		const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+		/** @TODO monitor_values_tree should be by sensor, not general!
+		*/
+		const struct monitor_value * new_mv = update_monitor_value(
+			worker_info->monitor_values_tree,&monitor_value);
 
-		if(send && new_mv)
+		if(monitor->send && new_mv) {
 			rd_lru_push(valueslist,(void *)new_mv);
+		}
 	}
 	else
 	{
@@ -815,58 +799,54 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 // @todo pass just a monitor_value with all precached possible.
 // @todo make a call to process_novector_monitor
 static int process_vector_monitor(struct _worker_info *worker_info,
-	rb_sensor_t *sensor, struct libmatheval_stuffs* libmatheval_variables,
-	const char *name, char *value_buf, const char *splittok,
-	rd_lru_t *valueslist, const char *unit, const char *group_id,
-	const char *group_name, const char *instance_prefix,
-	const char *name_split_suffix, const char *splitop,
-	const json_object *enrichment, int send, int timestamp_given,
-	const char *(*type)(void), rd_memctx_t *memctx, int integer)
-{
-	assert(worker_info);
-	assert(libmatheval_variables);
-
-	assert(name);
-	assert(value_buf);
-	assert(splittok);
-	// assert(valueslist);
-	// assert(instance_prefix);
-	// assert(name_split_suffix);
-	// assert(splitop); <- May be NULL
-	assert(memctx);
-
-	time_t last_valid_timestamp=0;
+			const rb_monitor_t *monitor,
+			struct libmatheval_stuffs* libmatheval_variables,
+			char *value_buf, rd_lru_t *valueslist,
+			const char *(*type)(void), rd_memctx_t *memctx) {
+	time_t last_valid_timestamp = 0;
 
 	int aok=1;
-	char * tok = value_buf; // Note: can't use strtok_r because value_buf with no values,
-					        // i.e., just many splittok.
+	char *tok = value_buf;
+	const char *name = monitor->name;
+
+	assert(worker_info);
+	assert(monitor);
+	assert(libmatheval_variables);
+	assert(valueslist);
+
+	assert(memctx);
+
 
 	struct monitor_value monitor_value;
 	memset(&monitor_value,0,sizeof(monitor_value));
 	#ifdef MONITOR_VALUE_MAGIC
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
-	monitor_value.sensor_name = rb_sensor_name(sensor);
-	monitor_value.sensor_id = rb_sensor_id(sensor);
+	monitor_value.sensor_name = rb_sensor_name(monitor->sensor);
+	monitor_value.sensor_id = rb_sensor_id(monitor->sensor);
 	monitor_value.bad_value = 0;
-	monitor_value.unit=unit;
-	monitor_value.group_name=group_name;
-	monitor_value.group_id=group_id;
-	monitor_value.integer=integer;
+	monitor_value.unit = monitor->unit;
+	monitor_value.group_name = monitor->group_name;
+	monitor_value.group_id = monitor->group_id;
+	monitor_value.integer = monitor->integer;
 	monitor_value.type = type;
-	monitor_value.enrichment = enrichment;
+	monitor_value.enrichment = rb_sensor_enrichment(monitor->sensor);
 
-	const size_t per_instance_name_len = strlen(name) + (name_split_suffix?strlen(name_split_suffix):0) + 1;
+	const size_t per_instance_name_len = strlen(name) +
+		(monitor->name_split_suffix ?
+			strlen(monitor->name_split_suffix)
+			:0)
+		+ 1;
 	char per_instance_name[per_instance_name_len];
-	snprintf(per_instance_name,per_instance_name_len,"%s%s",name,name_split_suffix);
-
+	snprintf(per_instance_name, per_instance_name_len, "%s%s", name,
+		monitor->name_split_suffix);
 
 	unsigned int count = 0,mean_count=0;
 	double sum=0;
 	const size_t name_len = strlen(name);
 	while(tok){
 		time_t timestamp = 0;
-		char * nexttok = strstr(tok,splittok);
+		char *nexttok = strstr(tok,monitor->splittok);
 		if(nexttok != NULL && *nexttok != '\0')
 		{
 			*nexttok = '\0';
@@ -876,7 +856,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 		{
 			char * tok_name = rd_memctx_calloc(memctx,name_len+strlen(GROUP_SEP)+7+strlen(VECTOR_SEP)+7,sizeof(char)); /* +7: space to allocate _65535 */
 
-			if(timestamp_given)
+			if(monitor->timestamp_given)
 			{
 				char * aux;
 				const char * ts_tok = strtok_r(tok,":",&aux);
@@ -903,28 +883,38 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 				double tok_f = toDouble(tok);
 				if(errno==0)
 				{
-					if(group_id)
-						snprintf(tok_name,name_len+7+7,"%s" GROUP_SEP "%s" VECTOR_SEP "%u",name,group_id,count);
+					if(monitor->group_id)
+						snprintf(tok_name, name_len+7+7,
+							"%s" GROUP_SEP "%s"
+								VECTOR_SEP "%u",
+							name, monitor->group_id,
+							count);
 					else
-						snprintf(tok_name,name_len+7+7,"%s" VECTOR_SEP "%u",name,count);
+						snprintf(tok_name, name_len+7+7,
+							"%s" VECTOR_SEP "%u",
+							name, count);
 
 					if(likely(0!=libmatheval_append(libmatheval_variables,tok_name,atof(tok))))
 					{
-						monitor_value.timestamp = timestamp;
+						monitor_value.timestamp =
+								timestamp;
 						monitor_value.name = tok_name;
-						monitor_value.send_name = per_instance_name;
+						monitor_value.send_name =
+							per_instance_name;
 						monitor_value.instance = count;
-						monitor_value.instance_prefix = instance_prefix;
-						monitor_value.instance_valid = 1;
+						monitor_value.instance_prefix =
+							monitor->instance_prefix;
+						monitor_value.instance_valid =
+									1;
 						monitor_value.value=tok_f;
 						monitor_value.string_value=tok;
 
-						const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+						const struct monitor_value *new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
 						if(new_mv)
 						{
 							last_valid_timestamp = timestamp;
-							if(send)
+							if(monitor->send)
 								rd_lru_push(valueslist,(void *)new_mv);
 						}
 					}
@@ -934,7 +924,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 						aok = 0;
 					}
 
-					if(NULL!=splitop)
+					if (NULL!=monitor->splitop)
 					{
 						sum += atof(tok);
 						mean_count++;
@@ -956,20 +946,22 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 	} /* while(tok) */
 
 	// Last token reached. Do we have an operation to do?
-	if(NULL!=splitop && mean_count>0)
+	if (NULL!=monitor->splitop && mean_count>0)
 	{
 		char split_op_result[1024];
 		double result = 0;
-		if(0==strcmp("sum",splitop))
+		if (0==strcmp("sum",monitor->splitop))
 		{
 			result = sum;
 		}
-		else if(0==strcmp("mean",splitop)){
+		else if (0==strcmp("mean",monitor->splitop)){
 			result = sum/mean_count;
 		}
 		else
 		{
-			rdlog(LOG_WARNING,"Splitop %s unknow in monitor parameter %s",splitop,name);
+			rdlog(LOG_WARNING,
+				"Splitop %s unknow in monitor parameter %s",
+				monitor->splitop, name);
 		}
 
 
@@ -991,15 +983,15 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 				monitor_value.instance = 0;
 				monitor_value.instance_prefix = NULL;
 				monitor_value.instance_valid = 0;
-				monitor_value.value=result;
-				monitor_value.string_value=split_op_result;
-				monitor_value.group_name=group_name;
-				monitor_value.group_id=group_id;
+				monitor_value.value = result;
+				monitor_value.string_value = split_op_result;
+				monitor_value.group_name = monitor->group_name;
+				monitor_value.group_id = monitor->group_id;
 //				monitor_value.type = type;
 
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-				if(send && new_mv)
+				if(monitor->send && new_mv)
 					rd_lru_push(valueslist,(void *)new_mv);
 			}
 		}
