@@ -54,21 +54,21 @@ static void rb_monitors_array_add(rb_monitors_array_t *array,
 }
 
 /// X-macro to define monitor operations
-/// _X(menum,cmd)
+/// _X(menum,cmd,value_type)
 #define MONITOR_CMDS_X \
-        /* Will launch a shell and execute given command, capturing output */  \
-	_X(RB_MONITOR_T__SYSTEM,"system")                                      \
-        /* Will ask SNMP server for a given oid */                             \
-	_X(RB_MONITOR_T__OID,"oid")                                            \
-        /* Will operate over previous results */                               \
-	_X(RB_MONITOR_T__OP,"op")
+	/* Will launch a shell and execute given command, capturing output */  \
+	_X(RB_MONITOR_T__SYSTEM,"system","system")                             \
+	/* Will ask SNMP server for a given oid */                             \
+	_X(RB_MONITOR_T__OID,"oid","snmp")                                     \
+	/* Will operate over previous results */                               \
+	_X(RB_MONITOR_T__OP,"op","op")
 
 struct rb_monitor_s {
 #ifdef RB_MONITOR_MAGIC
 	uint64_t magic;
 #endif
 	enum monitor_cmd_type {
-#define _X(menum,cmd) menum,
+#define _X(menum,cmd,type) menum,
 		MONITOR_CMDS_X
 #undef _X
 	} type;
@@ -98,6 +98,17 @@ struct rb_monitor_s {
 #else
 #define assert_rb_monitor(monitor)
 #endif
+
+static const char *rb_monitor_type(const rb_monitor_t *monitor) {
+	assert(monitor);
+
+	switch(monitor->type) {
+#define _X(menum,cmd,type) case menum: return type;
+		MONITOR_CMDS_X
+#undef _X
+	default: return NULL;
+	};
+}
 
 /** Free a const string.
   @todo remove this, is ugly
@@ -158,7 +169,7 @@ static double toDouble(const char *str) {
 static bool extract_monitor_cmd(enum monitor_cmd_type *type,
 			const char **cmd_arg, struct json_object *json_monitor) {
 	static const char *cmd_keys[] = {
-#define _X(menum,cmd) cmd,
+#define _X(menum,cmd,type) cmd,
 	MONITOR_CMDS_X
 #undef _X
 	};
@@ -218,6 +229,7 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 							"timestamp_given", 0);
 	ret->send = PARSE_CJSON_CHILD_INT64(json_monitor, "send", 1);
 	ret->integer = PARSE_CJSON_CHILD_INT64(json_monitor, "integer", 0);
+	ret->type = type;
 	ret->cmd_arg = strdup(cmd_arg);
 
 	return ret;
@@ -302,13 +314,13 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 		const rb_monitor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
 		const char *value_buf,
-		double value, rd_lru_t *valueslist, const char *(*type)(void));
+		double value, rd_lru_t *valueslist);
 
 static int process_vector_monitor(struct _worker_info *worker_info,
 			const rb_monitor_t *monitor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_lru_t *valueslist,
-			const char *(*type)(void), rd_memctx_t *memctx);
+			rd_memctx_t *memctx);
 
 bool process_monitors_array(struct _worker_info *worker_info,
 			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
@@ -392,17 +404,14 @@ static void process_sensor_monitor(
 		// @TODO refactor all this block. Search for repeated code.
 		/* @TODO test passing a sensor without params to caller function. */
 		char value_buf[1024] = {'\0'};
-		const char *(*type_fn)(void) = NULL;
 		if (monitor->type == RB_MONITOR_T__OID)
 		{
-			type_fn = snmp_type_fn;
 			valid_double = snmp_solve_response(value_buf, 1024,
 					&number, process_ctx->snmp_sessp,
 					monitor->cmd_arg);
 		}
 		else
 		{
-			type_fn = system_type_fn;
 			valid_double = system_solve_response(value_buf, 1024,
 				&number, NULL, monitor->cmd_arg);
 		}
@@ -422,7 +431,7 @@ static void process_sensor_monitor(
 					worker_info,
 					monitor,
 					libmatheval_variables, value_buf,
-					number, valueslist, type_fn);
+					number, valueslist);
 			}
 			else
 			{
@@ -438,7 +447,7 @@ static void process_sensor_monitor(
 				using monitor */
 			process_vector_monitor(worker_info, monitor,
 				libmatheval_variables, value_buf,
-				valueslist, type_fn, &process_ctx->memctx);
+				valueslist, &process_ctx->memctx);
 		}
 
 		if(monitor->nonzero && rd_dz(number))
@@ -538,7 +547,7 @@ static void process_sensor_monitor(
 			monitor_value.unit = monitor->unit;
 			monitor_value.group_name = monitor->group_name;
 			monitor_value.group_id = monitor->group_id;
-			monitor_value.type = op_type;
+			monitor_value.type = rb_monitor_type(monitor);
 			monitor_value.enrichment = rb_sensor_enrichment(monitor->sensor);
 
 			for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
@@ -747,10 +756,10 @@ static void process_sensor_monitor(
 /** Process a no-vector monitor */
 // @todo pass just a monitor_value with all precached possible.
 static int process_novector_monitor(struct _worker_info *worker_info,
-		const rb_monitor_t *monitor,
-		struct libmatheval_stuffs* libmatheval_variables,
-		const char *value_buf,
-		double value, rd_lru_t *valueslist, const char *(*type)(void)) {
+			const rb_monitor_t *monitor,
+			struct libmatheval_stuffs* libmatheval_variables,
+			const char *value_buf,
+			double value, rd_lru_t *valueslist) {
 
 	int aok = 1;
 	if(likely(libmatheval_append(libmatheval_variables,
@@ -773,7 +782,7 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 		monitor_value.group_name = monitor->group_name;
 		monitor_value.group_id = monitor->group_id;
 		monitor_value.integer = monitor->integer;
-		monitor_value.type = type;
+		monitor_value.type = rb_monitor_type(monitor);
 		monitor_value.enrichment
 					= rb_sensor_enrichment(monitor->sensor);
 
@@ -802,7 +811,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 			const rb_monitor_t *monitor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_lru_t *valueslist,
-			const char *(*type)(void), rd_memctx_t *memctx) {
+			rd_memctx_t *memctx) {
 	time_t last_valid_timestamp = 0;
 
 	int aok=1;
@@ -829,7 +838,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 	monitor_value.group_name = monitor->group_name;
 	monitor_value.group_id = monitor->group_id;
 	monitor_value.integer = monitor->integer;
-	monitor_value.type = type;
+	monitor_value.type = rb_monitor_type(monitor);
 	monitor_value.enrichment = rb_sensor_enrichment(monitor->sensor);
 
 	const size_t per_instance_name_len = strlen(name) +
