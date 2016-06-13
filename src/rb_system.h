@@ -34,8 +34,6 @@ static inline char * trim_end(char * buf)
 	return buf;
 }
 
-static inline const char *system_type_fn(void){return "system";}
-
 /**
  Exec a system command and puts the output in value_buf
  @param worker_info    Worker_info struct

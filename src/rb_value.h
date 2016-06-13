@@ -60,7 +60,7 @@ struct monitor_value{
 	time_t timestamp;
 	double value;
 	const char * string_value;
-	const char * (*type)(void); // way that the value has been obtained
+	const char *type;
 
 	/* vector response */
 	unsigned int instance;
