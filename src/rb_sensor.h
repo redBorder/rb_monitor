@@ -18,7 +18,8 @@
 
 #pragma once
 
-#include <rb_snmp.h>
+#include "rb_array.h"
+#include "rb_snmp.h"
 
 #include <librd/rdlru.h>
 #include <librdkafka/rdkafka.h>
@@ -70,10 +71,31 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
 bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
 								rd_lru_t *ret);
 
+/** Obtains sensor name
+  @param sensor Sensor
+  @return Name of sensor.
+  */
+const char *rb_sensor_name(rb_sensor_t *sensor);
+
+/** Obtains sensor id
+  @param sensor Sensor
+  @return Name of sensor.
+  @todo this is not needed if we use proper enrichment
+  */
+uint64_t rb_sensor_id(rb_sensor_t *sensor);
+
+/** Obtains sensor enrichment
+  @param sensor Sensor
+  @todo make const return
+  */
+struct json_object *rb_sensor_enrichment(rb_sensor_t *sensor);
+
 /** Increase by 1 the reference counter for sensor
   @param sensor Sensor
+  @todo this is not needed if we use proper enrichment
   */
 void rb_sensor_get(rb_sensor_t *sensor);
+
 
 /** Decrease the sensor reference counter.
   @param sensor Sensor
@@ -81,31 +103,23 @@ void rb_sensor_get(rb_sensor_t *sensor);
 void rb_sensor_put(rb_sensor_t *sensor);
 
 /** Sensors array */
-struct rb_sensor_array {
-	size_t size;  ///< Number of elements can hold
-	size_t count; ///< Count of elements
-	rb_sensor_t *sensors[]; ///< Elements
-};
+typedef struct rb_array rb_sensors_array_t;
 
 /** Create a new array with count capacity */
-struct rb_sensor_array *rb_sensors_array_new(size_t count);
+#define rb_sensors_array_new(sz) rb_array_new(sz)
 
 /** Destroy a sensors array */
-void rb_sensors_array_done(struct rb_sensor_array *array);
+#define rb_sensors_array_done(array) rb_array_done(array)
 
 /** Checks if a sensor array is full */
-static bool rb_sensors_array_full(struct rb_sensor_array *array) RD_UNUSED;
-static bool rb_sensors_array_full(struct rb_sensor_array *array) {
-	return array->size == array->count;
-}
+#define rb_sensors_array_full(array) rb_array_full(array)
 
-/** Add a sensor to sensors array */
-static void rb_sensor_array_add(struct rb_sensor_array *array,
+/** Add a sensor to sensors array
+  @note Wrapper function allows typechecking */
+static void rb_sensor_array_add(rb_sensors_array_t *array,
 						rb_sensor_t *sensor) RD_UNUSED;
-static void rb_sensor_array_add(struct rb_sensor_array *array,
+static void rb_sensor_array_add(rb_sensors_array_t *array,
 						rb_sensor_t *sensor) {
-	if (!rb_sensors_array_full(array)) {
-		array->sensors[array->count++] = sensor;
-	}
+	rb_array_add(array, sensor);
 }
 
