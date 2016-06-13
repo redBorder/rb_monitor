@@ -481,9 +481,9 @@ static void *worker(void *_info) {
   @param sarray Sensors array
   @param squeue Sensors queue
   */
-static void queue_sensors(struct rb_sensor_array *sarray, rd_fifoq_t *squeue) {
+static void queue_sensors(rb_sensors_array_t *sarray, rd_fifoq_t *squeue) {
 	for(size_t i=0; i<sarray->count; ++i) {
-		rb_sensor_t *sensor = sarray->sensors[i];
+		rb_sensor_t *sensor = sarray->elms[i];
 		rb_sensor_get(sensor);
 		queue_sensor(squeue, sensor);
 	}
@@ -504,7 +504,7 @@ static void *rdkafka_delivery_reports_poll_f(void * void_worker_info) {
   @param sensor_json JSON config
   @return Sensors array
   */
-static struct rb_sensor_array * parse_sensors(struct _worker_info *worker_info,
+static rb_sensors_array_t *parse_sensors(struct _worker_info *worker_info,
 						struct json_object *config) {
 	struct json_object *json_sensors=NULL;
 	const int get_rc = json_object_object_get_ex(config, CONFIG_SENSORS_KEY,
@@ -522,7 +522,7 @@ static struct rb_sensor_array * parse_sensors(struct _worker_info *worker_info,
 	}
 
 	const size_t sensors_length = json_object_array_length(json_sensors);
-	struct rb_sensor_array *ret = rb_sensors_array_new(sensors_length);
+	rb_sensors_array_t *ret = rb_sensors_array_new(sensors_length);
 
 	for (size_t i=0; i<sensors_length; ++i) {
 		if (rb_sensors_array_full(ret)) {
@@ -562,7 +562,6 @@ int main(int argc, char  *argv[])
 
 	pthread_t * pd_thread = NULL;
 	rd_fifoq_t queue;
-	struct rb_sensor_array *sensors_array = NULL;
 	sensor_queue_init(&queue);
 
 	assert(default_config);
@@ -731,7 +730,8 @@ int main(int argc, char  *argv[])
 	}
 #endif /* HAVE_RBHTTP */
 
-	sensors_array = parse_sensors(&worker_info, config_file);
+	rb_sensors_array_t *sensors_array = parse_sensors(&worker_info,
+								config_file);
 	if(sensors_array) {
 		init_snmp("redBorder-monitor");
 		pd_thread = malloc(sizeof(pthread_t)*main_info.threads);
