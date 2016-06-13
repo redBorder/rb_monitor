@@ -45,5 +45,3 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,
 void destroy_snmp_session(struct monitor_snmp_session *);
 
 int net_snmp_version(const char *string_version,const char *sensor_name);
-
-static inline const char * snmp_type_fn(void){return "snmp";}

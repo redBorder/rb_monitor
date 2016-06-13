@@ -137,7 +137,7 @@ struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
 		else
 			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
 		if(monitor_value->type)
-			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type());
+			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type);
 		if(monitor_value->unit)
 			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_value->unit);
 		if(monitor_value->group_name)

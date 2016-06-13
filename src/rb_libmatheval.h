@@ -157,5 +157,3 @@ static inline int libmatheval_check_exists(char ** vars,int varcount,const struc
 	*vars_pos = j-1;
 	return aok;
 }
-
-static inline const char * op_type(void){return "op";}
