@@ -308,8 +308,9 @@ struct process_sensor_monitor_ctx {
 };
 
 /* FW declaration */
-static void process_sensor_monitor(struct process_sensor_monitor_ctx *ctx,
-					rb_monitor_t *monitor, rd_lru_t *ret);
+static void process_sensor_monitor(
+				struct process_sensor_monitor_ctx *process_ctx,
+				const rb_monitor_t *monitor, rd_lru_t *ret);
 static int process_novector_monitor(struct _worker_info *worker_info,
 		const rb_monitor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
@@ -384,91 +385,127 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	return aok;
 }
 
-/// @todo monitor has to be const here
+/** Base function to obtain an external value, and to manage it as a vector or
+  as an integer
+  @param worker_info Common thread information
+  @param process_ctx Processing context
+  @param monitor Monitor to process
+  @param send Send value to kafka
+  @param valueslist List of values processed by this sensor in this iteration
+  @param get_value_cb Callback to get value
+  @param get_value_cb_ctx Context send to get_value_cb
+  @return true if we can send value
+  */
+static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
+		struct process_sensor_monitor_ctx *process_ctx,
+		const rb_monitor_t *monitor, bool *send, rd_lru_t *valueslist,
+		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
+						void *ctx, const char *arg),
+		void *get_value_cb_ctx) {
+	double number = 0;
+	char value_buf[BUFSIZ];
+	value_buf[0] = '\0';
+	const bool ok = get_value_cb(value_buf, sizeof(value_buf), &number,
+					get_value_cb_ctx, monitor->cmd_arg);
+
+	if(0 == strlen(value_buf)) {
+		rdlog(LOG_WARNING,"Not seeing %s value.", monitor->name);
+		return false;
+	}
+
+	if(!monitor->splittok) {
+		if (!ok) {
+			rdlog(LOG_WARNING,
+				"Value '%s' of [%s:%s] is not a number",
+						value_buf, monitor->cmd_arg,
+						monitor->name);
+			return false;
+		}
+		process_novector_monitor(worker_info, monitor,
+				process_ctx->libmatheval_variables, value_buf,
+				number, valueslist);
+	} else /* We have a vector here */ {
+		/** @todo delete parameters that could be sent
+			using monitor */
+		process_vector_monitor(worker_info, monitor,
+			process_ctx->libmatheval_variables, value_buf,
+			valueslist, &process_ctx->memctx);
+	}
+
+	/** @todo move to process_novector_monitor */
+	if(monitor->nonzero && rd_dz(number))
+	{
+		assert(process_ctx->bad_names.pos
+					< process_ctx->bad_names.size);
+		/// @TODO be able to difference between system and oid
+		/// in error message
+		rdlog(LOG_ALERT,
+			"value oid=%s is 0, but nonzero setted. skipping.",
+			monitor->cmd_arg);
+		size_t bad_names_pos = process_ctx->bad_names.pos++;
+		process_ctx->bad_names.names[bad_names_pos++] = monitor->name;
+		*send = 0;
+	}
+
+	return ok;
+}
+
+/** Convenience function to obtain system values */
+static bool rb_monitor_get_system_external_value(
+			struct _worker_info *worker_info, bool *send,
+			const rb_monitor_t *monitor,
+			rd_lru_t *valueslist,
+			struct process_sensor_monitor_ctx *process_ctx) {
+	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
+		send, valueslist, system_solve_response, NULL);
+}
+
+/** Convenience function */
+static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
+			double *number, void *session, const char *oid_string) {
+	return snmp_solve_response(value_buf, value_buf_len, number,
+		(struct monitor_snmp_session *)session, oid_string);
+}
+
+/** Convenience function to obtain SNMP values */
+static bool rb_monitor_get_snmp_external_value(
+			struct _worker_info *worker_info, bool *send,
+			const rb_monitor_t *monitor,
+			rd_lru_t *valueslist,
+			struct process_sensor_monitor_ctx *process_ctx) {
+	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
+				send, valueslist, snmp_solve_response0,
+				process_ctx->snmp_sessp);
+}
+
+/** Process a sensor monitor
+  @param process_ctx Process context
+  @param monitor Monitor to process
+  @param ret Returned messages
+  */
 static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
-				/* const */rb_monitor_t *monitor,
-				rd_lru_t *ret) {
+				const rb_monitor_t *monitor, rd_lru_t *ret) {
 	struct _worker_info *worker_info = process_ctx->worker_info;
 	struct libmatheval_stuffs *libmatheval_variables =
 					process_ctx->libmatheval_variables;
 	rd_lru_t *valueslist = rd_lru_new();
-	double number = 0;
 	bool send = monitor->send;
 
 	switch (monitor->type) {
 	case RB_MONITOR_T__OID:
+		rb_monitor_get_snmp_external_value(worker_info, &send,
+			monitor, valueslist, process_ctx);
+		break;
 	case RB_MONITOR_T__SYSTEM:
-	{
-		bool valid_double = false;
-		// @TODO refactor all this block. Search for repeated code.
-		/* @TODO test passing a sensor without params to caller function. */
-		char value_buf[1024] = {'\0'};
-		if (monitor->type == RB_MONITOR_T__OID)
-		{
-			valid_double = snmp_solve_response(value_buf, 1024,
-					&number, process_ctx->snmp_sessp,
-					monitor->cmd_arg);
-		}
-		else
-		{
-			valid_double = system_solve_response(value_buf, 1024,
-				&number, NULL, monitor->cmd_arg);
-		}
-
-		if(unlikely(strlen(value_buf)==0))
-		{
-			rdlog(LOG_WARNING,"Not seeing %s value.",
-								monitor->name);
-		}
-		else if(!monitor->splittok)
-		{
-			if(valid_double)
-			{
-				/** @todo delete parameters that could be sent
-				using monitor */
-				process_novector_monitor(
-					worker_info,
-					monitor,
-					libmatheval_variables, value_buf,
-					number, valueslist);
-			}
-			else
-			{
-				rdlog(LOG_WARNING,
-					"Value '%s' of [%s:%s] is not a number",
-						value_buf, monitor->cmd_arg,
-						monitor->name);
-			}
-		}
-		else /* We have a vector here */
-		{
-			/** @todo delete parameters that could be sent
-				using monitor */
-			process_vector_monitor(worker_info, monitor,
-				libmatheval_variables, value_buf,
-				valueslist, &process_ctx->memctx);
-		}
-
-		if(monitor->nonzero && rd_dz(number))
-		{
-			assert(process_ctx->bad_names.pos
-						< process_ctx->bad_names.size);
-			/// @TODO be able to difference between system and oid
-			/// in error message
-			rdlog(LOG_ALERT,
-				"value oid=%s is 0, but nonzero setted. skipping.",
-				monitor->cmd_arg);
-			size_t bad_names_pos = process_ctx->bad_names.pos++;
-			process_ctx->bad_names.names[bad_names_pos++] =
-								monitor->name;
-			send = 0;
-		}
-	}
+		rb_monitor_get_system_external_value(worker_info, &send,
+			monitor, valueslist, process_ctx);
+		break;
 	case RB_MONITOR_T__OP:
 	{
+		double number = 0;
 		const char * operation = monitor->cmd_arg;
-		int op_ok=1;
+		bool op_ok = true;
 		for (unsigned int i=0;
 				op_ok==1 && i<process_ctx->bad_names.pos; ++i) {
 			if (strstr(process_ctx->bad_names.names[i],operation)) {
@@ -476,7 +513,7 @@ static void process_sensor_monitor(
 					"OP %s Uses a previously bad marked value variable (%s). Skipping",
 					operation,
 					process_ctx->bad_names.names[i]);
-				send = (op_ok = 0);
+				send = op_ok = false;
 			}
 		}
 
