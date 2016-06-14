@@ -54,15 +54,15 @@ void assert_rb_sensor(rb_sensor_t *sensor) {
 }
 #endif
 
-const char *rb_sensor_name(rb_sensor_t *sensor) {
+const char *rb_sensor_name(const rb_sensor_t *sensor) {
 	return sensor->data.sensor_name;
 }
 
-uint64_t rb_sensor_id(rb_sensor_t *sensor) {
+uint64_t rb_sensor_id(const rb_sensor_t *sensor) {
 	return sensor->data.sensor_id;
 }
 
-struct json_object *rb_sensor_enrichment(rb_sensor_t *sensor) {
+struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor) {
 	return sensor->data.enrichment;
 }
 

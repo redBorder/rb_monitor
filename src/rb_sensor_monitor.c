@@ -92,8 +92,6 @@ struct rb_monitor_s {
 	const char *splitop; ///< Do a final operation with tokens
 	const char *unit; ///< Monitor unit
 	const char *cmd_arg; ///< Argument given to command
-
-	rb_sensor_t *sensor;
 };
 
 #ifdef RB_MONITOR_MAGIC
@@ -259,9 +257,6 @@ static rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor,
 	} else {
 		rb_monitor_t *ret = parse_rb_monitor0(cmd_type, cmd_arg,
 								json_monitor);
-		if (ret) {
-			ret->sensor = monitor_sensor;
-		}
 
 		return ret;
 	}
@@ -313,15 +308,16 @@ struct process_sensor_monitor_ctx {
 /* FW declaration */
 static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
-				const rb_monitor_t *monitor, rd_lru_t *ret);
+				const rb_monitor_t *monitor,
+				const rb_sensor_t *sensor, rd_lru_t *ret);
 static int process_novector_monitor(struct _worker_info *worker_info,
-		const rb_monitor_t *sensor,
+		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
 		const char *value_buf,
 		double value, rd_lru_t *valueslist);
 
 static int process_vector_monitor(struct _worker_info *worker_info,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_lru_t *valueslist,
 			rd_memctx_t *memctx);
@@ -377,7 +373,7 @@ bool process_monitors_array(struct _worker_info *worker_info,
 
 	for (size_t i=0; aok && i<monitors->count; ++i) {
 		process_sensor_monitor(&process_ctx,
-			rb_monitors_array_elm_at(monitors, i), ret);
+			rb_monitors_array_elm_at(monitors, i), sensor, ret);
 	}
 	destroy_snmp_session(process_ctx.snmp_sessp);
 
@@ -401,7 +397,8 @@ bool process_monitors_array(struct _worker_info *worker_info,
   */
 static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
 		struct process_sensor_monitor_ctx *process_ctx,
-		const rb_monitor_t *monitor, bool *send, rd_lru_t *valueslist,
+		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
+		bool *send, rd_lru_t *valueslist,
 		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
 						void *ctx, const char *arg),
 		void *get_value_cb_ctx) {
@@ -424,13 +421,13 @@ static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
 						monitor->name);
 			return false;
 		}
-		process_novector_monitor(worker_info, monitor,
+		process_novector_monitor(worker_info, monitor, sensor,
 				process_ctx->libmatheval_variables, value_buf,
 				number, valueslist);
 	} else /* We have a vector here */ {
 		/** @todo delete parameters that could be sent
 			using monitor */
-		process_vector_monitor(worker_info, monitor,
+		process_vector_monitor(worker_info, monitor, sensor,
 			process_ctx->libmatheval_variables, value_buf,
 			valueslist, &process_ctx->memctx);
 	}
@@ -456,11 +453,11 @@ static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
 /** Convenience function to obtain system values */
 static bool rb_monitor_get_system_external_value(
 			struct _worker_info *worker_info, bool *send,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-		send, valueslist, system_solve_response, NULL);
+		sensor, send, valueslist, system_solve_response, NULL);
 }
 
 /** Convenience function */
@@ -473,18 +470,18 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 /** Convenience function to obtain SNMP values */
 static bool rb_monitor_get_snmp_external_value(
 			struct _worker_info *worker_info, bool *send,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-				send, valueslist, snmp_solve_response0,
+		sensor, send, valueslist, snmp_solve_response0,
 				process_ctx->snmp_sessp);
 }
 
 /** Convenience function to obtain operations values */
 static bool rb_monitor_get_op_result(
 			struct _worker_info *worker_info, bool *send,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	double number = 0;
@@ -565,15 +562,15 @@ static bool rb_monitor_get_op_result(
 		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_id = rb_sensor_id(monitor->sensor);
-		monitor_value.sensor_name = rb_sensor_name(monitor->sensor);
+		monitor_value.sensor_id = rb_sensor_id(sensor);
+		monitor_value.sensor_name = rb_sensor_name(sensor);
 		monitor_value.instance_prefix = monitor->instance_prefix;
 		monitor_value.bad_value = 0;
 		monitor_value.unit = monitor->unit;
 		monitor_value.group_name = monitor->group_name;
 		monitor_value.group_id = monitor->group_id;
 		monitor_value.type = rb_monitor_type(monitor);
-		monitor_value.enrichment = rb_sensor_enrichment(monitor->sensor);
+		monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 		for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 		{
@@ -759,7 +756,8 @@ static bool rb_monitor_get_op_result(
   */
 static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
-				const rb_monitor_t *monitor, rd_lru_t *ret) {
+				const rb_monitor_t *monitor,
+				const rb_sensor_t *sensor, rd_lru_t *ret) {
 	struct _worker_info *worker_info = process_ctx->worker_info;
 	rd_lru_t *valueslist = rd_lru_new();
 	bool send = monitor->send;
@@ -767,7 +765,8 @@ static void process_sensor_monitor(
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
 	case menum:                                                            \
-		fn(worker_info, &send, monitor, valueslist, process_ctx);      \
+		fn(worker_info, &send, monitor, sensor, valueslist,            \
+						process_ctx);                  \
 		break;                                                         \
 
 	MONITOR_CMDS_X
@@ -804,7 +803,7 @@ static void process_sensor_monitor(
 /** Process a no-vector monitor */
 // @todo pass just a monitor_value with all precached possible.
 static int process_novector_monitor(struct _worker_info *worker_info,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			const char *value_buf,
 			double value, rd_lru_t *valueslist) {
@@ -818,8 +817,8 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_name = rb_sensor_name(monitor->sensor);
-		monitor_value.sensor_id = rb_sensor_id(monitor->sensor);
+		monitor_value.sensor_name = rb_sensor_name(sensor);
+		monitor_value.sensor_id = rb_sensor_id(sensor);
 		monitor_value.name = monitor->name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
@@ -831,8 +830,7 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 		monitor_value.group_id = monitor->group_id;
 		monitor_value.integer = monitor->integer;
 		monitor_value.type = rb_monitor_type(monitor);
-		monitor_value.enrichment
-					= rb_sensor_enrichment(monitor->sensor);
+		monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 		/** @TODO monitor_values_tree should be by sensor, not general!
 		*/
@@ -856,7 +854,7 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 // @todo pass just a monitor_value with all precached possible.
 // @todo make a call to process_novector_monitor
 static int process_vector_monitor(struct _worker_info *worker_info,
-			const rb_monitor_t *monitor,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_lru_t *valueslist,
 			rd_memctx_t *memctx) {
@@ -879,15 +877,15 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 	#ifdef MONITOR_VALUE_MAGIC
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
-	monitor_value.sensor_name = rb_sensor_name(monitor->sensor);
-	monitor_value.sensor_id = rb_sensor_id(monitor->sensor);
+	monitor_value.sensor_name = rb_sensor_name(sensor);
+	monitor_value.sensor_id = rb_sensor_id(sensor);
 	monitor_value.bad_value = 0;
 	monitor_value.unit = monitor->unit;
 	monitor_value.group_name = monitor->group_name;
 	monitor_value.group_id = monitor->group_id;
 	monitor_value.integer = monitor->integer;
 	monitor_value.type = rb_monitor_type(monitor);
-	monitor_value.enrichment = rb_sensor_enrichment(monitor->sensor);
+	monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 	const size_t per_instance_name_len = strlen(name) +
 		(monitor->name_split_suffix ?
