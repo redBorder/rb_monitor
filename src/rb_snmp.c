@@ -63,9 +63,8 @@ struct monitor_snmp_session * new_snmp_session(struct snmp_session *initial_sess
 	return session;
 }
 
-int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * number,
-	struct monitor_snmp_session * session,const char *oid_string)
-{
+bool snmp_solve_response(char *value_buf, size_t value_buf_len, double *number,
+		struct monitor_snmp_session *session, const char *oid_string) {
 	#ifdef SNMP_SESS_MAGIC
 	assert(session->magic==SNMP_SESS_MAGIC);
 	#endif
