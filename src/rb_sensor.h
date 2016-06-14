@@ -75,20 +75,20 @@ bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
   @param sensor Sensor
   @return Name of sensor.
   */
-const char *rb_sensor_name(rb_sensor_t *sensor);
+const char *rb_sensor_name(const rb_sensor_t *sensor);
 
 /** Obtains sensor id
   @param sensor Sensor
   @return Name of sensor.
   @todo this is not needed if we use proper enrichment
   */
-uint64_t rb_sensor_id(rb_sensor_t *sensor);
+uint64_t rb_sensor_id(const rb_sensor_t *sensor);
 
 /** Obtains sensor enrichment
   @param sensor Sensor
   @todo make const return
   */
-struct json_object *rb_sensor_enrichment(rb_sensor_t *sensor);
+struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor);
 
 /** Increase by 1 the reference counter for sensor
   @param sensor Sensor
