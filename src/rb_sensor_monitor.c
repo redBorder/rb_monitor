@@ -100,7 +100,7 @@ struct rb_monitor_s {
 #define assert_rb_monitor(monitor)
 #endif
 
-static const char *rb_monitor_type(const rb_monitor_t *monitor) {
+const char *rb_monitor_type(const rb_monitor_t *monitor) {
 	assert(monitor);
 
 	switch(monitor->type) {
@@ -109,6 +109,26 @@ static const char *rb_monitor_type(const rb_monitor_t *monitor) {
 #undef _X
 	default: return NULL;
 	};
+}
+
+const char *rb_monitor_instance_prefix(const rb_monitor_t *monitor) {
+	return monitor->instance_prefix;
+}
+
+const char *rb_monitor_group_id(const rb_monitor_t *monitor) {
+	return monitor->group_id;
+}
+
+const char *rb_monitor_group_name(const rb_monitor_t *monitor) {
+	return monitor->group_name;
+}
+
+bool rb_monitor_is_integer(const rb_monitor_t *monitor) {
+	return monitor->integer;
+}
+
+const char *rb_monitor_unit(const rb_monitor_t *monitor) {
+	return monitor->unit;
 }
 
 /** Free a const string.
@@ -562,15 +582,10 @@ static bool rb_monitor_get_op_result(
 		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_id = rb_sensor_id(sensor);
 		monitor_value.sensor_name = rb_sensor_name(sensor);
 		monitor_value.instance_prefix = monitor->instance_prefix;
 		monitor_value.bad_value = 0;
-		monitor_value.unit = monitor->unit;
-		monitor_value.group_name = monitor->group_name;
 		monitor_value.group_id = monitor->group_id;
-		monitor_value.type = rb_monitor_type(monitor);
-		monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 		for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 		{
@@ -778,7 +793,8 @@ static void process_sensor_monitor(
 
 	const struct monitor_value * monitor_value = NULL;
 	while((monitor_value = rd_lru_pop(valueslist))) {
-		struct printbuf* printbuf= print_monitor_value(monitor_value);
+		struct printbuf* printbuf= print_monitor_value(monitor_value,
+							monitor, sensor);
 		if(likely(NULL!=printbuf)) {
 			if(send) {
 				char *dup = strdup(printbuf->buf);
@@ -818,19 +834,13 @@ static int process_novector_monitor(struct _worker_info *worker_info,
 		#endif
 		monitor_value.timestamp = time(NULL);
 		monitor_value.sensor_name = rb_sensor_name(sensor);
-		monitor_value.sensor_id = rb_sensor_id(sensor);
 		monitor_value.name = monitor->name;
 		monitor_value.instance = 0;
 		monitor_value.instance_valid = 0;
 		monitor_value.bad_value = 0;
 		monitor_value.value = value;
 		monitor_value.string_value = value_buf;
-		monitor_value.unit = monitor->unit;
-		monitor_value.group_name = monitor->group_name;
 		monitor_value.group_id = monitor->group_id;
-		monitor_value.integer = monitor->integer;
-		monitor_value.type = rb_monitor_type(monitor);
-		monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 		/** @TODO monitor_values_tree should be by sensor, not general!
 		*/
@@ -878,14 +888,8 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
 	monitor_value.sensor_name = rb_sensor_name(sensor);
-	monitor_value.sensor_id = rb_sensor_id(sensor);
 	monitor_value.bad_value = 0;
-	monitor_value.unit = monitor->unit;
-	monitor_value.group_name = monitor->group_name;
 	monitor_value.group_id = monitor->group_id;
-	monitor_value.integer = monitor->integer;
-	monitor_value.type = rb_monitor_type(monitor);
-	monitor_value.enrichment = rb_sensor_enrichment(sensor);
 
 	const size_t per_instance_name_len = strlen(name) +
 		(monitor->name_split_suffix ?
@@ -1040,9 +1044,7 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 				monitor_value.instance_valid = 0;
 				monitor_value.value = result;
 				monitor_value.string_value = split_op_result;
-				monitor_value.group_name = monitor->group_name;
 				monitor_value.group_id = monitor->group_id;
-//				monitor_value.type = type;
 
 				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
