@@ -18,6 +18,9 @@
 
 #pragma once
 
+#include "rb_sensor_monitor.h"
+#include "rb_sensor.h"
+
 #include <signal.h>
 #include <pthread.h>
 #include <librd/rdtypes.h>
@@ -28,8 +31,9 @@
 #include <stdbool.h>
 #include <json/json.h>
 
-
-// #define MONITOR_VALUE_MAGIC 0x12345678
+#ifndef NDEBUG
+#define MONITOR_VALUE_MAGIC 0x010AEA1C010AEA1CL
+#endif
 
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
@@ -38,29 +42,22 @@ struct monitor_value{
 	rd_avl_node_t avl_node;
 
 	#ifdef MONITOR_VALUE_MAGIC
-	int magic; // Private data, don't need to use them outside.
+	uint64_t magic; // Private data, don't need to use them outside.
 	#endif
 
 	/* config.json extracted */
-	int sensor_id;
 	const char * sensor_name;
+
 	const char * name;            // Intern name: *__gid__*__pos__
 	const char * send_name;       // Extern name. If not __gid__ nor __pos__, it is NULL and you have to check name.
 	                              // @todo make a function name() for do the last.
 	const char * instance_prefix;
-	const char * unit;
-	const char * group_name;
 	const char * group_id;
-	bool integer;
-
-	/* enrichment */
-	const json_object *enrichment;
 
 	/* response */
 	time_t timestamp;
 	double value;
-	const char * string_value;
-	const char *type;
+	const char *string_value;
 
 	/* vector response */
 	unsigned int instance;
@@ -72,4 +69,11 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 
 int process_monitor_value(struct monitor_value *monitor_value);
 
-struct printbuf * print_monitor_value(const struct monitor_value *monitor_value);
+/** Print a sensor value
+  @param monitor_value Value to print
+  @param monitor Value's monitor
+  @param sensor  Monitor's sensor
+  @return new printbuf with result string (has to be freed with )
+  */
+struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor);

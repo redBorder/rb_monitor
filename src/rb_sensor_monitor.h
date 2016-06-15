@@ -43,6 +43,42 @@ struct snmp_params_s {
 	struct monitor_snmp_new_session_config session;
 };
 
+/** Gets monitor instance_prefix
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_instance_prefix(const rb_monitor_t *monitor);
+
+/** Gets monitor group_id
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_group_id(const rb_monitor_t *monitor);
+
+/** Gets monitor group_name
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_group_name(const rb_monitor_t *monitor);
+
+/** Gets monitor integer status
+  @param monitor Monitor to get data
+  @return requested data
+  */
+bool rb_monitor_is_integer(const rb_monitor_t *monitor);
+
+/** Gets monitor type
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_type(const rb_monitor_t *monitor);
+
+/** Gets monitor unit
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_unit(const rb_monitor_t *monitor);
+
 /** Extract monitors array from a JSON array.
   @param monitors_array_json JSON monitors template
   @param sensor Sensor this monitor's belong
