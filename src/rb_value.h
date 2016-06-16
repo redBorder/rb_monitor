@@ -20,6 +20,7 @@
 
 #include "rb_sensor_monitor.h"
 #include "rb_sensor.h"
+#include "rb_array.h"
 
 #include <signal.h>
 #include <pthread.h>
@@ -65,9 +66,32 @@ struct monitor_value{
 	bool bad_value;
 };
 
+void rb_monitor_value_done(struct monitor_value *mv);
+
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
 
 int process_monitor_value(struct monitor_value *monitor_value);
+
+/** Sensors array */
+typedef struct rb_array rb_monitor_value_array_t;
+
+/** Create a new array with count capacity */
+#define rb_monitor_value_array_new(sz) rb_array_new(sz)
+
+/** Destroy a sensors array */
+#define rb_monitor_value_array_done(array) rb_array_done(array)
+
+/** Checks if a sensor array is full */
+#define rb_monitor_value_array_full(array) rb_array_full(array)
+
+/** Add a sensor to sensors array
+  @note Wrapper function allows typechecking */
+static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
+					struct monitor_value *sensor) RD_UNUSED;
+static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
+					struct monitor_value *sensor) {
+	rb_array_add(array, sensor);
+}
 
 /** Print a sensor value
   @param monitor_value Value to print
