@@ -32,8 +32,6 @@ void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *sr
 	dst->magic = MONITOR_VALUE_MAGIC;
 #endif
         dst->timestamp           = src->timestamp;
-        if(src->sensor_name)
-                dst->sensor_name     = rd_memctx_strdup(&dst->memctx,src->sensor_name);
         if(src->name)
                 dst->name            = rd_memctx_strdup(&dst->memctx,src->name);
         if(src->send_name)
@@ -116,6 +114,7 @@ struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
 	struct printbuf * printbuf = printbuf_new();
 	if(likely(NULL!=printbuf)) {
 		const int sensor_id = rb_sensor_id(sensor);
+		const char *sensor_name = rb_sensor_name(sensor);
 		const char *monitor_group_name = rb_monitor_group_name(monitor);
 		const char *monitor_type = rb_monitor_type(monitor);
 		const char *monitor_unit = rb_monitor_unit(monitor);
@@ -128,9 +127,9 @@ struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
 		if (sensor_id) {
 			sprintbuf(printbuf, ",\"sensor_id\":%lu", sensor_id);
 		}
-		if (monitor_value->sensor_name) {
+		if (sensor_name) {
 			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",
-						monitor_value->sensor_name);
+						sensor_name);
 		}
 		if (monitor_value->send_name) {
 			sprintbuf(printbuf, ",\"monitor\":\"%s\"",

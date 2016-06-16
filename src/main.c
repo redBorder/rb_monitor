@@ -19,7 +19,6 @@
 #include "config.h"
 
 #include "rb_sensor.h"
-#include "rb_values_list.h"
 #include "rb_sensor_queue.h"
 
 #ifdef HAVE_ZOOKEEPER
@@ -571,7 +570,6 @@ int main(int argc, char  *argv[])
 	assert(default_config);
 	ret = parse_json_config(default_config,&worker_info,&main_info);
 	assert(ret==TRUE);
-	worker_info.monitor_values_tree = new_monitor_values_tree();
 
 	while ((opt = getopt(argc, argv, "gc:hvd:")) != -1) {
 		switch (opt) {

@@ -43,7 +43,7 @@ static int monitor_value_cmp(const void *_v1,const void*_v2)
 	assert(v2->magic==MONITOR_VALUE_MAGIC);
 	#endif
 
-	int ret = strcmp(v1->sensor_name,v2->sensor_name);
+	int ret = 0;
 	if(0==ret && v1->group_id && v2->group_id)
 		ret = strcmp(v1->group_id,v2->group_id);
 	if(0==ret)

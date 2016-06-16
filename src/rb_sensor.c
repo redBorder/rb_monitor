@@ -23,6 +23,7 @@
 #include "rb_json.h"
 
 #include "rb_sensor_monitor.h"
+#include "rb_values_list.h"
 
 #include <librd/rd.h>
 #include <librd/rdlog.h>
@@ -45,6 +46,7 @@ struct rb_sensor_s {
 
 	sensor_data_t data;              ///< Data of sensor
 	rb_monitors_array_t *monitors;   ///< Monitors to ask for
+	struct monitor_values_tree *mv_tree; ///< @todo delete me
 	int refcnt;                      ///< Reference counting
 };
 
@@ -64,6 +66,10 @@ uint64_t rb_sensor_id(const rb_sensor_t *sensor) {
 
 struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor) {
 	return sensor->data.enrichment;
+}
+
+struct monitor_values_tree *rb_sensor_monitor_values_tree(rb_sensor_t *sensor) {
+	return sensor->mv_tree;
 }
 
 /** Checks if a property is set. If not, it will show error message and will
@@ -173,6 +179,8 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
 	rb_sensor_t *ret = calloc(1,sizeof(*ret));
 
 	if (ret) {
+		ret->mv_tree = new_monitor_values_tree();
+
 		sensor_set_defaults(worker_info, ret);
 		const bool sensor_ok = sensor_common_attrs(ret, sensor_info);
 		if (!sensor_ok) {
