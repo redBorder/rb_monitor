@@ -175,3 +175,9 @@ struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
 
 	return printbuf;
 }
+
+void rb_monitor_value_done(struct monitor_value *mv) {
+	rd_memctx_freeall(&mv->memctx);
+	rd_memctx_destroy(&mv->memctx);
+	free(mv);
+}
