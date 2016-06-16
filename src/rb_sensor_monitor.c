@@ -330,17 +330,18 @@ static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
 				const rb_sensor_t *sensor, rd_lru_t *ret);
-static int process_novector_monitor(struct _worker_info *worker_info,
+static rb_monitors_array_t *process_novector_monitor(
+		struct _worker_info *worker_info,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
 		const char *value_buf,
-		double value, rd_lru_t *valueslist);
+		double value);
 
-static int process_vector_monitor(struct _worker_info *worker_info,
+static rb_monitors_array_t *process_vector_monitor(
+			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
-			char *value_buf, rd_lru_t *valueslist,
-			rd_memctx_t *memctx);
+			char *value_buf, rd_memctx_t *memctx);
 
 bool process_monitors_array(struct _worker_info *worker_info,
 			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
@@ -410,21 +411,23 @@ bool process_monitors_array(struct _worker_info *worker_info,
   @param process_ctx Processing context
   @param monitor Monitor to process
   @param send Send value to kafka
-  @param valueslist List of values processed by this sensor in this iteration
+  @todo delete send argument, just do not add to valueslist vector!
   @param get_value_cb Callback to get value
   @param get_value_cb_ctx Context send to get_value_cb
   @return true if we can send value
   */
-static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
+static rb_monitors_array_t *rb_monitor_get_external_value(
+		struct _worker_info *worker_info,
 		struct process_sensor_monitor_ctx *process_ctx,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-		bool *send, rd_lru_t *valueslist,
+		bool *send,
 		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
 						void *ctx, const char *arg),
 		void *get_value_cb_ctx) {
 	double number = 0;
 	char value_buf[BUFSIZ];
 	value_buf[0] = '\0';
+	rb_monitors_array_t *ret = NULL;
 	const bool ok = get_value_cb(value_buf, sizeof(value_buf), &number,
 					get_value_cb_ctx, monitor->cmd_arg);
 
@@ -441,15 +444,15 @@ static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
 						monitor->name);
 			return false;
 		}
-		process_novector_monitor(worker_info, monitor, sensor,
+		ret = process_novector_monitor(worker_info, monitor, sensor,
 				process_ctx->libmatheval_variables, value_buf,
-				number, valueslist);
+				number);
 	} else /* We have a vector here */ {
 		/** @todo delete parameters that could be sent
 			using monitor */
-		process_vector_monitor(worker_info, monitor, sensor,
+		ret = process_vector_monitor(worker_info, monitor, sensor,
 			process_ctx->libmatheval_variables, value_buf,
-			valueslist, &process_ctx->memctx);
+			&process_ctx->memctx);
 	}
 
 	/** @todo move to process_novector_monitor */
@@ -467,17 +470,16 @@ static bool rb_monitor_get_external_value(struct _worker_info *worker_info,
 		*send = 0;
 	}
 
-	return ok;
+	return ret;
 }
 
 /** Convenience function to obtain system values */
-static bool rb_monitor_get_system_external_value(
+static rb_monitors_array_t *rb_monitor_get_system_external_value(
 			struct _worker_info *worker_info, bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-		sensor, send, valueslist, system_solve_response, NULL);
+		sensor, send, system_solve_response, NULL);
 }
 
 /** Convenience function */
@@ -488,27 +490,26 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 }
 
 /** Convenience function to obtain SNMP values */
-static bool rb_monitor_get_snmp_external_value(
+static rb_monitors_array_t *rb_monitor_get_snmp_external_value(
 			struct _worker_info *worker_info, bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-		sensor, send, valueslist, snmp_solve_response0,
-				process_ctx->snmp_sessp);
+		sensor, send, snmp_solve_response0, process_ctx->snmp_sessp);
 }
 
 /** Convenience function to obtain operations values */
-static bool rb_monitor_get_op_result(
+static rb_monitors_array_t *rb_monitor_get_op_result(
 			struct _worker_info *worker_info, bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			rd_lru_t *valueslist,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	double number = 0;
 	const char * operation = monitor->cmd_arg;
 	bool op_ok = true;
 	struct libmatheval_stuffs *libmatheval_variables =
 					process_ctx->libmatheval_variables;
+	/// @TODO do not use an lru for this
+	rd_lru_t *monitor_values = rd_lru_new();
 
 	for (unsigned int i=0; op_ok==1 && i<process_ctx->bad_names.pos; ++i) {
 		if (strstr(process_ctx->bad_names.names[i],operation)) {
@@ -636,8 +637,6 @@ static bool rb_monitor_get_op_result(
 				}
 			}
 
-
-
 			void * const f = evaluator_create ((char *)str_op); /* really it has to be (void *). See libmatheval doc. */
 		                                                       /* also, we have to create a new one for each iteration */
 			if(NULL==f)
@@ -714,10 +713,19 @@ static bool rb_monitor_get_op_result(
 					monitor_value.instance_valid = 0;
 					monitor_value.string_value=val_buf;
 				}
-				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
 
-				if ((send) && new_mv)
-					rd_lru_push(valueslist, (void *)new_mv);
+				/// @todo duplicated code with splitop!
+				struct monitor_value *new_mv = calloc(1,
+							sizeof(*new_mv));
+				if (NULL == new_mv) {
+					rdlog(LOG_ERR,
+						"Couldn't allocate monitor value (out of memory?)");
+					/// @todo need to free memory?
+				} else {
+					monitor_value_copy(new_mv,
+								&monitor_value);
+					rd_lru_push(monitor_values,new_mv);
+				}
 			}
 			if(op_ok && monitor->splitop) {
 				sum+=number;
@@ -743,10 +751,16 @@ static bool rb_monitor_get_op_result(
 				monitor_value.instance_valid = 0;
 				monitor_value.string_value=split_op_result;
 
-				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
-
-				if ((send) && new_mv) {
-					rd_lru_push(valueslist, (void *)new_mv);
+				struct monitor_value *new_mv = calloc(1,
+							sizeof(*new_mv));
+				if (NULL == new_mv) {
+					rdlog(LOG_ERR,
+						"Couldn't allocate monitor value (out of memory?)");
+					/// @todo need to free memory?
+				} else {
+					monitor_value_copy(new_mv,
+								&monitor_value);
+					rd_lru_push(monitor_values,new_mv);
 				}
 			}
 		}
@@ -761,7 +775,26 @@ static bool rb_monitor_get_op_result(
 		free(str_op_variables);
 	}
 
-	return op_ok;
+	rb_monitors_array_t *ret = rb_monitors_array_new(rd_lru_cnt(
+							monitor_values));
+	if (NULL == ret) {
+		rdlog(LOG_ERR,
+			"Couldn't allocate monitors array (out of memory?)");
+		// @todo memory free
+	} else {
+		struct monitor_value *monitor_value = NULL;
+		while((monitor_value = rd_lru_pop(monitor_values))) {
+			if (rb_monitor_value_array_full(ret)) {
+				rdlog(LOG_CRIT, "Monitor array full");
+			} else {
+				rb_monitor_value_array_add(ret, monitor_value);
+			}
+		}
+	}
+
+	rd_lru_destroy(monitor_values);
+
+	return ret;
 }
 
 /** Process a sensor monitor
@@ -774,13 +807,13 @@ static void process_sensor_monitor(
 				const rb_monitor_t *monitor,
 				const rb_sensor_t *sensor, rd_lru_t *ret) {
 	struct _worker_info *worker_info = process_ctx->worker_info;
-	rd_lru_t *valueslist = rd_lru_new();
 	bool send = monitor->send;
+	rb_monitors_array_t *monitor_values = NULL;
 
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
 	case menum:                                                            \
-		fn(worker_info, &send, monitor, sensor, valueslist,            \
+		monitor_values = fn(worker_info, &send, monitor, sensor,       \
 						process_ctx);                  \
 		break;                                                         \
 
@@ -791,24 +824,31 @@ static void process_sensor_monitor(
 		rdlog(LOG_CRIT,"Unknown monitor type: %u", monitor->type);
 	}; /* Switch monitor type */
 
-	const struct monitor_value * monitor_value = NULL;
-	while((monitor_value = rd_lru_pop(valueslist))) {
-		struct printbuf* printbuf= print_monitor_value(monitor_value,
-							monitor, sensor);
-		if(likely(NULL!=printbuf)) {
-			if(send) {
-				char *dup = strdup(printbuf->buf);
-				if (NULL == dup) {
-					rdlog(LOG_ERR, "Couldn't dup!");
-				} else {
-					rd_lru_push(ret, dup);
-				}
-			}
-		} /* for i in splittoks */
-		printbuf_free(printbuf);
-	}
+	for (size_t i=0; monitor_values && i<monitor_values->count; ++i) {
+		const struct monitor_value *monitor_value =
+							monitor_values->elms[i];
 
-	rd_lru_destroy(valueslist);
+		/** @TODO monitor_values_tree should be by sensor, not general!
+		*/
+		const struct monitor_value *new_mv = update_monitor_value(
+			worker_info->monitor_values_tree,monitor_value);
+
+		if(monitor->send && new_mv) {
+			struct printbuf* printbuf= print_monitor_value(new_mv,
+							monitor, sensor);
+			if(likely(NULL!=printbuf)) {
+				if(send) {
+					char *dup = strdup(printbuf->buf);
+					if (NULL == dup) {
+						rdlog(LOG_ERR, "Couldn't dup!");
+					} else {
+						rd_lru_push(ret, dup);
+					}
+				}
+			} /* for i in splittoks */
+			printbuf_free(printbuf);
+		}
+	}
 }
 
 /** @note our way to save a SNMP string vector in libmatheval_array is:
@@ -817,70 +857,77 @@ static void process_sensor_monitor(
 */
 
 /** Process a no-vector monitor */
-// @todo pass just a monitor_value with all precached possible.
-static int process_novector_monitor(struct _worker_info *worker_info,
+static rb_monitors_array_t *process_novector_monitor(
+			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
-			const char *value_buf,
-			double value, rd_lru_t *valueslist) {
+			const char *value_buf, double value) {
+	rb_monitors_array_t *ret = NULL;
 
-	int aok = 1;
 	if(likely(libmatheval_append(libmatheval_variables,
 						monitor->name, value))) {
-		struct monitor_value monitor_value;
-		memset(&monitor_value,0,sizeof(monitor_value));
-		#ifdef MONITOR_VALUE_MAGIC
-		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
-		#endif
-		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_name = rb_sensor_name(sensor);
-		monitor_value.name = monitor->name;
-		monitor_value.instance = 0;
-		monitor_value.instance_valid = 0;
-		monitor_value.bad_value = 0;
-		monitor_value.value = value;
-		monitor_value.string_value = value_buf;
-		monitor_value.group_id = monitor->group_id;
-
-		/** @TODO monitor_values_tree should be by sensor, not general!
-		*/
-		const struct monitor_value * new_mv = update_monitor_value(
-			worker_info->monitor_values_tree,&monitor_value);
-
-		if(monitor->send && new_mv) {
-			rd_lru_push(valueslist,(void *)new_mv);
+		ret = rb_monitor_value_array_new(1);
+		struct monitor_value *mv = NULL;
+		if (NULL == ret) {
+			rdlog(LOG_ERR,
+				"Couldn't allocate monitors value array (out of memory?)");
+			return NULL;
 		}
-	}
-	else
-	{
+
+		rd_calloc_struct(&mv, sizeof(*mv),
+			-1, value_buf, &mv->string_value,
+			RD_MEM_END_TOKEN);
+
+		if (mv) {
+			#ifdef MONITOR_VALUE_MAGIC
+			mv->magic = MONITOR_VALUE_MAGIC; // just sanity check
+			#endif
+			mv->timestamp = time(NULL);
+			mv->sensor_name = rb_sensor_name(sensor);
+			mv->name = monitor->name;
+			mv->instance = 0;
+			mv->instance_valid = 0;
+			mv->bad_value = 0;
+			mv->value = value;
+			mv->group_id = monitor->group_id;
+
+			rb_monitor_value_array_add(ret, mv);
+		} else {
+			rdlog(LOG_ERR,
+				"Couldn't allocate monitor value (out of memory?)");
+			/// @todo memory management
+		}
+	} else {
 		rdlog(LOG_ERR,"Error adding libmatheval value");
-		aok = 0;
 	}
 
-	return aok;
+	return ret;
 }
 
 
-// @todo pass just a monitor_value with all precached possible.
 // @todo make a call to process_novector_monitor
-static int process_vector_monitor(struct _worker_info *worker_info,
+static rb_monitor_value_array_t *process_vector_monitor(
+			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
-			char *value_buf, rd_lru_t *valueslist,
-			rd_memctx_t *memctx) {
+			char *value_buf, rd_memctx_t *memctx) {
 	time_t last_valid_timestamp = 0;
 
-	int aok=1;
 	char *tok = value_buf;
 	const char *name = monitor->name;
+	/// @TODO do not use an LRU, guess # needed values
+	rd_lru_t *monitors = rd_lru_new();
 
 	assert(worker_info);
 	assert(monitor);
 	assert(libmatheval_variables);
-	assert(valueslist);
-
 	assert(memctx);
 
+	if (NULL == monitors) {
+		rdlog(LOG_ERR,
+			"Couldn't allocate values list (out of memory?)");
+		return NULL;
+	}
 
 	struct monitor_value monitor_value;
 	memset(&monitor_value,0,sizeof(monitor_value));
@@ -968,19 +1015,20 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 						monitor_value.value=tok_f;
 						monitor_value.string_value=tok;
 
-						const struct monitor_value *new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+						last_valid_timestamp = timestamp;
 
-						if(new_mv)
-						{
-							last_valid_timestamp = timestamp;
-							if(monitor->send)
-								rd_lru_push(valueslist,(void *)new_mv);
-						}
+						/// @todo duplication with splitop
+						struct monitor_value *new_mv =
+							calloc(1, sizeof(*new_mv));
+
+						monitor_value_copy(new_mv,
+								&monitor_value);
+
+						rd_lru_push(monitors,new_mv);
 					}
 					else
 					{
 						rdlog(LOG_ERR,"Error adding libmatheval value");
-						aok = 0;
 					}
 
 					if (NULL!=monitor->splitop)
@@ -1046,10 +1094,12 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 				monitor_value.string_value = split_op_result;
 				monitor_value.group_id = monitor->group_id;
 
-				const struct monitor_value * new_mv = update_monitor_value(worker_info->monitor_values_tree,&monitor_value);
+				struct monitor_value *new_mv = calloc(1,
+							sizeof(*new_mv));
 
-				if(monitor->send && new_mv)
-					rd_lru_push(valueslist,(void *)new_mv);
+				monitor_value_copy(new_mv, &monitor_value);
+
+				rd_lru_push(monitors,new_mv);
 			}
 		}
 		else
@@ -1057,10 +1107,30 @@ static int process_vector_monitor(struct _worker_info *worker_info,
 			if(rd_dz(sum))
 				rdlog(LOG_ERR,"%s Gives a non finite value: (sum=%lf)/(count=%u)",name,sum,mean_count);
 		}
-
 	}
 
-	return aok;
+	rb_monitor_value_array_t *ret = rb_monitors_array_new(
+							rd_lru_cnt(monitors));
+	if (NULL == ret) {
+		rdlog(LOG_ERR,
+			"Couldn't allocate rb_monitors array (out of memory?)");
+		/// @TODO memory management
+	} else {
+		struct monitor_value *mv = NULL;
+		while((mv = rd_lru_pop(monitors))) {
+			if (rb_monitor_value_array_full(ret)) {
+				rdlog(LOG_ERR,
+					"Monitors array full (out of memory?)");
+				/// Memory management
+			} else {
+				rb_monitor_value_array_add(ret, mv);
+			}
+		}
+	}
+
+	rd_lru_destroy(monitors);
+
+	return ret;
 }
 
 void rb_monitors_array_done(rb_monitors_array_t *monitors_array) {
