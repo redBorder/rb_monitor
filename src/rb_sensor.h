@@ -46,7 +46,6 @@ struct _worker_info{
 	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
-	struct monitor_values_tree * monitor_values_tree;
 #ifdef HAVE_RBHTTP
 	int64_t http_mode;
 	int64_t http_insecure;
@@ -96,6 +95,7 @@ struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor);
   */
 void rb_sensor_get(rb_sensor_t *sensor);
 
+struct monitor_values_tree *rb_sensor_monitor_values_tree(rb_sensor_t *sensor);
 
 /** Decrease the sensor reference counter.
   @param sensor Sensor

@@ -46,9 +46,6 @@ struct monitor_value{
 	uint64_t magic; // Private data, don't need to use them outside.
 	#endif
 
-	/* config.json extracted */
-	const char * sensor_name;
-
 	const char * name;            // Intern name: *__gid__*__pos__
 	const char * send_name;       // Extern name. If not __gid__ nor __pos__, it is NULL and you have to check name.
 	                              // @todo make a function name() for do the last.

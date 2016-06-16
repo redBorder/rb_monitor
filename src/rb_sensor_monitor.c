@@ -312,7 +312,6 @@ rb_monitors_array_t *parse_rb_monitors(struct json_object *monitors_array_json,
 /** Context of sensor monitors processing */
 struct process_sensor_monitor_ctx {
 	rd_memctx_t memctx; ///< Memory context
-	struct _worker_info *worker_info; ///< All workers shared data
 	struct monitor_snmp_session *snmp_sessp; ///< Base SNMP session
 	struct libmatheval_stuffs *libmatheval_variables; ///< libmatheval vars
 	/// Bad marked variables
@@ -329,16 +328,14 @@ struct process_sensor_monitor_ctx {
 static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
-				const rb_sensor_t *sensor, rd_lru_t *ret);
+				rb_sensor_t *sensor, rd_lru_t *ret);
 static rb_monitors_array_t *process_novector_monitor(
-		struct _worker_info *worker_info,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
 		const char *value_buf,
 		double value);
 
 static rb_monitors_array_t *process_vector_monitor(
-			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_memctx_t *memctx);
@@ -349,7 +346,6 @@ bool process_monitors_array(struct _worker_info *worker_info,
 			rd_lru_t *ret) {
 	bool aok = true;
 	struct process_sensor_monitor_ctx process_ctx = {
-		.worker_info = worker_info,
 		.libmatheval_variables = new_libmatheval_stuffs(
 							monitors->count*10),
 		.bad_names = {
@@ -407,7 +403,6 @@ bool process_monitors_array(struct _worker_info *worker_info,
 
 /** Base function to obtain an external value, and to manage it as a vector or
   as an integer
-  @param worker_info Common thread information
   @param process_ctx Processing context
   @param monitor Monitor to process
   @param send Send value to kafka
@@ -417,7 +412,6 @@ bool process_monitors_array(struct _worker_info *worker_info,
   @return true if we can send value
   */
 static rb_monitors_array_t *rb_monitor_get_external_value(
-		struct _worker_info *worker_info,
 		struct process_sensor_monitor_ctx *process_ctx,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		bool *send,
@@ -444,13 +438,13 @@ static rb_monitors_array_t *rb_monitor_get_external_value(
 						monitor->name);
 			return false;
 		}
-		ret = process_novector_monitor(worker_info, monitor, sensor,
+		ret = process_novector_monitor(monitor, sensor,
 				process_ctx->libmatheval_variables, value_buf,
 				number);
 	} else /* We have a vector here */ {
 		/** @todo delete parameters that could be sent
 			using monitor */
-		ret = process_vector_monitor(worker_info, monitor, sensor,
+		ret = process_vector_monitor(monitor, sensor,
 			process_ctx->libmatheval_variables, value_buf,
 			&process_ctx->memctx);
 	}
@@ -474,12 +468,11 @@ static rb_monitors_array_t *rb_monitor_get_external_value(
 }
 
 /** Convenience function to obtain system values */
-static rb_monitors_array_t *rb_monitor_get_system_external_value(
-			struct _worker_info *worker_info, bool *send,
+static rb_monitors_array_t *rb_monitor_get_system_external_value(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-		sensor, send, system_solve_response, NULL);
+	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
+						system_solve_response, NULL);
 }
 
 /** Convenience function */
@@ -490,17 +483,15 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 }
 
 /** Convenience function to obtain SNMP values */
-static rb_monitors_array_t *rb_monitor_get_snmp_external_value(
-			struct _worker_info *worker_info, bool *send,
+static rb_monitors_array_t *rb_monitor_get_snmp_external_value(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(worker_info, process_ctx, monitor,
-		sensor, send, snmp_solve_response0, process_ctx->snmp_sessp);
+	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
+				snmp_solve_response0, process_ctx->snmp_sessp);
 }
 
 /** Convenience function to obtain operations values */
-static rb_monitors_array_t *rb_monitor_get_op_result(
-			struct _worker_info *worker_info, bool *send,
+static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	double number = 0;
@@ -583,7 +574,6 @@ static rb_monitors_array_t *rb_monitor_get_op_result(
 		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		monitor_value.timestamp = time(NULL);
-		monitor_value.sensor_name = rb_sensor_name(sensor);
 		monitor_value.instance_prefix = monitor->instance_prefix;
 		monitor_value.bad_value = 0;
 		monitor_value.group_id = monitor->group_id;
@@ -800,21 +790,20 @@ static rb_monitors_array_t *rb_monitor_get_op_result(
 /** Process a sensor monitor
   @param process_ctx Process context
   @param monitor Monitor to process
+  @todo sensor should be const
   @param ret Returned messages
   */
 static void process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
-				const rb_sensor_t *sensor, rd_lru_t *ret) {
-	struct _worker_info *worker_info = process_ctx->worker_info;
+				rb_sensor_t *sensor, rd_lru_t *ret) {
 	bool send = monitor->send;
 	rb_monitors_array_t *monitor_values = NULL;
 
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
 	case menum:                                                            \
-		monitor_values = fn(worker_info, &send, monitor, sensor,       \
-						process_ctx);                  \
+		monitor_values = fn(&send, monitor, sensor, process_ctx);      \
 		break;                                                         \
 
 	MONITOR_CMDS_X
@@ -831,7 +820,7 @@ static void process_sensor_monitor(
 		/** @TODO monitor_values_tree should be by sensor, not general!
 		*/
 		const struct monitor_value *new_mv = update_monitor_value(
-			worker_info->monitor_values_tree,monitor_value);
+			rb_sensor_monitor_values_tree(sensor),monitor_value);
 
 		if(monitor->send && new_mv) {
 			struct printbuf* printbuf= print_monitor_value(new_mv,
@@ -858,7 +847,6 @@ static void process_sensor_monitor(
 
 /** Process a no-vector monitor */
 static rb_monitors_array_t *process_novector_monitor(
-			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			const char *value_buf, double value) {
@@ -883,7 +871,6 @@ static rb_monitors_array_t *process_novector_monitor(
 			mv->magic = MONITOR_VALUE_MAGIC; // just sanity check
 			#endif
 			mv->timestamp = time(NULL);
-			mv->sensor_name = rb_sensor_name(sensor);
 			mv->name = monitor->name;
 			mv->instance = 0;
 			mv->instance_valid = 0;
@@ -907,7 +894,6 @@ static rb_monitors_array_t *process_novector_monitor(
 
 // @todo make a call to process_novector_monitor
 static rb_monitor_value_array_t *process_vector_monitor(
-			struct _worker_info *worker_info,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_memctx_t *memctx) {
@@ -918,7 +904,6 @@ static rb_monitor_value_array_t *process_vector_monitor(
 	/// @TODO do not use an LRU, guess # needed values
 	rd_lru_t *monitors = rd_lru_new();
 
-	assert(worker_info);
 	assert(monitor);
 	assert(libmatheval_variables);
 	assert(memctx);
@@ -934,7 +919,6 @@ static rb_monitor_value_array_t *process_vector_monitor(
 	#ifdef MONITOR_VALUE_MAGIC
 	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
 	#endif
-	monitor_value.sensor_name = rb_sensor_name(sensor);
 	monitor_value.bad_value = 0;
 	monitor_value.group_id = monitor->group_id;
 
