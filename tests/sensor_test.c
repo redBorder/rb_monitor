@@ -28,7 +28,6 @@ void test_sensor(const char *cjson_sensor, check_list_t *checks) {
 
 	memset(&worker_info, 0, sizeof(worker_info));
 
-	worker_info.monitor_values_tree = new_monitor_values_tree();
 	snmp_sess_init(&worker_info.default_session);
 	struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
 	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
@@ -39,6 +38,5 @@ void test_sensor(const char *cjson_sensor, check_list_t *checks) {
 
 	json_list_check(checks, messages);
 
-	destroy_monitor_values_tree(worker_info.monitor_values_tree);
 	rd_lru_destroy(messages);
 }
