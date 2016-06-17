@@ -33,7 +33,7 @@ struct monitor_values_tree * new_monitor_values_tree();
   Add a monitor value to a monitor_values_tree.
   @note src value will be copied.
  */
-const struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
+const struct monitor_value *update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
 
 /**
   Destroy values tree
