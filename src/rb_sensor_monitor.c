@@ -35,8 +35,6 @@
 #define VECTOR_SEP "_pos_"
 #define GROUP_SEP  "_gid_"
 
-static const char *OPERATIONS = "+-*/&^|";
-
 #ifndef NDEBUG
 #define RB_MONITOR_MAGIC 0x0b010a1c0b010a1cl
 #endif
@@ -490,280 +488,324 @@ static rb_monitors_array_t *rb_monitor_get_snmp_external_value(bool *send,
 				snmp_solve_response0, process_ctx->snmp_sessp);
 }
 
+/** search if a string contains any of other strings, returning the first
+  coincidence
+  @param haystack String to search into
+  @param needles Strings to search
+  @param needles_size Number of needles. Return what needle found
+  @return Position of the needle in the haystack, or NULL if not found
+*/
+static const char *strmstr(const char *haystack, const char **needles,
+							size_t *needles_size) {
+	const char *ret = NULL;
+
+	for (size_t i=0; NULL == ret && i<*needles_size; ++i) {
+		ret = strstr(needles[i],haystack);
+		if (ret) {
+			*needles_size = i;
+		}
+	}
+
+	return ret;
+}
+
+/// @todo change this for rb_monitor_value_array_t
+struct vector_variables_s { // @TODO Integrate in struct monitor_value
+	char *name;
+	size_t name_len;
+	unsigned int pos;
+	SIMPLEQ_ENTRY(vector_variables_s) entry;
+};
+typedef SIMPLEQ_HEAD(,vector_variables_s) variables_list;
+#define variable_list_initializer(head) SIMPLEQ_HEAD_INITIALIZER(head)
+
+/** Extract needed variables from a math operation
+  @param evaluator libmatheval evaluator
+  @param monitor_values bucket of monitor values to search operators in
+  @param sensor Sensor this variable belong
+  @param monitor Monitor this variable belongs
+  @param vars Where to store variables
+  @param vectors_len Length of the vectors
+  @return Number of vectors found, -1 if failed
+  */
+int rb_monitor_get_op_variables(void *evaluator,
+			struct libmatheval_stuffs *libmatheval_variables,
+			const rb_sensor_t *sensor, const rb_monitor_t *monitor,
+			variables_list *vars, size_t *vectors_len) {
+	int vector_count = 0;
+	*vectors_len=1;
+	struct {
+		char **vars;
+		int count;
+	} all_vars;
+
+	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
+
+	for (int i=0; i<all_vars.count; ++i) {
+		size_t pos, size;
+		if(libmatheval_search_vector(libmatheval_variables->names,
+					libmatheval_variables->variables_pos,
+					all_vars.vars[i], &pos,&size)
+					&& size>1) {
+			struct vector_variables_s *vvs =
+				malloc(sizeof(struct vector_variables_s));
+			/// @todo error checking
+			vvs->name     = all_vars.vars[i];
+			vvs->name_len = strlen(all_vars.vars[i]);
+			vvs->pos      = pos;
+			SIMPLEQ_INSERT_TAIL(vars,vvs,entry);
+			vector_count++;
+
+			if(*vectors_len==1) {
+				*vectors_len=size;
+			} else if(*vectors_len!=size) {
+				rdlog(LOG_ERR,"vector dimension mismatch");
+				return -1;
+			}
+		}
+	}
+
+	return vector_count;
+}
+
 /** Convenience function to obtain operations values */
 static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
+	size_t vectors_len;
 	double number = 0;
-	const char * operation = monitor->cmd_arg;
+	const char *operation = monitor->cmd_arg;
 	bool op_ok = true;
 	struct libmatheval_stuffs *libmatheval_variables =
 					process_ctx->libmatheval_variables;
 	/// @TODO do not use an lru for this
-	rd_lru_t *monitor_values = rd_lru_new();
+	rd_lru_t *monitor_values = NULL;
+	variables_list head = variable_list_initializer(head);
+	size_t i_bad_values = process_ctx->bad_names.pos;
 
-	for (unsigned int i=0; op_ok==1 && i<process_ctx->bad_names.pos; ++i) {
-		if (strstr(process_ctx->bad_names.names[i],operation)) {
-			rdlog(LOG_NOTICE,
-				"OP %s Uses a previously bad marked value variable (%s). Skipping",
-				operation,
-				process_ctx->bad_names.names[i]);
-			*send = op_ok = false;
-		}
+	if (NULL != strmstr(operation, process_ctx->bad_names.names,
+							&i_bad_values)) {
+		rdlog(LOG_NOTICE,
+			"OP %s Uses a previously bad marked value variable (%s). Skipping",
+			operation,
+			process_ctx->bad_names.names[i_bad_values]);
+		return NULL;
 	}
 
-	if(op_ok)
+	monitor_values = rd_lru_new();
+	void *const f = evaluator_create((char *)operation);
+	const int vector_variables_count = rb_monitor_get_op_variables(f,
+		libmatheval_variables, sensor, monitor, &head, &vectors_len);
+
+	if (vector_variables_count < 0) {
+		return rb_monitors_array_new(0);
+	}
+
+	char *str_op = vector_variables_count > 0 ?
+		calloc(strlen(operation) + 10*vector_variables_count, 1) :
+		(char *)operation;
+
+	double sum=0;
+	unsigned count=0;
+
+	struct monitor_value monitor_value; // ready-to-go struct
+	memset(&monitor_value,0,sizeof(monitor_value));
+	#ifdef MONITOR_VALUE_MAGIC
+	monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
+	#endif
+	monitor_value.timestamp = time(NULL);
+	monitor_value.instance_prefix = monitor->instance_prefix;
+	monitor_value.bad_value = 0;
+	monitor_value.group_id = monitor->group_id;
+
+	for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
 	{
-		struct vector_variables_s { // @TODO Integrate in struct monitor_value
-			char *name;
-			size_t name_len;
-			unsigned int pos;
-			SIMPLEQ_ENTRY(vector_variables_s) entry;
-		};
-		SIMPLEQ_HEAD(listhead,vector_variables_s) head = SIMPLEQ_HEAD_INITIALIZER(head);
+		// @TODO make the suffix append in libmatheval_append
+		const size_t namelen = strlen(monitor->name);
+		char *mathname = rd_memctx_calloc(
+			&process_ctx->memctx,
+			namelen+strlen(VECTOR_SEP)+6,
+			/* space enough to save _60000 */
+			sizeof(char));
+		strcpy(mathname,monitor->name);
+		mathname[namelen] = '\0';
 
-		/* TODO: use libmatheval_names better */
-		char *str_op_variables = strdup(operation);
-		char *str_op = NULL;
-		char *auxchar;
-		char *tok = strtok_r(str_op_variables,OPERATIONS,&auxchar);
+		/* editing operation string, so evaluate() will put the correct result */
 
-		SIMPLEQ_INIT(&head);
-		size_t vectors_len=1;
-		size_t vector_variables_count = 0;
-		while(tok) /* searching if some variable is a vector */ {
-			size_t pos, size;
-			if(libmatheval_search_vector(libmatheval_variables->names,
-				libmatheval_variables->variables_pos,tok,&pos,&size) && size>1)
+		const char * operation_iterator = operation;
+		char * str_op_iterator    = str_op;
+		struct vector_variables_s *vector_iterator;
+		/* It should be a short operation. If needed, we will cache it and just change the _ suffix */
+		SIMPLEQ_FOREACH(vector_iterator,&head,entry)
+		{
+			// sustitute each variable => variable_idx:
+			//   copyng all unchanged string before the variable
+			const char * operator_pos = strstr(operation_iterator,vector_iterator->name);
+			assert(operator_pos);
+			const size_t unchanged_size = operator_pos - operation_iterator;
+			strncpy(str_op_iterator,operation_iterator,unchanged_size);
+
+			str_op_iterator += unchanged_size;
+
+			strcpy(str_op_iterator,libmatheval_variables->names[vector_iterator->pos+j]);
+
+			str_op_iterator    += unchanged_size + strlen(libmatheval_variables->names[vector_iterator->pos+j]);
+			operation_iterator += unchanged_size + vector_iterator->name_len;
+
+		}
+		rdlog(LOG_DEBUG,"vector operation string result: %s",str_op);
+
+		/* extracting suffix */
+		if(vectors_len>1)
+		{
+			const int mathpos = SIMPLEQ_FIRST(&head)->pos + j;
+			const char * suffix = strrchr(libmatheval_variables->names[mathpos],'_');
+			if(suffix)
 			{
-				struct vector_variables_s *vvs = malloc(sizeof(struct vector_variables_s));
-				vvs->name     = tok;
-				vvs->name_len = strlen(tok);
-				vvs->pos      = pos;
-				SIMPLEQ_INSERT_TAIL(&head,vvs,entry);
-				vector_variables_count++;
-
-				if(vectors_len==1)
-				{
-					vectors_len=size;
-				}
-				else if(vectors_len!=size)
-				{
-					rdlog(LOG_ERR,"vector dimension mismatch");
-					op_ok=0;
-				}
+				strcpy(mathname+namelen,VECTOR_SEP);
+				strcpy(mathname+namelen+strlen(VECTOR_SEP),suffix+1);
 			}
-			tok = strtok_r(NULL,OPERATIONS,&auxchar);
 		}
 
-		if(vector_variables_count>0)
+		void *v_f = evaluator_create ((char *)str_op);
+
+		if(NULL==v_f)
 		{
-			/* +6: to add _pos_99999 to all variables */
-			str_op = calloc(strlen(operation)+10*vector_variables_count,sizeof(char)); // @TODO more descriptive name
-		}
-		else
-		{
-			str_op = (char *)operation;
+			rdlog(LOG_ERR,"Operation not valid: %s",str_op);
+			op_ok = 0;
 		}
 
-		double sum=0;unsigned count=0;
-
-		struct monitor_value monitor_value; // ready-to-go struct
-		memset(&monitor_value,0,sizeof(monitor_value));
-		#ifdef MONITOR_VALUE_MAGIC
-		monitor_value.magic = MONITOR_VALUE_MAGIC; // just sanity check
-		#endif
-		monitor_value.timestamp = time(NULL);
-		monitor_value.instance_prefix = monitor->instance_prefix;
-		monitor_value.bad_value = 0;
-		monitor_value.group_id = monitor->group_id;
-
-		for(size_t j=0;op_ok && j<vectors_len;++j) /* foreach member of vector */
-		{
-			// @TODO make the suffix append in libmatheval_append
-			const size_t namelen = strlen(monitor->name);
-			char *mathname = rd_memctx_calloc(
-				&process_ctx->memctx,
-				namelen+strlen(VECTOR_SEP)+6,
-				/* space enough to save _60000 */
-				sizeof(char));
-			strcpy(mathname,monitor->name);
-			mathname[namelen] = '\0';
-
-			/* editing operation string, so evaluate() will put the correct result */
-
-			const char * operation_iterator = operation;
-			char * str_op_iterator    = str_op;
-			struct vector_variables_s *vector_iterator;
-			/* It should be a short operation. If needed, we will cache it and just change the _ suffix */
-			SIMPLEQ_FOREACH(vector_iterator,&head,entry)
+		if(op_ok && NULL != v_f){
+			char ** evaluator_variables;int evaluator_variables_count,vars_pos;
+			evaluator_get_variables(v_f,&evaluator_variables,&evaluator_variables_count);
+			op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
+			if(!op_ok)
 			{
-				// sustitute each variable => variable_idx:
-				//   copyng all unchanged string before the variable
-				const char * operator_pos = strstr(operation_iterator,vector_iterator->name);
-				assert(operator_pos);
-				const size_t unchanged_size = operator_pos - operation_iterator;
-				strncpy(str_op_iterator,operation_iterator,unchanged_size);
-
-				str_op_iterator += unchanged_size;
-
-				strcpy(str_op_iterator,libmatheval_variables->names[vector_iterator->pos+j]);
-
-				str_op_iterator    += unchanged_size + strlen(libmatheval_variables->names[vector_iterator->pos+j]);
-				operation_iterator += unchanged_size + vector_iterator->name_len;
-
+				rdlog(LOG_ERR,"Variable not found: %s",evaluator_variables[vars_pos]);
+				evaluator_destroy(v_f);
 			}
-			rdlog(LOG_DEBUG,"vector operation string result: %s",str_op);
+		}
 
-			/* extracting suffix */
+		if(op_ok && NULL!=v_f)
+		{
+			number = evaluator_evaluate (v_f, libmatheval_variables->variables_pos,
+				(char **) libmatheval_variables->names,	libmatheval_variables->values);
+			evaluator_destroy(v_f);
+			v_f = NULL;
+			rdlog(LOG_DEBUG,
+				"Result of operation %s: %lf",
+				monitor->cmd_arg,number);
+			if(rd_dz(number) == 0
+				&& monitor->nonzero)
+			{
+				op_ok=false;
+				rdlog(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.",operation);
+			}
+			if(!isnormal(number))
+			{
+				op_ok=false;
+				rdlog(LOG_ERR,"OP %s return a bad value: %lf. Skipping.",operation,number);
+			}
+			/* op will send by default, so we ignore kafka param */
+		}
+
+		if(op_ok && libmatheval_append(libmatheval_variables, mathname,number))
+		{
+			char val_buf[64];
+			sprintf(val_buf,"%lf",number);
+
+
 			if(vectors_len>1)
 			{
-				const int mathpos = SIMPLEQ_FIRST(&head)->pos + j;
-				const char * suffix = strrchr(libmatheval_variables->names[mathpos],'_');
-				if(suffix)
+				char name_buf[1024];
+				char *vector_pos = NULL;
+				sprintf(name_buf, "%s%s",
+					monitor->name,
+					monitor->name_split_suffix);
+				monitor_value.name = name_buf;
+				if((vector_pos = strstr(mathname,VECTOR_SEP)))
 				{
-					strcpy(mathname+namelen,VECTOR_SEP);
-					strcpy(mathname+namelen+strlen(VECTOR_SEP),suffix+1);
-				}
-			}
-
-			void * const f = evaluator_create ((char *)str_op); /* really it has to be (void *). See libmatheval doc. */
-		                                                       /* also, we have to create a new one for each iteration */
-			if(NULL==f)
-			{
-				rdlog(LOG_ERR,"Operation not valid: %s",str_op);
-				op_ok = 0;
-			}
-
-			if(op_ok){
-				char ** evaluator_variables;int evaluator_variables_count,vars_pos;
-				evaluator_get_variables(f,&evaluator_variables,&evaluator_variables_count);
-				op_ok=libmatheval_check_exists(evaluator_variables,evaluator_variables_count,libmatheval_variables,&vars_pos);
-				if(!op_ok)
-				{
-					rdlog(LOG_ERR,"Variable not found: %s",evaluator_variables[vars_pos]);
-					evaluator_destroy(f);
-				}
-			}
-
-			if(op_ok && NULL!=f)
-			{
-				number = evaluator_evaluate (f, libmatheval_variables->variables_pos,
-					(char **) libmatheval_variables->names,	libmatheval_variables->values);
-				evaluator_destroy (f);
-				rdlog(LOG_DEBUG,
-					"Result of operation %s: %lf",
-					monitor->cmd_arg,number);
-				if(rd_dz(number) == 0
-					&& monitor->nonzero)
-				{
-					op_ok=false;
-					rdlog(LOG_ERR,"OP %s return 0, and nonzero setted. Skipping.",operation);
-				}
-				if(!isnormal(number))
-				{
-					op_ok=false;
-					rdlog(LOG_ERR,"OP %s return a bad value: %lf. Skipping.",operation,number);
-				}
-				/* op will send by default, so we ignore kafka param */
-			}
-
-			if(op_ok && libmatheval_append(libmatheval_variables, mathname,number))
-			{
-				char val_buf[64];
-				sprintf(val_buf,"%lf",number);
-
-
-				if(vectors_len>1)
-				{
-					char name_buf[1024];
-					char *vector_pos = NULL;
-					sprintf(name_buf, "%s%s",
-						monitor->name,
-						monitor->name_split_suffix);
-					monitor_value.name = name_buf;
-					if((vector_pos = strstr(mathname,VECTOR_SEP)))
-					{
-						monitor_value.instance_valid = 1;
-						monitor_value.instance = atoi(vector_pos + strlen(VECTOR_SEP));
-					}
-					else
-					{
-						monitor_value.instance_valid = 0;
-						monitor_value.instance = 0;
-					}
-					monitor_value.value=number;
-					monitor_value.string_value=val_buf;
+					monitor_value.instance_valid = 1;
+					monitor_value.instance = atoi(vector_pos + strlen(VECTOR_SEP));
 				}
 				else
 				{
-					monitor_value.name
-							= monitor->name;
-					monitor_value.value = number;
 					monitor_value.instance_valid = 0;
-					monitor_value.string_value=val_buf;
+					monitor_value.instance = 0;
 				}
-
-				/// @todo duplicated code with splitop!
-				struct monitor_value *new_mv = calloc(1,
-							sizeof(*new_mv));
-				if (NULL == new_mv) {
-					rdlog(LOG_ERR,
-						"Couldn't allocate monitor value (out of memory?)");
-					/// @todo need to free memory?
-				} else {
-					monitor_value_copy(new_mv,
-								&monitor_value);
-					rd_lru_push(monitor_values,new_mv);
-				}
+				monitor_value.value=number;
+				monitor_value.string_value=val_buf;
 			}
-			if(op_ok && monitor->splitop) {
-				sum+=number;
-				count++;
-			}
-			mathname=NULL;
-
-		} /* foreach member of vector */
-		if(monitor->splitop)
-		{
-			if(0==strcmp(monitor->splitop, "sum"))
-				number = sum;
-			else if(0==strcmp(monitor->splitop, "mean"))
-				number = sum/count;
 			else
-				op_ok=0;
-
-			if(op_ok){
-				char split_op_result[64];
-				sprintf(split_op_result,"%lf",number);
-				monitor_value.name = monitor->name;
+			{
+				monitor_value.name
+						= monitor->name;
 				monitor_value.value = number;
 				monitor_value.instance_valid = 0;
-				monitor_value.string_value=split_op_result;
+				monitor_value.string_value=val_buf;
+			}
 
-				struct monitor_value *new_mv = calloc(1,
-							sizeof(*new_mv));
-				if (NULL == new_mv) {
-					rdlog(LOG_ERR,
-						"Couldn't allocate monitor value (out of memory?)");
-					/// @todo need to free memory?
-				} else {
-					monitor_value_copy(new_mv,
-								&monitor_value);
-					rd_lru_push(monitor_values,new_mv);
-				}
+			/// @todo duplicated code with splitop!
+			struct monitor_value *new_mv = calloc(1,
+						sizeof(*new_mv));
+			if (NULL == new_mv) {
+				rdlog(LOG_ERR,
+					"Couldn't allocate monitor value (out of memory?)");
+				/// @todo need to free memory?
+			} else {
+				monitor_value_copy(new_mv,
+							&monitor_value);
+				rd_lru_push(monitor_values,new_mv);
 			}
 		}
-
-		struct vector_variables_s *vector_iterator,*tmp_vector_iterator;
-		SIMPLEQ_FOREACH_SAFE(vector_iterator,&head,entry,tmp_vector_iterator)
-		{
-			free(vector_iterator);
+		if(op_ok && monitor->splitop) {
+			sum+=number;
+			count++;
 		}
-		if(vector_variables_count>0) // @TODO: make it more simple
-			free(str_op);
-		free(str_op_variables);
+		mathname=NULL;
+
+	} /* foreach member of vector */
+
+	evaluator_destroy (f);
+
+	if(monitor->splitop)
+	{
+		if(0==strcmp(monitor->splitop, "sum"))
+			number = sum;
+		else if(0==strcmp(monitor->splitop, "mean"))
+			number = sum/count;
+		else
+			op_ok=0;
+
+		if(op_ok){
+			char split_op_result[64];
+			sprintf(split_op_result,"%lf",number);
+			monitor_value.name = monitor->name;
+			monitor_value.value = number;
+			monitor_value.instance_valid = 0;
+			monitor_value.string_value=split_op_result;
+
+			struct monitor_value *new_mv = calloc(1,
+						sizeof(*new_mv));
+			if (NULL == new_mv) {
+				rdlog(LOG_ERR,
+					"Couldn't allocate monitor value (out of memory?)");
+				/// @todo need to free memory?
+			} else {
+				monitor_value_copy(new_mv,
+							&monitor_value);
+				rd_lru_push(monitor_values,new_mv);
+			}
+		}
 	}
+
+	struct vector_variables_s *vector_iterator,*tmp_vector_iterator;
+	SIMPLEQ_FOREACH_SAFE(vector_iterator,&head,entry,tmp_vector_iterator)
+	{
+		free(vector_iterator);
+	}
+	if(vector_variables_count>0) // @TODO: make it more simple
+		free(str_op);
 
 	rb_monitors_array_t *ret = rb_monitors_array_new(rd_lru_cnt(
 							monitor_values));

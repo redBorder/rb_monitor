@@ -23,7 +23,7 @@
 
 static rd_memctx_t memctx;
 
-struct monitor_values_tree{
+struct monitor_values_tree {
 	#ifdef MONITOR_VALUES_TREE_MAGIC
 	int magic;
 	#endif
@@ -48,16 +48,13 @@ static int monitor_value_cmp(const void *_v1,const void*_v2)
 		ret = strcmp(v1->group_id,v2->group_id);
 	if(0==ret)
 		ret = strcmp(v1->name,v2->name);
-	if(0==ret && v1->group_id && v2->group_id)
-		ret = strcmp(v1->group_id,v2->group_id);
 	if(ret==0 && v1->instance_prefix && v2->instance_prefix) // @TODO force instance_prefix setted
 		ret = v1->instance-v2->instance;
 	return ret;
 
 }
 
-struct monitor_values_tree * new_monitor_values_tree()
-{
+struct monitor_values_tree * new_monitor_values_tree() {
 	rd_memctx_init(&memctx,"monitor_values",RD_MEMCTX_F_LOCK | RD_MEMCTX_F_TRACK);
 
 	struct monitor_values_tree * ret = rd_memctx_calloc(&memctx,1,sizeof(struct monitor_values_tree));
@@ -69,18 +66,10 @@ struct monitor_values_tree * new_monitor_values_tree()
 	return ret;
 }
 
-static inline char * _rd_memctx_strdup(rd_memctx_t *memctx,const char *src)
-{
-    	const size_t len = strlen(src);
-    	char * dst = rd_memctx_malloc(memctx,len+1);
-    	memcpy(dst,src,len+1);
-    	return dst;
-}
-
 /**
  Add a monitor value to the tree. 'src' will be copied and not changed.
  */
-struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const struct monitor_value *src)
+static struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const struct monitor_value *src)
 {
 	struct monitor_value * dst = rd_memctx_calloc(&memctx,1,sizeof(struct monitor_value));
 
@@ -99,8 +88,9 @@ struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const s
 	return dst;
 }
 
-struct monitor_value * find_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *node)
-{
+static struct monitor_value *find_monitor_value(
+					struct monitor_values_tree *tree,
+					const struct monitor_value *node) {
 	return RD_AVL_FIND(tree->avl,node);
 }
 
