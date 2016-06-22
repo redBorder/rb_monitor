@@ -199,7 +199,7 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
   @return true if OK, false in other case
   */
 bool process_rb_sensor(struct _worker_info * worker_info, rb_sensor_t *sensor,
-								rd_lru_t *ret) {
+							rb_message_list *ret) {
 	return process_monitors_array(worker_info, sensor, sensor->monitors,
 						&sensor->data.snmp_params, ret);
 }

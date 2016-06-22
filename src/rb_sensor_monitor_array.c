@@ -65,8 +65,9 @@ rb_monitors_array_t *parse_rb_monitors(
 struct rb_sensor_s;
 
 static void process_monitors_array_values(const rb_monitor_t *monitor,
-		struct rb_sensor_s *sensor,
-		rb_monitor_value_array_t *monitor_values, rd_lru_t *ret) {
+				struct rb_sensor_s *sensor,
+				rb_monitor_value_array_t *monitor_values,
+				rb_message_list *ret) {
 	bool send = rb_monitor_send(monitor);
 
 	for (size_t i=0; monitor_values && i<monitor_values->count; ++i) {
@@ -77,17 +78,11 @@ static void process_monitors_array_values(const rb_monitor_t *monitor,
 			rb_sensor_monitor_values_tree(sensor),monitor_value);
 
 		if(send && new_mv) {
-			struct printbuf* printbuf= print_monitor_value(new_mv,
+			rb_message_array_t* msgs = print_monitor_value(new_mv,
 							monitor, sensor);
-			if(likely(NULL!=printbuf)) {
-				char *dup = strdup(printbuf->buf);
-				if (NULL == dup) {
-					rdlog(LOG_ERR, "Couldn't dup!");
-				} else {
-					rd_lru_push(ret, dup);
-				}
+			if (msgs) {
+				rb_message_list_push(ret, msgs);
 			}
-			printbuf_free(printbuf);
 		}
 	}
 }
@@ -95,7 +90,7 @@ static void process_monitors_array_values(const rb_monitor_t *monitor,
 bool process_monitors_array(struct _worker_info *worker_info,
 			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
 			struct snmp_params_s *snmp_params,
-			rd_lru_t *ret) {
+			rb_message_list *ret) {
 	bool aok = true;
 	struct monitor_snmp_session *snmp_sessp = NULL;
 	struct process_sensor_monitor_ctx *process_ctx = NULL;

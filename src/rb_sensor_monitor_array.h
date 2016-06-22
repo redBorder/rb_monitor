@@ -21,7 +21,6 @@
 #include "rb_array.h"
 #include "rb_sensor_monitor.h"
 
-#include <librd/rdlru.h>
 #include <json-c/json.h>
 
 /// SNMP connection parameters
@@ -63,8 +62,7 @@ rb_monitor_t *rb_monitors_array_elm_at(rb_monitors_array_t *array, size_t i);
   @warning This function assumes ALL fields of sensor_data will be populated */
 bool process_monitors_array(struct _worker_info * worker_info,
     struct rb_sensor_s *sensor, rb_monitors_array_t *monitors_array,
-    struct snmp_params_s *snmp_params,
-    rd_lru_t *ret);
+    struct snmp_params_s *snmp_params, rb_message_list *ret);
 
 /** Free array allocated with parse_rb_monitors
   @param array Array

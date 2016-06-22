@@ -19,8 +19,6 @@
 #pragma once
 
 #include <stdbool.h>
-#include "librd/rdlru.h"
-#include "librd/rdavl.h"
 #include <json-c/printbuf.h>
 
 #include "rb_value.h"

@@ -20,10 +20,11 @@
 
 #include "rb_array.h"
 #include "rb_snmp.h"
+#include "rb_message_list.h"
 
-#include <librd/rdlru.h>
 #include <librdkafka/rdkafka.h>
 #include <json-c/json.h>
+#include <librd/rdqueue.h>
 #include <stdbool.h>
 
 /// SHARED Info needed by threads.
@@ -68,7 +69,7 @@ void assert_rb_sensor(rb_sensor_t *sensor);
 rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
 		const struct _worker_info *worker_info);
 bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
-								rd_lru_t *ret);
+							rb_message_list *ret);
 
 /** Obtains sensor name
   @param sensor Sensor
