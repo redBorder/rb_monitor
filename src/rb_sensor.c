@@ -22,7 +22,7 @@
 
 #include "rb_json.h"
 
-#include "rb_sensor_monitor.h"
+#include "rb_sensor_monitor_array.h"
 #include "rb_values_list.h"
 
 #include <librd/rd.h>
@@ -127,7 +127,7 @@ static bool sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 					snmp_version, sensor->data.sensor_name);
 	}
 
-	sensor->monitors = parse_rb_monitors(sensor_monitors, sensor);
+	sensor->monitors = parse_rb_monitors(sensor_monitors);
 	return NULL != sensor->monitors;
 }
 
