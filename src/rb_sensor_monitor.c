@@ -28,6 +28,7 @@
 #include "rb_json.h"
 
 #include <matheval.h>
+#include <librd/rdlru.h>
 #include <librd/rdfloat.h>
 
 #define SPLITOP_RESULT_LEN 512     /* String that will save a double */

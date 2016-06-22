@@ -17,8 +17,9 @@
 */
 
 #pragma once
-#include <librd/rd.h>
-#include <librd/rdlru.h>
+
+#include "rb_message_list.h"
+
 #include <json/json.h>
 #include <sys/queue.h>
 
@@ -53,4 +54,4 @@ void check_list_push(check_list_t *list, struct json_check *check);
 void check_list_push_checks(check_list_t *check_list,
 		struct json_key_test **checks, size_t checks_list_size,
 		size_t checks_size);
-void json_list_check(check_list_t *check_list, rd_lru_t *msgs);
+void json_list_check(check_list_t *check_list, rb_message_list *msgs);

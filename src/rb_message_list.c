@@ -16,26 +16,27 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "sensor_test.h"
+#include "rb_message_list.h"
 
-#include "rb_sensor.h"
+#include <stdlib.h>
 
-#include "rb_values_list.h"
+/** Creates a new message array
+  @param s Size of array
+  @return New messages array
+  */
+rb_message_array_t *new_messages_array(size_t s) {
+	rb_message_array_t *ret = calloc(1,sizeof(ret) +
+							s*sizeof(ret->msgs[0]));
+	if (ret) {
+		ret->count = s;
+	}
 
-void test_sensor(const char *cjson_sensor, check_list_t *checks) {
-	struct _worker_info worker_info;
-	rb_message_list messages;
-	rb_message_list_init(&messages);
+	return ret;
+}
 
-	memset(&worker_info, 0, sizeof(worker_info));
-
-	snmp_sess_init(&worker_info.default_session);
-	struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
-	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
-	json_object_put(json_sensor);
-
-	process_rb_sensor(&worker_info, sensor, &messages);
-	rb_sensor_put(sensor);
-
-	json_list_check(checks, &messages);
+/** Releases message array resources
+  @param msgs Message array
+  */
+void message_array_done(rb_message_array_t *msgs) {
+	free(msgs);
 }

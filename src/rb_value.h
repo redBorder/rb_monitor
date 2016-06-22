@@ -19,11 +19,11 @@
 #pragma once
 
 #include "rb_array.h"
+#include "rb_message_list.h"
 
 #include <signal.h>
 #include <pthread.h>
 #include <librd/rdtypes.h>
-#include <librd/rdlru.h>
 #include <librd/rdavl.h>
 #include <librd/rdmem.h>
 
@@ -98,5 +98,6 @@ struct rb_sensor_s;
   @param sensor  Monitor's sensor
   @return new printbuf with result string (has to be freed with )
   */
-struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
+rb_message_array_t *print_monitor_value(
+ 	const struct monitor_value *monitor_value,
 	const struct rb_monitor_s *monitor, const struct rb_sensor_s *sensor);
