@@ -112,8 +112,15 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 	}
 }
 
-struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
+rb_message_array_t *print_monitor_value(
+		const struct monitor_value *monitor_value,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor) {
+	rb_message_array_t *ret = new_messages_array(1);
+	if (ret == NULL) {
+		rdlog(LOG_ERR, "Couldn't allocate messages array");
+		return NULL;
+	}
+
 	struct printbuf * printbuf = printbuf_new();
 	if(likely(NULL!=printbuf)) {
 		const int sensor_id = rb_sensor_id(sensor);
@@ -173,9 +180,16 @@ struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
 							sensor_enrichment);
 		}
 		sprintbuf(printbuf, "}");
+
+		ret->msgs[0].payload = printbuf->buf;
+		ret->msgs[0].len = printbuf->bpos;
+
+		printbuf->buf = NULL;
+		printbuf_free(printbuf);
+
 	}
 
-	return printbuf;
+	return ret;
 }
 
 void rb_monitor_value_done(struct monitor_value *mv) {

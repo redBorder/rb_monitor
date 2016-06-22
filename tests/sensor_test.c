@@ -24,7 +24,8 @@
 
 void test_sensor(const char *cjson_sensor, check_list_t *checks) {
 	struct _worker_info worker_info;
-	rd_lru_t *messages = rd_lru_new();
+	rb_message_list messages;
+	rb_message_list_init(&messages);
 
 	memset(&worker_info, 0, sizeof(worker_info));
 
@@ -33,10 +34,8 @@ void test_sensor(const char *cjson_sensor, check_list_t *checks) {
 	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
 	json_object_put(json_sensor);
 
-	process_rb_sensor(&worker_info, sensor, messages);
+	process_rb_sensor(&worker_info, sensor, &messages);
 	rb_sensor_put(sensor);
 
-	json_list_check(checks, messages);
-
-	rd_lru_destroy(messages);
+	json_list_check(checks, &messages);
 }

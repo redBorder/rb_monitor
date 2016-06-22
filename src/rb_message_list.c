@@ -16,24 +16,27 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include "rb_message_list.h"
 
-#include <stdbool.h>
-#include <json/printbuf.h>
+#include <stdlib.h>
 
-#include "rb_value.h"
+/** Creates a new message array
+  @param s Size of array
+  @return New messages array
+  */
+rb_message_array_t *new_messages_array(size_t s) {
+	rb_message_array_t *ret = calloc(1,sizeof(ret) +
+							s*sizeof(ret->msgs[0]));
+	if (ret) {
+		ret->count = s;
+	}
 
-struct monitor_values_tree;
+	return ret;
+}
 
-struct monitor_values_tree * new_monitor_values_tree();
-
-/**
-  Add a monitor value to a monitor_values_tree.
-  @note src value will be copied.
- */
-const struct monitor_value *update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
-
-/**
-  Destroy values tree
- */
-void destroy_monitor_values_tree(struct monitor_values_tree*tree);
+/** Releases message array resources
+  @param msgs Message array
+  */
+void message_array_done(rb_message_array_t *msgs) {
+	free(msgs);
+}

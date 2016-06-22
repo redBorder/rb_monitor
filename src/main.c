@@ -44,7 +44,6 @@
 #include <signal.h>
 #include <librd/rdthread.h>
 #include <librd/rdmem.h>
-#include <librd/rdlru.h>
 #include <librdkafka/rdkafka.h>
 #include <math.h>
 
@@ -383,51 +382,58 @@ static void *get_report_thread(void *http_handler) {
 }
 #endif
 
-static int worker_process_sensor_send_message(struct _worker_info * worker_info,
-							char *msg) {
-	if(worker_info->kafka_broker != NULL) {
-		rdlog(LOG_DEBUG,"[Kafka] %s\n",msg);
-		const int produce_rc =  rd_kafka_produce(
-			worker_info->rkt, RD_KAFKA_PARTITION_UA,
-			RD_KAFKA_MSG_F_COPY,
-			/* Payload and length */
-			/// @TODO cache len
-			msg, strlen(msg),
-			/* Optional key and its length */
-			NULL, 0,
-			/* Message opaque, provided in delivery report
-			 * callback as
-			 * msg_opaque. */
-			NULL);
-		if (0!=produce_rc) {
-			rdlog(LOG_ERR,
-				"[Kafka] Cannot produce kafka message: %s",
-				rd_kafka_err2str(rd_kafka_errno2err(errno)));
-		}
-	} /* if kafka */
+static int worker_process_sensor_send_array(struct _worker_info * worker_info,
+						rb_message_array_t *msgs) {
+	for (size_t i=0; i<msgs->count; ++i) {
+		char *msg = msgs->msgs[i].payload;
+		size_t len = msgs->msgs[i].len;
 
-#ifdef HAVE_RBHTTP
-	if (worker_info->http_handler != NULL) {
-		char err[BUFSIZ];
-		rdlog(LOG_DEBUG,"[HTTP] %s\n",msg);
-		const int produce_rc = rb_http_produce(
-			worker_info->http_handler, msg, strlen(msg),
-			RB_HTTP_MESSAGE_F_COPY, err, sizeof(err), NULL);
-		if (0!=produce_rc) {
-			rdlog(LOG_ERR, "[HTTP] Cannot produce message: %s",
-									err);
+		if(worker_info->kafka_broker != NULL) {
+			rdlog(LOG_DEBUG,"[Kafka] %s\n",msg);
+			const int produce_rc =  rd_kafka_produce(
+				worker_info->rkt, RD_KAFKA_PARTITION_UA,
+				RD_KAFKA_MSG_F_COPY,
+				/* Payload and length */
+				msg, len,
+				/* Optional key and its length */
+				NULL, 0,
+				/* Message opaque, provided in delivery report
+				 * callback as
+				 * msg_opaque. */
+				NULL);
+			if (0!=produce_rc) {
+				rdlog(LOG_ERR,
+					"[Kafka] Cannot produce kafka message: %s",
+					rd_kafka_err2str(rd_kafka_errno2err(errno)));
+			}
+		} /* if kafka */
+
+	#ifdef HAVE_RBHTTP
+		if (worker_info->http_handler != NULL) {
+			char err[BUFSIZ];
+			rdlog(LOG_DEBUG,"[HTTP] %s\n",msg);
+			const int produce_rc = rb_http_produce(
+				worker_info->http_handler, msg, len,
+				RB_HTTP_MESSAGE_F_COPY, err, sizeof(err), NULL);
+			if (0!=produce_rc) {
+				rdlog(LOG_ERR, "[HTTP] Cannot produce message: %s",
+										err);
+			}
 		}
+	#endif
+		free(msg);
 	}
-#endif
-	free(msg);
+
+	message_array_done(msgs);
 	return 0;
 }
 
 static int worker_process_sensor_send_messages(struct _worker_info *worker_info,
-					rd_lru_t *msgs) {
-	char *msg = NULL;
-	while((msg = rd_lru_pop(msgs))) {
-		worker_process_sensor_send_message(worker_info, msg);
+					rb_message_list *msgs) {
+	while(!(rb_message_list_empty(msgs))) {
+		rb_message_array_t *array = rb_message_list_first(msgs);
+		rb_message_list_remove(msgs, array);
+		worker_process_sensor_send_array(worker_info, array);
 	}
 
 	return 0;
@@ -440,17 +446,16 @@ static int worker_process_sensor_send_messages(struct _worker_info *worker_info,
   */
 static int worker_process_sensor(struct _worker_info *worker_info,
 							rb_sensor_t *sensor) {
-	rd_lru_t *messages = rd_lru_new(); /// @TODO not use an lru!
+	rb_message_list messages;
+	rb_message_list_init(&messages);
 
 	assert(sensor);
 	assert_rb_sensor(sensor);
 
-	process_rb_sensor(worker_info, sensor, messages);
+	process_rb_sensor(worker_info, sensor, &messages);
 	rb_sensor_put(sensor);
 
-	worker_process_sensor_send_messages(worker_info, messages);
-
-	rd_lru_destroy(messages);
+	worker_process_sensor_send_messages(worker_info, &messages);
 
 	return 0;
 }

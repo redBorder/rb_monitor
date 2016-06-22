@@ -21,6 +21,7 @@
 #include <assert.h>
 
 #include "rb_sensor.h"
+#include <librd/rdthread.h>
 #include <librd/rdqueue.h>
 
 /// Sensors queue
