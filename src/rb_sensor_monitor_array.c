@@ -18,6 +18,7 @@
 
 #include "rb_sensor_monitor_array.h"
 #include "rb_sensor.h"
+#include "rb_values_list.h"
 
 #include <librd/rdlog.h>
 
@@ -58,6 +59,37 @@ rb_monitors_array_t *parse_rb_monitors(
 	}
 
 	return ret;
+}
+
+/// @todo delete this FW declaration
+struct rb_sensor_s;
+
+static void process_monitors_array_values(const rb_monitor_t *monitor,
+		struct rb_sensor_s *sensor,
+		rb_monitor_value_array_t *monitor_values, rd_lru_t *ret) {
+	bool send = rb_monitor_send(monitor);
+
+	for (size_t i=0; monitor_values && i<monitor_values->count; ++i) {
+		const struct monitor_value *monitor_value =
+							monitor_values->elms[i];
+
+		const struct monitor_value *new_mv = update_monitor_value(
+			rb_sensor_monitor_values_tree(sensor),monitor_value);
+
+		if(send && new_mv) {
+			struct printbuf* printbuf= print_monitor_value(new_mv,
+							monitor, sensor);
+			if(likely(NULL!=printbuf)) {
+				char *dup = strdup(printbuf->buf);
+				if (NULL == dup) {
+					rdlog(LOG_ERR, "Couldn't dup!");
+				} else {
+					rd_lru_push(ret, dup);
+				}
+			}
+			printbuf_free(printbuf);
+		}
+	}
 }
 
 bool process_monitors_array(struct _worker_info *worker_info,
@@ -103,8 +135,11 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	}
 
 	for (size_t i=0; aok && i<monitors->count; ++i) {
-		process_sensor_monitor(process_ctx,
-			rb_monitors_array_elm_at(monitors, i), sensor, ret);
+		const rb_monitor_t *monitor = rb_monitors_array_elm_at(monitors,
+									i);
+		rb_monitor_value_array_t *vals = process_sensor_monitor(
+					process_ctx, monitor, sensor);
+		process_monitors_array_values(monitor, sensor, vals, ret);
 	}
 
 	if (process_ctx) {

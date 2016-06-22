@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include "rb_sensor_monitor.h"
-#include "rb_sensor.h"
 #include "rb_array.h"
 
 #include <signal.h>
@@ -90,6 +88,10 @@ static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
 	rb_array_add(array, sensor);
 }
 
+/// @todo delete this FW declarations, print should not be here
+struct rb_monitor_s;
+struct rb_sensor_s;
+
 /** Print a sensor value
   @param monitor_value Value to print
   @param monitor Value's monitor
@@ -97,4 +99,4 @@ static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
   @return new printbuf with result string (has to be freed with )
   */
 struct printbuf *print_monitor_value(const struct monitor_value *monitor_value,
-			const rb_monitor_t *monitor, const rb_sensor_t *sensor);
+	const struct rb_monitor_s *monitor, const struct rb_sensor_s *sensor);
