@@ -39,18 +39,6 @@
 #define RB_MONITOR_MAGIC 0x0b010a1c0b010a1cl
 #endif
 
-/*
- * Monitors array
- */
-
-#define rb_monitors_array_new(count) rb_array_new(count)
-#define rb_monitors_array_full(array) rb_array_full(array)
-/** @note Doing with a function provides type safety */
-static void rb_monitors_array_add(rb_monitors_array_t *array,
-							rb_monitor_t *monitor) {
-	rb_array_add(array, monitor);
-}
-
 /// X-macro to define monitor operations
 /// _X(menum,cmd,value_type,fn)
 #define MONITOR_CMDS_X \
@@ -92,10 +80,10 @@ struct rb_monitor_s {
 	const char *cmd_arg; ///< Argument given to command
 };
 
-#ifdef RB_MONITOR_MAGIC
-#define assert_rb_monitor(monitor) assert(RB_MONITOR_MAGIC == (monitor)->magic)
-#else
-#define assert_rb_monitor(monitor)
+#ifndef NDEBUG
+void assert_rb_monitor(const rb_monitor_t *monitor) {
+	assert(RB_MONITOR_MAGIC == (monitor)->magic);
+}
 #endif
 
 const char *rb_monitor_type(const rb_monitor_t *monitor) {
@@ -138,11 +126,7 @@ static void free_const_str(const char *str) {
 	free(aux);
 }
 
-
-/** Free resources allocated by a monitor
-  @param monitor Monitor to free
-  */
-static void rb_monitor_done(rb_monitor_t *monitor) {
+void rb_monitor_done(rb_monitor_t *monitor) {
 	free_const_str(monitor->name);
 	free_const_str(monitor->argument);
 	free_const_str(monitor->name_split_suffix);
@@ -154,18 +138,6 @@ static void rb_monitor_done(rb_monitor_t *monitor) {
 	free_const_str(monitor->unit);
 	free_const_str(monitor->cmd_arg);
 	free(monitor);
-}
-
-/** Extract an indexed monitor of a monitor array
-  @param array Monitors array
-  @param i Index to extract
-  @return Desired monitor
-  */
-static rb_monitor_t *rb_monitors_array_elm_at(rb_monitors_array_t *array,
-								size_t i) {
-	rb_monitor_t *ret = array->elms[i];
-	assert_rb_monitor(ret);
-	return ret;
 }
 
 /** strtod conversion plus set errno=EINVAL if no conversion is possible
@@ -254,13 +226,7 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	return ret;
 }
 
-/** Parse a rb_monitor element
-  @param json_monitor monitor in JSON format
-  @todo json_monitor should be const
-  @return Parsed rb_monitor.
-  */
-static rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor,
-						rb_sensor_t *monitor_sensor) {
+rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor) {
 	enum monitor_cmd_type cmd_type;
 	const char *cmd_arg = NULL;
 
@@ -282,31 +248,6 @@ static rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor,
 	return NULL;
 }
 
-rb_monitors_array_t *parse_rb_monitors(struct json_object *monitors_array_json,
-					struct rb_sensor_s *sensor) {
-	const size_t monitors_len = json_object_array_length(
-							monitors_array_json);
-	rb_monitors_array_t *ret = rb_monitors_array_new(monitors_len);
-
-	for (size_t i=0; i<monitors_len; ++i) {
-		if (rb_monitors_array_full(ret)) {
-			rdlog(LOG_CRIT,
-				"Sensors array full at %zu, can't add %zu",
-				ret->size, i);
-			break;
-		}
-
-		json_object *monitor_json = json_object_array_get_idx(
-							monitors_array_json, i);
-		rb_monitor_t *monitor = parse_rb_monitor(monitor_json, sensor);
-		if (monitor) {
-			rb_monitors_array_add(ret, monitor);
-		}
-	}
-
-	return ret;
-}
-
 /** Context of sensor monitors processing */
 struct process_sensor_monitor_ctx {
 	rd_memctx_t memctx; ///< Memory context
@@ -322,82 +263,44 @@ struct process_sensor_monitor_ctx {
 	} bad_names;
 };
 
+struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
+				size_t monitors_count,
+				struct monitor_snmp_session *snmp_sessp) {
+	struct process_sensor_monitor_ctx *ret = calloc(1, sizeof(*ret));
+	if (NULL == ret) {
+		rdlog(LOG_ERR, "Couldn't allocate process sensor monitors ctx");
+	} else {
+		ret->libmatheval_variables = new_libmatheval_stuffs(
+							monitors_count*10);
+		ret->bad_names.names = calloc(monitors_count,
+					sizeof(ret->bad_names.names[0]));
+		ret->bad_names.size = monitors_count;
+		ret->snmp_sessp = snmp_sessp;
+		rd_memctx_init(&ret->memctx,NULL,RD_MEMCTX_F_TRACK);
+	}
+
+	return ret;
+}
+
+void destroy_process_sensor_monitor_ctx(
+				struct process_sensor_monitor_ctx *ctx) {
+	rd_memctx_freeall(&ctx->memctx);
+	delete_libmatheval_stuffs(ctx->libmatheval_variables);
+	free(ctx->bad_names.names);
+	free(ctx);
+}
+
 /* FW declaration */
-static void process_sensor_monitor(
-				struct process_sensor_monitor_ctx *process_ctx,
-				const rb_monitor_t *monitor,
-				rb_sensor_t *sensor, rd_lru_t *ret);
-static rb_monitors_array_t *process_novector_monitor(
+static rb_monitor_value_array_t *process_novector_monitor(
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		struct libmatheval_stuffs* libmatheval_variables,
 		const char *value_buf,
 		double value);
 
-static rb_monitors_array_t *process_vector_monitor(
+static rb_monitor_value_array_t *process_vector_monitor(
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			char *value_buf, rd_memctx_t *memctx);
-
-bool process_monitors_array(struct _worker_info *worker_info,
-			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
-			struct snmp_params_s *snmp_params,
-			rd_lru_t *ret) {
-	bool aok = true;
-	struct process_sensor_monitor_ctx process_ctx = {
-		.libmatheval_variables = new_libmatheval_stuffs(
-							monitors->count*10),
-		.bad_names = {
-			.names = calloc(monitors->count,
-				sizeof(process_ctx.bad_names.names[0])),
-			.size = monitors->count,
-		},
-	};
-	rd_memctx_init(&process_ctx.memctx,NULL,RD_MEMCTX_F_TRACK);
-
-	/* @todo we only need this if we are going to use SNMP */
-	if (NULL == snmp_params->peername) {
-		aok = false;
-		rdlog(LOG_ERR, "Peername not setted in %s. Skipping.",
-							rb_sensor_name(sensor));
-	}
-
-	if (NULL == snmp_params->session.community) {
-		aok = false;
-		rdlog(LOG_ERR, "Community not setted in %s. Skipping.",
-							rb_sensor_name(sensor));
-	}
-
-	if(aok) {
-		pthread_mutex_lock(&worker_info->snmp_session_mutex);
-		/* @TODO: You can do it later, see session_api.h */
-		worker_info->default_session.peername =
-						(char *)snmp_params->peername;
-		const struct monitor_snmp_new_session_config config = {
-			snmp_params->session.community,
-			snmp_params->session.timeout,
-			worker_info->default_session.flags,
-			snmp_params->session.version
-		};
-		process_ctx.snmp_sessp = new_snmp_session(&worker_info->default_session,&config);
-		if(NULL== process_ctx.snmp_sessp){
-			rdlog(LOG_ERR,"Error creating session: %s",snmp_errstring(worker_info->default_session.s_snmp_errno));
-			aok=0;
-		}
-		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
-	}
-
-	for (size_t i=0; aok && i<monitors->count; ++i) {
-		process_sensor_monitor(&process_ctx,
-			rb_monitors_array_elm_at(monitors, i), sensor, ret);
-	}
-	destroy_snmp_session(process_ctx.snmp_sessp);
-
-	if(aok) {
-		rd_memctx_freeall(&process_ctx.memctx);
-		delete_libmatheval_stuffs(process_ctx.libmatheval_variables);
-	}
-	return aok;
-}
 
 /** Base function to obtain an external value, and to manage it as a vector or
   as an integer
@@ -409,7 +312,7 @@ bool process_monitors_array(struct _worker_info *worker_info,
   @param get_value_cb_ctx Context send to get_value_cb
   @return true if we can send value
   */
-static rb_monitors_array_t *rb_monitor_get_external_value(
+static rb_monitor_value_array_t *rb_monitor_get_external_value(
 		struct process_sensor_monitor_ctx *process_ctx,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 		bool *send,
@@ -419,7 +322,7 @@ static rb_monitors_array_t *rb_monitor_get_external_value(
 	double number = 0;
 	char value_buf[BUFSIZ];
 	value_buf[0] = '\0';
-	rb_monitors_array_t *ret = NULL;
+	rb_monitor_value_array_t *ret = NULL;
 	const bool ok = get_value_cb(value_buf, sizeof(value_buf), &number,
 					get_value_cb_ctx, monitor->cmd_arg);
 
@@ -466,7 +369,7 @@ static rb_monitors_array_t *rb_monitor_get_external_value(
 }
 
 /** Convenience function to obtain system values */
-static rb_monitors_array_t *rb_monitor_get_system_external_value(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_system_external_value(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
@@ -481,7 +384,7 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 }
 
 /** Convenience function to obtain SNMP values */
-static rb_monitors_array_t *rb_monitor_get_snmp_external_value(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_snmp_external_value(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
@@ -569,7 +472,7 @@ int rb_monitor_get_op_variables(void *evaluator,
 }
 
 /** Convenience function to obtain operations values */
-static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_op_result(bool *send,
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	size_t vectors_len;
@@ -598,7 +501,7 @@ static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
 		libmatheval_variables, sensor, monitor, &head, &vectors_len);
 
 	if (vector_variables_count < 0) {
-		return rb_monitors_array_new(0);
+		return rb_monitor_value_array_new(0);
 	}
 
 	char *str_op = vector_variables_count > 0 ?
@@ -807,7 +710,7 @@ static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
 	if(vector_variables_count>0) // @TODO: make it more simple
 		free(str_op);
 
-	rb_monitors_array_t *ret = rb_monitors_array_new(rd_lru_cnt(
+	rb_monitor_value_array_t *ret = rb_monitor_value_array_new(rd_lru_cnt(
 							monitor_values));
 	if (NULL == ret) {
 		rdlog(LOG_ERR,
@@ -829,18 +732,11 @@ static rb_monitors_array_t *rb_monitor_get_op_result(bool *send,
 	return ret;
 }
 
-/** Process a sensor monitor
-  @param process_ctx Process context
-  @param monitor Monitor to process
-  @todo sensor should be const
-  @param ret Returned messages
-  */
-static void process_sensor_monitor(
-				struct process_sensor_monitor_ctx *process_ctx,
+void process_sensor_monitor(struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
 				rb_sensor_t *sensor, rd_lru_t *ret) {
 	bool send = monitor->send;
-	rb_monitors_array_t *monitor_values = NULL;
+	rb_monitor_value_array_t *monitor_values = NULL;
 
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
@@ -859,8 +755,6 @@ static void process_sensor_monitor(
 		const struct monitor_value *monitor_value =
 							monitor_values->elms[i];
 
-		/** @TODO monitor_values_tree should be by sensor, not general!
-		*/
 		const struct monitor_value *new_mv = update_monitor_value(
 			rb_sensor_monitor_values_tree(sensor),monitor_value);
 
@@ -888,11 +782,11 @@ static void process_sensor_monitor(
 */
 
 /** Process a no-vector monitor */
-static rb_monitors_array_t *process_novector_monitor(
+static rb_monitor_value_array_t *process_novector_monitor(
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct libmatheval_stuffs* libmatheval_variables,
 			const char *value_buf, double value) {
-	rb_monitors_array_t *ret = NULL;
+	rb_monitor_value_array_t *ret = NULL;
 
 	if(likely(libmatheval_append(libmatheval_variables,
 						monitor->name, value))) {
@@ -1135,7 +1029,7 @@ static rb_monitor_value_array_t *process_vector_monitor(
 		}
 	}
 
-	rb_monitor_value_array_t *ret = rb_monitors_array_new(
+	rb_monitor_value_array_t *ret = rb_monitor_value_array_new(
 							rd_lru_cnt(monitors));
 	if (NULL == ret) {
 		rdlog(LOG_ERR,
@@ -1157,10 +1051,4 @@ static rb_monitor_value_array_t *process_vector_monitor(
 	rd_lru_destroy(monitors);
 
 	return ret;
-}
-
-void rb_monitors_array_done(rb_monitors_array_t *monitors_array) {
-	for (size_t i=0; i<monitors_array->count; ++i) {
-		rb_monitor_done(rb_monitors_array_elm_at(monitors_array, i));
-	}
 }

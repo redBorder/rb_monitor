@@ -20,10 +20,10 @@
 
 #include "rb_snmp.h"
 
-#include <json/json.h>
-#include <stdbool.h>
-
 #include <librd/rdlru.h>
+#include <json-c/json.h>
+
+#include <stdbool.h>
 
 /* FW declaration */
 struct rb_sensor_s;
@@ -32,16 +32,53 @@ struct _worker_info;
 /// Single monitor
 typedef struct rb_monitor_s rb_monitor_t;
 
-/// Monitors array
-typedef struct rb_array rb_monitors_array_t;
+#ifdef NDEBUG
+#define assert_rb_monitor(monitor)
+#else
+void assert_rb_monitor(const rb_monitor_t *monitor);
+#endif
 
-/// SNMP connection parameters
-struct snmp_params_s {
-	/// Peername to connect
-	const char *peername;
-	/// Connection values
-	struct monitor_snmp_new_session_config session;
-};
+/// Context to process all monitors
+struct process_sensor_monitor_ctx;
+
+/** Parse a rb_monitor element
+  @param json_monitor monitor in JSON format
+  @todo json_monitor should be const
+  @return Parsed rb_monitor.
+  */
+rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor);
+
+/** Free resources allocated by a monitor
+  @param monitor Monitor to free
+  */
+void rb_monitor_done(rb_monitor_t *monitor);
+
+/** Creates a new monitor process ctx
+  @param monitors_count # of monitors
+  @param snmp_sessp Session to make SNMP request
+  @return New monitor process ctx
+  */
+struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
+                                size_t monitors_count,
+                                struct monitor_snmp_session *snmp_sessp);
+
+/** Destroy process sensor monitor context
+  @param ctx Context to free
+  */
+void destroy_process_sensor_monitor_ctx(struct process_sensor_monitor_ctx *ctx);
+
+/// @todo delete this FW declaration
+struct rb_sensor_s;
+
+/** Process a sensor monitor
+  @param process_ctx Process context
+  @param monitor Monitor to process
+  @todo sensor should be const
+  @param ret Returned messages
+  */
+void process_sensor_monitor(struct process_sensor_monitor_ctx *process_ctx,
+                                const rb_monitor_t *monitor,
+                                struct rb_sensor_s *sensor, rd_lru_t *ret);
 
 /** Gets monitor instance_prefix
   @param monitor Monitor to get data
@@ -78,29 +115,3 @@ const char *rb_monitor_type(const rb_monitor_t *monitor);
   @return requested data
   */
 const char *rb_monitor_unit(const rb_monitor_t *monitor);
-
-/** Extract monitors array from a JSON array.
-  @param monitors_array_json JSON monitors template
-  @param sensor Sensor this monitor's belong
-  @return New monitors array
-  @note Need to free returned monitors with rb_monitors_array_done
-  */
-rb_monitors_array_t *parse_rb_monitors(struct json_object *monitors_array_json,
-	struct rb_sensor_s *sensor);
-
-/** Process all monitors in sensor, returning result in ret
-  @param worker_info All workers info
-  @param sensor_data Data of current sensor
-  @param monitors Array of monitors to ask
-  @param snmp_params SNMP connection parameters
-  @param ret Message returning function
-  @warning This function assumes ALL fields of sensor_data will be populated */
-bool process_monitors_array(struct _worker_info * worker_info,
-		struct rb_sensor_s *sensor, rb_monitors_array_t *monitors_array,
-		struct snmp_params_s *snmp_params,
-		rd_lru_t *ret);
-
-/** Free array allocated with parse_rb_monitors
-  @param array Array
-  */
-void rb_monitors_array_done(rb_monitors_array_t *array);
