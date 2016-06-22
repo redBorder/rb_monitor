@@ -18,6 +18,9 @@
 
 #include "rb_value.h"
 
+#include "rb_sensor.h"
+#include "rb_sensor_monitor.h"
+
 #include <librd/rdlog.h>
 #include <librd/rdmem.h>
 #include <json/printbuf.h>
