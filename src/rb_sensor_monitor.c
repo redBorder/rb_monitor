@@ -117,6 +117,11 @@ const char *rb_monitor_unit(const rb_monitor_t *monitor) {
 	return monitor->unit;
 }
 
+bool rb_monitor_send(const rb_monitor_t *monitor) {
+	return monitor->send;
+}
+
+
 /** Free a const string.
   @todo remove this, is ugly
   */
@@ -310,12 +315,11 @@ static rb_monitor_value_array_t *process_vector_monitor(
   @todo delete send argument, just do not add to valueslist vector!
   @param get_value_cb Callback to get value
   @param get_value_cb_ctx Context send to get_value_cb
-  @return true if we can send value
+  @return Monitor values array
   */
 static rb_monitor_value_array_t *rb_monitor_get_external_value(
 		struct process_sensor_monitor_ctx *process_ctx,
 		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-		bool *send,
 		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
 						void *ctx, const char *arg),
 		void *get_value_cb_ctx) {
@@ -362,17 +366,18 @@ static rb_monitor_value_array_t *rb_monitor_get_external_value(
 			monitor->cmd_arg);
 		size_t bad_names_pos = process_ctx->bad_names.pos++;
 		process_ctx->bad_names.names[bad_names_pos++] = monitor->name;
-		*send = 0;
+		/// @TODO memory management
+		ret = NULL;
 	}
 
 	return ret;
 }
 
 /** Convenience function to obtain system values */
-static rb_monitor_value_array_t *rb_monitor_get_system_external_value(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_system_external_value(
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
+	return rb_monitor_get_external_value(process_ctx, monitor, sensor,
 						system_solve_response, NULL);
 }
 
@@ -384,10 +389,10 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 }
 
 /** Convenience function to obtain SNMP values */
-static rb_monitor_value_array_t *rb_monitor_get_snmp_external_value(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_snmp_external_value(
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(process_ctx, monitor, sensor, send,
+	return rb_monitor_get_external_value(process_ctx, monitor, sensor,
 				snmp_solve_response0, process_ctx->snmp_sessp);
 }
 
@@ -472,7 +477,7 @@ int rb_monitor_get_op_variables(void *evaluator,
 }
 
 /** Convenience function to obtain operations values */
-static rb_monitor_value_array_t *rb_monitor_get_op_result(bool *send,
+static rb_monitor_value_array_t *rb_monitor_get_op_result(
 			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
 			struct process_sensor_monitor_ctx *process_ctx) {
 	size_t vectors_len;
@@ -732,16 +737,14 @@ static rb_monitor_value_array_t *rb_monitor_get_op_result(bool *send,
 	return ret;
 }
 
-void process_sensor_monitor(struct process_sensor_monitor_ctx *process_ctx,
+rb_monitor_value_array_t *process_sensor_monitor(
+				struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
-				rb_sensor_t *sensor, rd_lru_t *ret) {
-	bool send = monitor->send;
-	rb_monitor_value_array_t *monitor_values = NULL;
-
+				rb_sensor_t *sensor) {
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
 	case menum:                                                            \
-		monitor_values = fn(&send, monitor, sensor, process_ctx);      \
+		return fn(monitor, sensor, process_ctx);                       \
 		break;                                                         \
 
 	MONITOR_CMDS_X
@@ -749,31 +752,8 @@ void process_sensor_monitor(struct process_sensor_monitor_ctx *process_ctx,
 
 	default:
 		rdlog(LOG_CRIT,"Unknown monitor type: %u", monitor->type);
+		return NULL;
 	}; /* Switch monitor type */
-
-	for (size_t i=0; monitor_values && i<monitor_values->count; ++i) {
-		const struct monitor_value *monitor_value =
-							monitor_values->elms[i];
-
-		const struct monitor_value *new_mv = update_monitor_value(
-			rb_sensor_monitor_values_tree(sensor),monitor_value);
-
-		if(monitor->send && new_mv) {
-			struct printbuf* printbuf= print_monitor_value(new_mv,
-							monitor, sensor);
-			if(likely(NULL!=printbuf)) {
-				if(send) {
-					char *dup = strdup(printbuf->buf);
-					if (NULL == dup) {
-						rdlog(LOG_ERR, "Couldn't dup!");
-					} else {
-						rd_lru_push(ret, dup);
-					}
-				}
-			} /* for i in splittoks */
-			printbuf_free(printbuf);
-		}
-	}
 }
 
 /** @note our way to save a SNMP string vector in libmatheval_array is:
