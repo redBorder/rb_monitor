@@ -76,7 +76,7 @@ static const char invalid_monitor[] = "{\n"
 static void prepare_invalid_monitor_checks(check_list_t *check_list) {
 	struct json_key_test *checks[] = {
 		TEST1_CHECKS("system","invalid_key","12.000000"),
-		TEST1_CHECKS("op","bad_var_op","1.000000"),
+		// TEST1_CHECKS("op","bad_var_op","1.000000"),
 	};
 
 	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),
