@@ -43,7 +43,6 @@ struct process_sensor_monitor_ctx;
 
 /** Parse a rb_monitor element
   @param json_monitor monitor in JSON format
-  @todo json_monitor should be const
   @return Parsed rb_monitor.
   */
 rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor);
@@ -76,16 +75,34 @@ struct rb_sensor_s;
   @todo sensor should be const
   @param ret Returned messages
   */
-rb_monitor_value_array_t *process_sensor_monitor(
+struct monitor_value *process_sensor_monitor(
                                 struct process_sensor_monitor_ctx *process_ctx,
                                 const rb_monitor_t *monitor,
                                 struct rb_sensor_s *sensor);
+
+/** Gets if monitor expect timestamp
+  @param monitor Monitor to get data
+  @return requested data
+  */
+bool rb_monitor_timestamp_provided(const rb_monitor_t *monitor);
 
 /** Gets monitor instance_prefix
   @param monitor Monitor to get data
   @return requested data
   */
 const char *rb_monitor_instance_prefix(const rb_monitor_t *monitor);
+
+/** Gets monitor name split suffix
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_name_split_suffix(const rb_monitor_t *monitor);
+
+/** Gets monitor name
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_name(const rb_monitor_t *monitor);
 
 /** Gets monitor group_id
   @param monitor Monitor to get data

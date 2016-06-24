@@ -77,8 +77,6 @@ static void prepare_split_op_monitor_checks(check_list_t *check_list) {
 		TEST1_LOAD_5_CHECKS,
 		TEST1_CHECKS("load_5","5.500000"),
 		TEST1_LOAD_INVALID_CHECKS,
-		/// @TODO we should not send this one!
-		TEST1_CHECKS("load_invalid","0.000000"),
 	};
 
 	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),
