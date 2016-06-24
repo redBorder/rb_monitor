@@ -46,12 +46,7 @@ static int monitor_value_cmp(const void *_v1,const void*_v2)
 	int ret = 0;
 	if(0==ret && v1->group_id && v2->group_id)
 		ret = strcmp(v1->group_id,v2->group_id);
-	if(0==ret)
-		ret = strcmp(v1->name,v2->name);
-	if(ret==0 && v1->instance_prefix && v2->instance_prefix) // @TODO force instance_prefix setted
-		ret = v1->instance-v2->instance;
-	return ret;
-
+	return ret == 0 ? strcmp(v1->name,v2->name) : 0;
 }
 
 struct monitor_values_tree * new_monitor_values_tree() {
@@ -66,57 +61,26 @@ struct monitor_values_tree * new_monitor_values_tree() {
 	return ret;
 }
 
-/**
- Add a monitor value to the tree. 'src' will be copied and not changed.
- */
-static struct monitor_value * add_monitor_value(struct monitor_values_tree*tree,const struct monitor_value *src)
-{
-	struct monitor_value * dst = rd_memctx_calloc(&memctx,1,sizeof(struct monitor_value));
-
-	if(dst)
-	{
-		#ifdef MONITOR_VALUE_MAGIC
-		dst->magic = MONITOR_VALUE_MAGIC;
-		#endif
-
-		rd_memctx_init(&dst->memctx,NULL,RD_MEMCTX_F_LOCK | RD_MEMCTX_F_TRACK);
-
-		monitor_value_copy(dst,src);
-		RD_AVL_INSERT(tree->avl,dst,avl_node);
-	}
-
-	return dst;
+/** Add a monitor value to the tree.
+  @param tree Tree to add monitor value
+  @param mv Monitor value to add
+  */
+void add_monitor_value(struct monitor_values_tree *tree,
+					struct monitor_value *mv) {
+	RD_AVL_INSERT(tree->avl,mv,avl_node);
 }
 
-static struct monitor_value *find_monitor_value(
-					struct monitor_values_tree *tree,
-					const struct monitor_value *node) {
-	return RD_AVL_FIND(tree->avl,node);
-}
+struct monitor_value *find_monitor_value(struct monitor_values_tree *tree,
+				const char *name, const char *group_id) {
+	const struct monitor_value dummy_node = {
+#ifdef MONITOR_VALUE_MAGIC
+		.magic = MONITOR_VALUE_MAGIC,
+#endif
+		.group_id = group_id,
+		.name = name,
+	};
 
-const struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src)
-{
-	struct monitor_value * current_value = find_monitor_value(tree,src);
-	if(current_value)
-	{
-		if(src->timestamp != current_value->timestamp)
-		{
-			// monitor_value_copy(current_value,src); <- Not possible because strings
-			current_value->timestamp = src->timestamp;
-			current_value->value = src->value;
-		}
-		else
-		{
-			// fprintf(stderr,"Same timestamp, return no monitor value.\n");
-			current_value = NULL;
-		}
-	}
-	else
-	{
-		current_value = add_monitor_value(tree,src);
-	}
-
-	return current_value;
+	return RD_AVL_FIND(tree->avl,&dummy_node);
 }
 
 void destroy_monitor_values_tree(struct monitor_values_tree*tree)

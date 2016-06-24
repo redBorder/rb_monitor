@@ -25,31 +25,76 @@
 #include <librd/rdmem.h>
 #include <json/printbuf.h>
 
+struct monitor_value *new_monitor_value_array(const char *name,
+		size_t n_children, struct monitor_value **children,
+		struct monitor_value *split_op) {
+	struct monitor_value *ret = calloc(1, sizeof(*ret));
+	if (NULL == ret) {
+		rdlog(LOG_ERR, "Couldn't allocate monitor value");
+		return NULL;
+	}
+
+#ifdef MONITOR_VALUE_MAGIC
+	ret->magic = MONITOR_VALUE_MAGIC;
+#endif
+
+	ret->type = MONITOR_VALUE_T__ARRAY;
+	ret->name = name;
+	ret->array.children_count = n_children;
+	ret->array.split_op_result = split_op;
+	ret->array.children = children;
+
+	return ret;
+}
+
 /* Copy just the 'useful' data of the node, not list-related */
-void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)
-{
+void monitor_value_copy(struct monitor_value *dst,
+					const struct monitor_value *src) {
 	assert(src);
 	assert(dst);
+
+	memset(dst, 0, sizeof(*dst));
 
 #ifdef MONITOR_VALUE_MAGIC
 	dst->magic = MONITOR_VALUE_MAGIC;
 #endif
-        dst->timestamp           = src->timestamp;
-        if(src->name)
-                dst->name            = rd_memctx_strdup(&dst->memctx,src->name);
-        if(src->send_name)
-                dst->send_name       = rd_memctx_strdup(&dst->memctx,src->send_name);
-        if(src->instance_prefix)
-                dst->instance_prefix = rd_memctx_strdup(&dst->memctx,src->instance_prefix);
-        dst->instance            = src->instance;
-        dst->instance_valid      = src->instance_valid;
-        dst->bad_value           = src->bad_value;
-        dst->value               = src->value;
-        if(src->string_value)
-                dst->string_value    = rd_memctx_strdup(&dst->memctx,src->string_value);
-        if(src->group_id)
-                dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
 
+        if(src->name) {
+                dst->name      = strdup(src->name);
+        }
+        if(src->group_id) {
+		dst->group_id  = strdup(src->group_id);
+	}
+
+        switch(src->type) {
+        case MONITOR_VALUE_T__VALUE:
+        	dst->value.timestamp = src->value.timestamp;
+        	dst->value.bad_value = src->value.bad_value;
+        	dst->value.value     = src->value.value;
+		if(src->value.string_value) {
+			dst->value.string_value = strdup(src->value.string_value);
+		}
+
+        	break;
+	case MONITOR_VALUE_T__ARRAY:
+		dst->array.children_count = src->array.children_count;
+		if (src->array.split_op_result) {
+			dst->array.split_op_result = calloc(1,
+					sizeof(dst->array.split_op_result));
+			if (dst->array.split_op_result) {
+				monitor_value_copy(dst->array.split_op_result,
+					src->array.split_op_result);
+			} else {
+				/// @TODO error treatment
+			}
+		}
+
+		for (size_t i=0; i<dst->array.children_count; ++i) {
+			monitor_value_copy(dst->array.children[i],
+					src->array.children[i]);
+		}
+		break;
+        };
 }
 
 /// @TODO we should print all with this function
@@ -112,14 +157,12 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 	}
 }
 
-rb_message_array_t *print_monitor_value(
-		const struct monitor_value *monitor_value,
-		const rb_monitor_t *monitor, const rb_sensor_t *sensor) {
-	rb_message_array_t *ret = new_messages_array(1);
-	if (ret == NULL) {
-		rdlog(LOG_ERR, "Couldn't allocate messages array");
-		return NULL;
-	}
+#define NO_INSTANCE -1
+static void print_monitor_value0(rb_message *message,
+			const struct monitor_value *monitor_value,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
+			int instance) {
+	assert(monitor_value->type == MONITOR_VALUE_T__VALUE);
 
 	struct printbuf * printbuf = printbuf_new();
 	if(likely(NULL!=printbuf)) {
@@ -128,12 +171,16 @@ rb_message_array_t *print_monitor_value(
 		const char *monitor_group_name = rb_monitor_group_name(monitor);
 		const char *monitor_type = rb_monitor_type(monitor);
 		const char *monitor_unit = rb_monitor_unit(monitor);
+		const char *monitor_instance_prefix =
+					rb_monitor_instance_prefix(monitor);
+		const char *monitor_name_split_suffix =
+					rb_monitor_name_split_suffix(monitor);
 		struct json_object *sensor_enrichment =
 						rb_sensor_enrichment(sensor);
 		// @TODO use printbuf_memappend_fast instead! */
 		sprintbuf(printbuf, "{");
 		sprintbuf(printbuf, "\"timestamp\":%lu",
-						monitor_value->timestamp);
+						monitor_value->value.timestamp);
 		if (sensor_id) {
 			sprintbuf(printbuf, ",\"sensor_id\":%lu", sensor_id);
 		}
@@ -141,25 +188,27 @@ rb_message_array_t *print_monitor_value(
 			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",
 						sensor_name);
 		}
-		if (monitor_value->send_name) {
-			sprintbuf(printbuf, ",\"monitor\":\"%s\"",
-						monitor_value->send_name);
+
+		if (NO_INSTANCE != instance && monitor_name_split_suffix) {
+			sprintbuf(printbuf, ",\"monitor\":\"%s%s\"",
+						monitor_value->name,
+						monitor_name_split_suffix);
 		} else {
 			sprintbuf(printbuf, ",\"monitor\":\"%s\"",
-						monitor_value->name);
+							monitor_value->name);
 		}
-		if (monitor_value->instance_valid &&
-					monitor_value->instance_prefix) {
-			sprintbuf(printbuf, ",\"instance\":\"%s%u\"",
-						monitor_value->instance_prefix,
-						monitor_value->instance);
+
+		if (NO_INSTANCE != instance && monitor_instance_prefix) {
+			sprintbuf(printbuf, ",\"instance\":\"%s%d\"",
+					monitor_instance_prefix, instance);
 		}
+
 		if (rb_monitor_is_integer(monitor)) {
 			sprintbuf(printbuf, ",\"value\":%"PRId64,
-						(int64_t)monitor_value->value);
+					(int64_t)monitor_value->value.value);
 		} else {
 			sprintbuf(printbuf, ",\"value\":\"%lf\"",
-							monitor_value->value);
+						monitor_value->value.value);
 		}
 		if (monitor_type) {
 			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_type);
@@ -181,19 +230,67 @@ rb_message_array_t *print_monitor_value(
 		}
 		sprintbuf(printbuf, "}");
 
-		ret->msgs[0].payload = printbuf->buf;
-		ret->msgs[0].len = printbuf->bpos;
+		message->payload = printbuf->buf;
+		message->len = printbuf->bpos;
 
 		printbuf->buf = NULL;
 		printbuf_free(printbuf);
 
+	}
+}
+
+rb_message_array_t *print_monitor_value(
+		const struct monitor_value *monitor_value,
+		const rb_monitor_t *monitor, const rb_sensor_t *sensor) {
+	const size_t ret_size = monitor_value->type == MONITOR_VALUE_T__VALUE ?
+		1 : monitor_value->array.children_count +
+			(monitor_value->array.split_op_result ? 1 : 0);
+
+	rb_message_array_t *ret = new_messages_array(ret_size);
+	if (ret == NULL) {
+		rdlog(LOG_ERR, "Couldn't allocate messages array");
+		return NULL;
+	}
+
+	if (monitor_value->type == MONITOR_VALUE_T__VALUE) {
+		print_monitor_value0(&ret->msgs[0], monitor_value, monitor,
+			sensor, NO_INSTANCE);
+	} else {
+		size_t i_msgs = 0;
+		assert(monitor_value->type == MONITOR_VALUE_T__ARRAY);
+		for (size_t i=0; i<monitor_value->array.children_count; ++i) {
+			if (monitor_value->array.children[i]) {
+				print_monitor_value0(&ret->msgs[i_msgs++],
+					monitor_value->array.children[i],
+					monitor, sensor, i);
+			}
+		}
+
+		if (monitor_value->array.split_op_result) {
+			rb_message *msg = &ret->msgs[i_msgs++];
+			assert(NULL == msg->payload);
+			print_monitor_value0(msg,
+				monitor_value->array.split_op_result, monitor,
+				sensor, NO_INSTANCE);
+		}
+
+		ret->count = i_msgs;
 	}
 
 	return ret;
 }
 
 void rb_monitor_value_done(struct monitor_value *mv) {
-	rd_memctx_freeall(&mv->memctx);
-	rd_memctx_destroy(&mv->memctx);
+	if (MONITOR_VALUE_T__ARRAY == mv->type) {
+		for (size_t i=0; i<mv->array.children_count; ++i) {
+			if (mv->array.children[i]) {
+				rb_monitor_value_done(mv->array.children[i]);
+			}
+		}
+		if (mv->array.split_op_result) {
+			rb_monitor_value_done(mv->array.split_op_result);
+		}
+		free(mv->array.children);
+	}
 	free(mv);
 }

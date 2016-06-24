@@ -21,6 +21,7 @@
 #include "rb_values_list.h"
 
 #include <librd/rdlog.h>
+#include <librd/rdfloat.h>
 
 #define rb_monitors_array_new(count) rb_array_new(count)
 #define rb_monitors_array_full(array) rb_array_full(array)
@@ -64,26 +65,113 @@ rb_monitors_array_t *parse_rb_monitors(
 /// @todo delete this FW declaration
 struct rb_sensor_s;
 
-static void process_monitors_array_values(const rb_monitor_t *monitor,
-				struct rb_sensor_s *sensor,
-				rb_monitor_value_array_t *monitor_values,
-				rb_message_list *ret) {
-	bool send = rb_monitor_send(monitor);
+/// Swap two pointers
+#define SWAP(T, a, b) do { T tmp = a; a = b; b = tmp; } while (0)
+/** Print all elements of new array that have changed
+  @param monitor_value New monitor value
+  @param old_mv Previous monitor value we had
+  @return Monitor messages to send
+  */
+static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
+					const rb_sensor_t *sensor,
+					struct monitor_value *new_mv,
+					struct monitor_value *old_mv) {
+	assert(new_mv->type == MONITOR_VALUE_T__ARRAY);
+	assert(old_mv->type == MONITOR_VALUE_T__ARRAY);
 
-	for (size_t i=0; monitor_values && i<monitor_values->count; ++i) {
-		const struct monitor_value *monitor_value =
-							monitor_values->elms[i];
+	struct monitor_value *print_children[new_mv->array.children_count];
+	memset(print_children, 0,
+			new_mv->array.children_count*sizeof(print_children[0]));
 
-		const struct monitor_value *new_mv = update_monitor_value(
-			rb_sensor_monitor_values_tree(sensor),monitor_value);
+	/* Print all values that have changed */
+	size_t i=0;
+	for (i=0; i<new_mv->array.children_count &&
+					i<old_mv->array.children_count; ++i) {
+		struct monitor_value *new_mv_i = new_mv->array.children[i];
+		const struct monitor_value *old_mv_i
+						= old_mv->array.children[i];
 
-		if(send && new_mv) {
-			rb_message_array_t* msgs = print_monitor_value(new_mv,
-							monitor, sensor);
-			if (msgs) {
-				rb_message_list_push(ret, msgs);
+		if (new_mv_i) {
+			const bool update = (NULL == old_mv_i
+				|| rb_monitor_value_cmp_timestamp(old_mv_i,
+								new_mv_i) < 0
+				|| rd_dne(old_mv_i->value.value,
+						new_mv_i->value.value));
+
+			if (update) {
+				print_children[i] = new_mv_i;
 			}
 		}
+	}
+
+	/* Print all new variables, if any */
+	for(; i<new_mv->array.children_count; ++i) {
+		print_children[i] = new_mv->array.children[i];
+	}
+
+	struct monitor_value to_print = {
+#ifdef MONITOR_VALUE_MAGIC
+		.magic = MONITOR_VALUE_MAGIC,
+#endif
+		.type = MONITOR_VALUE_T__ARRAY,
+		.name = new_mv->name,
+		.group_id = new_mv->group_id,
+		.array = {
+			.children_count = new_mv->array.children_count,
+			.split_op_result = new_mv->array.split_op_result,
+			.children = print_children,
+		},
+	};
+
+	rb_message_array_t *ret = print_monitor_value(&to_print, monitor,
+									sensor);
+	SWAP(void *,old_mv->array.children, new_mv->array.children);
+	rb_monitor_value_done(new_mv);
+	return ret;
+}
+
+static void process_monitor_value(const rb_monitor_t *monitor,
+				struct rb_sensor_s *sensor,
+				struct monitor_value *monitor_value,
+				rb_message_list *ret) {
+	assert(monitor_value);
+
+	rb_message_array_t* msgs = NULL;
+	struct monitor_values_tree *mv_tree =
+					rb_sensor_monitor_values_tree(sensor);
+
+	struct monitor_value *old_mv = find_monitor_value(mv_tree,
+		rb_monitor_name(monitor), rb_monitor_group_id(monitor));
+
+	const bool updated_value = NULL == old_mv ||
+		(monitor_value->type == MONITOR_VALUE_T__VALUE &&
+			rb_monitor_timestamp_provided(monitor) &&
+			rb_monitor_value_cmp_timestamp(old_mv,
+							monitor_value) < 0) ||
+		(monitor_value->type == MONITOR_VALUE_T__ARRAY &&
+			!rb_monitor_timestamp_provided(monitor));
+
+	if (updated_value) {
+		add_monitor_value(mv_tree, monitor_value);
+
+		if(rb_monitor_send(monitor)) {
+			msgs = print_monitor_value(monitor_value, monitor,
+									sensor);
+		}
+
+		if (old_mv) {
+			rb_monitor_value_done(old_mv);
+		}
+	} else if (monitor_value->type == MONITOR_VALUE_T__ARRAY) {
+		msgs = process_monitor_value_v(monitor, sensor, monitor_value,
+									old_mv);
+	} else {
+		// No use for the new monitor value
+		rb_monitor_value_done(monitor_value);
+	}
+
+	if (msgs) {
+		rb_message_list_push(ret, msgs);
 	}
 }
 
@@ -132,9 +220,11 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	for (size_t i=0; aok && i<monitors->count; ++i) {
 		const rb_monitor_t *monitor = rb_monitors_array_elm_at(monitors,
 									i);
-		rb_monitor_value_array_t *vals = process_sensor_monitor(
+		struct monitor_value *value = process_sensor_monitor(
 					process_ctx, monitor, sensor);
-		process_monitors_array_values(monitor, sensor, vals, ret);
+		if (value) {
+			process_monitor_value(monitor, sensor, value, ret);
+		}
 	}
 
 	if (process_ctx) {

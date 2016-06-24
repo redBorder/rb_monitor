@@ -27,11 +27,21 @@ struct monitor_values_tree;
 
 struct monitor_values_tree * new_monitor_values_tree();
 
-/**
-  Add a monitor value to a monitor_values_tree.
-  @note src value will be copied.
- */
-const struct monitor_value *update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
+/** Add a monitor value to the tree.
+  @param tree Tree to add monitor value
+  @param mv Monitor value to add
+  */
+void add_monitor_value(struct monitor_values_tree *tree,
+					struct monitor_value *mv);
+
+/** Find requested monitor value
+  @param tree Tree to search monitor value
+  @param name Name of monitor value
+  @param group_id Group id of the requested monitor value
+  @return requested monitor value
+  */
+struct monitor_value *find_monitor_value(struct monitor_values_tree *tree,
+					const char *name, const char *group_id);
 
 /**
   Destroy values tree
