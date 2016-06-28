@@ -18,7 +18,6 @@
 
 #include "rb_sensor_monitor_array.h"
 #include "rb_sensor.h"
-#include "rb_values_list.h"
 
 #include <librd/rdlog.h>
 #include <librd/rdfloat.h>
@@ -62,20 +61,18 @@ rb_monitors_array_t *parse_rb_monitors(
 	return ret;
 }
 
-/// @todo delete this FW declaration
-struct rb_sensor_s;
-
-/// Swap two pointers
-#define SWAP(T, a, b) do { T tmp = a; a = b; b = tmp; } while (0)
-/** Print all elements of new array that have changed
-  @param monitor_value New monitor value
-  @param old_mv Previous monitor value we had
-  @return Monitor messages to send
+/** Prints a monitor value taking into account timestamp of values
+  @param monitor Monitor of monitor value
+  @param sensor Sensor Sensor of monitor
+  @param new_mv New monitor value
+  @param old_mv Old monitor value
+  @return Message array of this update
   */
-static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
+static rb_message_array_t *process_monitor_value_v_print(
+					const rb_monitor_t *monitor,
 					const rb_sensor_t *sensor,
-					struct monitor_value *new_mv,
-					struct monitor_value *old_mv) {
+					const struct monitor_value *new_mv,
+					const struct monitor_value *old_mv) {
 	assert(new_mv->type == MONITOR_VALUE_T__ARRAY);
 	assert(old_mv->type == MONITOR_VALUE_T__ARRAY);
 
@@ -123,37 +120,65 @@ static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
 		},
 	};
 
-	rb_message_array_t *ret = print_monitor_value(&to_print, monitor,
-									sensor);
-	SWAP(void *,old_mv->array.children, new_mv->array.children);
+	return print_monitor_value(&to_print, monitor, sensor);
+}
+
+/// Swap two pointers
+#define SWAP(a, b) do { typeof(a) tmp = a; a = b; b = tmp; } while (0)
+
+/** Print all elements of new array that have changed
+  @param monitor Monitor of monitors values
+  @param sensor Sensor of monitor
+  @param new_mv New monitor value
+  @param old_mv Previous monitor value we had
+  @return Monitor messages to send
+  */
+static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
+					const rb_sensor_t *sensor,
+					struct monitor_value *new_mv,
+					struct monitor_value *old_mv) {
+	rb_message_array_t *ret = NULL;
+
+	assert(new_mv->type == MONITOR_VALUE_T__ARRAY);
+	assert(old_mv->type == MONITOR_VALUE_T__ARRAY);
+
+	if (rb_monitor_send(monitor)) {
+		ret = process_monitor_value_v_print(monitor, sensor, new_mv,
+									old_mv);
+	}
+
+	SWAP(old_mv->array.children_count, new_mv->array.children_count);
+	SWAP(old_mv->array.children, new_mv->array.children);
 	rb_monitor_value_done(new_mv);
 	return ret;
 }
 
-static void process_monitor_value(const rb_monitor_t *monitor,
+/** Process a monitor value
+  @param monitor Monitor this monitor value is related
+  @param sensor  Sensor of the monitor
+  @param monitor_value New monitor value to process
+  @param old_mv Last known monitor value
+  @param ret Message list to report
+  @return New monitor value we should save
+  */
+static struct monitor_value *process_monitor_value(const rb_monitor_t *monitor,
 				struct rb_sensor_s *sensor,
 				struct monitor_value *monitor_value,
+				struct monitor_value *old_mv,
 				rb_message_list *ret) {
 	assert(monitor_value);
 
 	rb_message_array_t* msgs = NULL;
-	struct monitor_values_tree *mv_tree =
-					rb_sensor_monitor_values_tree(sensor);
+	struct monitor_value *ret_mv = old_mv;
 
-	struct monitor_value *old_mv = find_monitor_value(mv_tree,
-		rb_monitor_name(monitor), rb_monitor_group_id(monitor));
+	const bool update_value = NULL == old_mv
+				|| !rb_monitor_timestamp_provided(monitor)
+				|| (monitor_value->type
+						== MONITOR_VALUE_T__VALUE &&
+					rb_monitor_value_cmp_timestamp(old_mv,
+							monitor_value) < 0);
 
-	const bool updated_value = NULL == old_mv ||
-		(monitor_value->type == MONITOR_VALUE_T__VALUE &&
-			rb_monitor_timestamp_provided(monitor) &&
-			rb_monitor_value_cmp_timestamp(old_mv,
-							monitor_value) < 0) ||
-		(monitor_value->type == MONITOR_VALUE_T__ARRAY &&
-			!rb_monitor_timestamp_provided(monitor));
-
-	if (updated_value) {
-		add_monitor_value(mv_tree, monitor_value);
-
+	if (update_value) {
 		if(rb_monitor_send(monitor)) {
 			msgs = print_monitor_value(monitor_value, monitor,
 									sensor);
@@ -162,6 +187,7 @@ static void process_monitor_value(const rb_monitor_t *monitor,
 		if (old_mv) {
 			rb_monitor_value_done(old_mv);
 		}
+		ret_mv = monitor_value;
 	} else if (monitor_value->type == MONITOR_VALUE_T__ARRAY) {
 		msgs = process_monitor_value_v(monitor, sensor, monitor_value,
 									old_mv);
@@ -173,10 +199,14 @@ static void process_monitor_value(const rb_monitor_t *monitor,
 	if (msgs) {
 		rb_message_list_push(ret, msgs);
 	}
+
+	return ret_mv;
 }
 
 bool process_monitors_array(struct _worker_info *worker_info,
 			rb_sensor_t *sensor, rb_monitors_array_t *monitors,
+			rb_monitor_value_array_t *last_known_monitor_values,
+			ssize_t **monitors_deps,
 			struct snmp_params_s *snmp_params,
 			rb_message_list *ret) {
 	bool aok = true;
@@ -218,12 +248,36 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	}
 
 	for (size_t i=0; aok && i<monitors->count; ++i) {
+		rb_monitor_value_array_t *op_vars =
+			rb_monitor_value_array_select(last_known_monitor_values,
+					monitors_deps[i]);
+
 		const rb_monitor_t *monitor = rb_monitors_array_elm_at(monitors,
 									i);
 		struct monitor_value *value = process_sensor_monitor(
-					process_ctx, monitor, sensor);
+					process_ctx, monitor, op_vars);
 		if (value) {
-			process_monitor_value(monitor, sensor, value, ret);
+			struct monitor_value *last_known_monitor_value_i =
+					last_known_monitor_values->elms[i];
+
+			last_known_monitor_values->elms[i] =
+				process_monitor_value(monitor, sensor, value,
+					last_known_monitor_value_i, ret);
+		}
+
+		rb_monitor_value_array_done(op_vars);
+	}
+
+	for (size_t i=0; aok && i<monitors->count; ++i) {
+		/* We don't need monitors with no timestamp information in it,
+		so we delete them */
+		const rb_monitor_t *monitor = rb_monitors_array_elm_at(monitors,
+									i);
+		if (last_known_monitor_values->elms[i] &&
+				!rb_monitor_timestamp_provided(monitor)) {
+			rb_monitor_value_done(
+					last_known_monitor_values->elms[i]);
+			last_known_monitor_values->elms[i] = NULL;
 		}
 	}
 
@@ -236,6 +290,94 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	}
 
 	return aok;
+}
+
+/** Get a monitor position
+  @param monitors_array Array of monitors
+  @param name Name of monitor to find
+  @param group_id Group ip of monitor
+  @return position of the monitor, or -1 if it couldn't be found
+  */
+static ssize_t find_monitor_pos(const rb_monitors_array_t *monitors_array,
+				const char *name, const char *group_id) {
+	for (size_t i=0; i<monitors_array->count; ++i) {
+		const char *i_name = rb_monitor_name(monitors_array->elms[i]);
+		const char *i_gid =
+				rb_monitor_group_id(monitors_array->elms[i]);
+		if (0 == strcmp(name, i_name) &&
+					((!i_gid && !group_id)
+					|| 0 == strcmp(group_id, i_gid))) {
+			return (ssize_t)i;
+		}
+	}
+
+	return -1;
+}
+
+/** Retuns a -1 terminated array with monitor operations variables position
+  @param monitors_array Array of monitors
+  @param monitor Monitor to search for
+  @return requested array
+  */
+static ssize_t *get_monitor_dependencies(
+				const rb_monitors_array_t *monitors_array,
+				const rb_monitor_t *monitor) {
+	ssize_t *ret = NULL;
+	char **vars;
+	size_t vars_len;
+
+	rb_monitor_get_op_variables(monitor, &vars, &vars_len);
+
+	if (vars_len > 0) {
+		ret = calloc(vars_len + 1, sizeof(ret[0]));
+		if (NULL == ret) {
+			rdlog(LOG_ERR, "Couldn't allocate dependencies array "
+								"(OOM?)");
+			goto err;
+		}
+
+		for (size_t i=0; i<vars_len; ++i) {
+			ret[i] = find_monitor_pos(monitors_array, vars[i],
+						rb_monitor_group_id(monitor));
+			if (-1 == ret[i]) {
+				rdlog(LOG_ERR, "Couldn't find variable [%s] in"
+					"operation [%s]. Discarding",
+					vars[i],
+					rb_monitor_get_cmd_data(monitor));
+				free(ret);
+				ret = NULL;
+				goto err;
+			}
+		}
+
+		ret[vars_len] = -1;
+	}
+
+err:
+	rb_monitor_free_op_variables(vars, vars_len);
+	return ret;
+}
+
+ssize_t **get_monitors_dependencies(const rb_monitors_array_t *monitors_array) {
+	ssize_t **ret = calloc(monitors_array->count, sizeof(ret[0]));
+	if (NULL == ret) {
+		rdlog(LOG_ERR, "Couldn't allocate monitor dependences!");
+		return NULL;
+	}
+
+	for (size_t i=0; i<monitors_array->count; ++i) {
+		const rb_monitor_t *i_monitor = monitors_array->elms[i];
+		ret[i] = get_monitor_dependencies(monitors_array, i_monitor);
+	}
+
+	return ret;
+}
+
+void free_monitors_dependencies(ssize_t **deps, size_t count) {
+	for (size_t i=0; i<count; ++i) {
+		free(deps[i]);
+	}
+	free(deps);
 }
 
 void rb_monitors_array_done(rb_monitors_array_t *monitors_array) {

@@ -32,7 +32,6 @@ struct libmatheval_vars *new_libmatheval_vars(size_t new_size) {
 	if (NULL == this) {
 		rdlog(LOG_ERR, "Cannot allocate memory. Exiting.");
 	} else {
-		this->count = new_size;
 		this->names = (void *)&this[1];
 		this->values = (void *)&this->names[new_size];
 	}

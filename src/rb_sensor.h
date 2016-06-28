@@ -96,8 +96,6 @@ struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor);
   */
 void rb_sensor_get(rb_sensor_t *sensor);
 
-struct monitor_values_tree *rb_sensor_monitor_values_tree(rb_sensor_t *sensor);
-
 /** Decrease the sensor reference counter.
   @param sensor Sensor
   */

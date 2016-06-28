@@ -22,24 +22,47 @@
 
 #include "json_test.h"
 
+/** Checks to pass a sensor n times
+  @param cjson_sensor Sensor in json text format
+  @param checks Checks to pass every time a sensor is processed
+  @param n Number of checks (and times to pass)
+  */
+void test_sensor_n(const char *cjson_sensor, check_list_t *checks, size_t n);
 
-void test_sensor(const char *cjson_sensor, check_list_t *checks);
+/** Convenience function to pass checks over one sensor */
+static void test_sensor(const char *cjson_sensor, check_list_t *checks)
+							__attribute__((unused));
+static void test_sensor(const char *cjson_sensor, check_list_t *checks) {
+	test_sensor_n(cjson_sensor, checks, 1);
+}
 
 /** Basic sensor test
   @param prepare_checks_cb Construct checks using provided callback
   @param sensor JSON describing sensor under test
   */
 static void basic_test_checks_cb(
-		void (*prepare_checks_cb)(check_list_t *checks),
-		const char *sensor) __attribute__((unused));
+		void (*prepare_checks_cb[])(check_list_t *checks),
+		size_t checks_size, const char *sensor) __attribute__((unused));
 static void basic_test_checks_cb(
-		void (*prepare_checks_cb)(check_list_t *checks),
-		const char *sensor) {
-	check_list_t checks = TAILQ_HEAD_INITIALIZER(checks);
-	prepare_checks_cb(&checks);
-	test_sensor(sensor, &checks);
+		void (*prepare_checks_cb[])(check_list_t *checks),
+		size_t checks_size, const char *sensor) {
+	check_list_t checks[checks_size];
+	for (size_t i=0; i<checks_size; ++i) {
+		TAILQ_INIT(&checks[i]);
+		prepare_checks_cb[i](&checks[i]);
+	}
+	test_sensor_n(sensor, checks, checks_size);
+}
+
+/// Convenience macro to create tests functions
+#define TEST_FN_N(fn_name, prepare_checks_cb_v, n, json_sensor) \
+static void fn_name() { \
+	basic_test_checks_cb(prepare_checks_cb_v, n, json_sensor); \
 }
 
 /// Convenience macro to create tests functions
 #define TEST_FN(fn_name, prepare_checks_cb, json_sensor) \
-static void fn_name() {basic_test_checks_cb(prepare_checks_cb, json_sensor);}
+static void fn_name() { \
+	typeof(prepare_checks_cb) *cb = &prepare_checks_cb; \
+	basic_test_checks_cb(&cb, 1, json_sensor); \
+}

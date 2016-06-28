@@ -11,6 +11,10 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
+#define LOAD_5_OP "[[ -f $PPID.pid ]] && " \
+	"(echo '10:20;60:40'; rm $PPID.pid;) || " \
+	"(echo '10:20;30:40'; touch $PPID.pid;)"
+
 /** Sensor with timestamp given in response */
 static const char split_op_timestamp[] =  "{"
 	"\"sensor_id\":1,"
@@ -26,7 +30,7 @@ static const char split_op_timestamp[] =  "{"
 				"\"instance_prefix\":\"load-\",\"send\":0,"
 				"\"unit\": \"%\","
 				"\"timestamp_given\":1},"
-		"{\"name\": \"load_5\", \"system\": \"echo '10:20;30:40'\","
+		"{\"name\": \"load_5\", \"system\": \"" LOAD_5_OP "\","
 				"\"name_split_suffix\":\"_per_instance\","
 				"\"split\":\";\",\"split_op\":\"mean\","
 				"\"instance_prefix\":\"load5-\","
@@ -36,19 +40,7 @@ static const char split_op_timestamp[] =  "{"
 				"\"name_split_suffix\":\"_per_instance\","
 				"\"split\":\";\",\"split_op\":\"mean\","
 				"\"instance_prefix\":\"load-instance-\","
-				"\"unit\": \"%\","
-				"\"timestamp_given\":1},"
-
-		/* Simulate that only one field of load_5 has changed, so we
-		should not send the value that has changed.
-		@todo simulate better this, using twice the same sensor, for
-		example*/
-		"{\"name\": \"load_5\", \"system\": \"echo '10:20;60:40'\","
-				"\"name_split_suffix\":\"_per_instance\","
-				"\"split\":\";\",\"split_op\":\"mean\","
-				"\"instance_prefix\":\"load5-\","
-				"\"unit\": \"%\","
-				"\"timestamp_given\":1},"
+				"\"unit\": \"%\"},"
 	"]"
 	"}";
 
@@ -91,6 +83,23 @@ static const char split_op_timestamp[] =  "{"
 #define TEST1_SPLIT_OP_SIZE \
 		sizeof(TEST1_SPLIT_OP_SAMPLE)/sizeof(TEST1_SPLIT_OP_SAMPLE[0])
 
+static void prepare_op_checks(check_list_t *check_list) {
+	struct json_key_test *checks_v[] = {
+		TEST1_CHECKS0_V_OP("load_1+5_per_instance","22.000000", "op",
+							"load-instance-0"),
+		TEST1_CHECKS0_V_OP("load_1+5_per_instance","44.000000", "op",
+							"load-instance-1"),
+	};
+
+	struct json_key_test *checks_op[] = {
+		TEST1_CHECKS0_SPLIT_OP("load_1+5", "33.000000", "op")
+	};
+
+	check_list_push_checks(check_list, checks_v, RD_ARRAYSIZE(checks_v),
+							TEST1_V_OP_SIZE);
+	check_list_push_checks(check_list, checks_op, 1, TEST1_SPLIT_OP_SIZE);
+}
+
 static void prepare_split_op_timestamp(check_list_t *check_list) {
 	struct json_key_test *checks_v5[] = {
 		TEST1_CHECKS0_SYSTEM(10, "load_5_per_instance","20.000000",
@@ -103,17 +112,14 @@ static void prepare_split_op_timestamp(check_list_t *check_list) {
 		TEST1_CHECKS0_SPLIT_OP("load_5", "30.000000", "system")
 	};
 
-	struct json_key_test *checks_v[] = {
-		TEST1_CHECKS0_V_OP("load_1+5_per_instance","22.000000", "op",
-							"load-instance-0"),
-		TEST1_CHECKS0_V_OP("load_1+5_per_instance","44.000000", "op",
-							"load-instance-1"),
-	};
+	check_list_push_checks(check_list, checks_v5, RD_ARRAYSIZE(checks_v5),
+							TEST1_V_SIZE);
+	check_list_push_checks(check_list, checks_op5, 1, TEST1_SPLIT_OP_SIZE);
 
-	struct json_key_test *checks_op[] = {
-		TEST1_CHECKS0_SPLIT_OP("load_1+5", "33.000000", "op")
-	};
+	prepare_op_checks(check_list);
+}
 
+static void prepare_split_op_timestamp_2(check_list_t *check_list) {
 	struct json_key_test *checks_v5_after_ts_change[] = {
 		/*
 		Only one!
@@ -128,23 +134,22 @@ static void prepare_split_op_timestamp(check_list_t *check_list) {
 		TEST1_CHECKS0_SPLIT_OP("load_5", "30.000000", "system")
 	};
 
-	check_list_push_checks(check_list, checks_v5, RD_ARRAYSIZE(checks_v5),
-							TEST1_V_SIZE);
-	check_list_push_checks(check_list, checks_op5, 1, TEST1_SPLIT_OP_SIZE);
-
-	check_list_push_checks(check_list, checks_v, RD_ARRAYSIZE(checks_v),
-							TEST1_SPLIT_OP_SIZE);
-	check_list_push_checks(check_list, checks_op, 1, TEST1_SPLIT_OP_SIZE);
-
 	/* After timestamp change */
 	check_list_push_checks(check_list, checks_v5_after_ts_change,
 		RD_ARRAYSIZE(checks_v5_after_ts_change), TEST1_V_SIZE);
 	check_list_push_checks(check_list, checks_op5_after_ts_change,
 							1, TEST1_SPLIT_OP_SIZE);
+
+	prepare_op_checks(check_list);
 }
 
-/** Test ops with no data */
-TEST_FN(test_split_op_timestamp, prepare_split_op_timestamp, split_op_timestamp)
+void (*prepare_cb[])(check_list_t *) = {
+	prepare_split_op_timestamp,
+	prepare_split_op_timestamp_2,
+};
+
+TEST_FN_N(test_split_op_timestamp, prepare_cb, RD_ARRAYSIZE(prepare_cb),
+							split_op_timestamp);
 
 int main(void) {
 	const struct CMUnitTest tests[] = {
