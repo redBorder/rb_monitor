@@ -23,7 +23,6 @@
 #include "rb_json.h"
 
 #include "rb_sensor_monitor_array.h"
-#include "rb_values_list.h"
 
 #include <librd/rd.h>
 #include <librd/rdlog.h>
@@ -46,7 +45,8 @@ struct rb_sensor_s {
 
 	sensor_data_t data;              ///< Data of sensor
 	rb_monitors_array_t *monitors;   ///< Monitors to ask for
-	struct monitor_values_tree *mv_tree; ///< @todo delete me
+	rb_monitor_value_array_t *last_vals; ///< Last values
+	ssize_t **op_vars; ///< Operation variables that needs each monitor
 	int refcnt;                      ///< Reference counting
 };
 
@@ -66,10 +66,6 @@ uint64_t rb_sensor_id(const rb_sensor_t *sensor) {
 
 struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor) {
 	return sensor->data.enrichment;
-}
-
-struct monitor_values_tree *rb_sensor_monitor_values_tree(rb_sensor_t *sensor) {
-	return sensor->mv_tree;
 }
 
 /** Checks if a property is set. If not, it will show error message and will
@@ -128,7 +124,14 @@ static bool sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 	}
 
 	sensor->monitors = parse_rb_monitors(sensor_monitors);
-	return NULL != sensor->monitors;
+	if (NULL != sensor->monitors) {
+		const size_t monitors_count = sensor->monitors->count;
+		sensor->op_vars = get_monitors_dependencies(sensor->monitors);
+		sensor->last_vals = rb_monitor_value_array_new(monitors_count);
+		sensor->last_vals->count = monitors_count;
+		/// @todo error checking
+	}
+	return NULL != sensor->monitors && NULL != sensor->last_vals;
 }
 
 /** Checks if a sensor is OK
@@ -179,8 +182,6 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
 	rb_sensor_t *ret = calloc(1,sizeof(*ret));
 
 	if (ret) {
-		ret->mv_tree = new_monitor_values_tree();
-
 		sensor_set_defaults(worker_info, ret);
 		const bool sensor_ok = sensor_common_attrs(ret, sensor_info);
 		if (!sensor_ok) {
@@ -198,10 +199,11 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
   @param ret Messages returned
   @return true if OK, false in other case
   */
-bool process_rb_sensor(struct _worker_info * worker_info, rb_sensor_t *sensor,
+bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
 							rb_message_list *ret) {
 	return process_monitors_array(worker_info, sensor, sensor->monitors,
-						&sensor->data.snmp_params, ret);
+		sensor->last_vals, sensor->op_vars, &sensor->data.snmp_params,
+		ret);
 }
 
 /// @todo find a better way
@@ -218,7 +220,14 @@ static void sensor_done(rb_sensor_t *sensor) {
 	free_const_str(sensor->data.snmp_params.peername);
 	free_const_str(sensor->data.sensor_name);
 	free_const_str(sensor->data.snmp_params.session.community);
+	free_monitors_dependencies(sensor->op_vars, sensor->monitors->count);
 	rb_monitors_array_done(sensor->monitors);
+	for (size_t i=0; i<sensor->last_vals->count; ++i) {
+		if (sensor->last_vals->elms[i]) {
+			rb_monitor_value_done(sensor->last_vals->elms[i]);
+		}
+	}
+	rb_monitor_value_array_done(sensor->last_vals);
 	free(sensor);
 }
 

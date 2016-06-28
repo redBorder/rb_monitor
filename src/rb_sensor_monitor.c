@@ -23,7 +23,6 @@
 #include "rb_snmp.h"
 #include "rb_system.h"
 #include "rb_libmatheval.h"
-#include "rb_values_list.h"
 
 #include "rb_json.h"
 
@@ -130,6 +129,47 @@ bool rb_monitor_send(const rb_monitor_t *monitor) {
 	return monitor->send;
 }
 
+const char *rb_monitor_get_cmd_data(const rb_monitor_t *monitor) {
+	return monitor->argument;
+}
+
+void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
+							size_t *vars_size) {
+	struct {
+		char **vars;
+		int count;
+	} all_vars;
+
+	void *const evaluator = evaluator_create((char *)monitor->cmd_arg);
+	if (NULL == evaluator) {
+		*vars = NULL;
+		*vars_size = 0;
+		return;
+	}
+
+	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
+	(*vars) = malloc(all_vars.count*sizeof((*vars)[0]));
+	for (int i=0; vars && i<all_vars.count; ++i) {
+		(*vars)[i] = strdup(all_vars.vars[i]);
+		if (NULL == (*vars)[i]) {
+			rdlog(LOG_ERR, "Couldn't strdup (OOM?)");
+			rb_monitor_free_op_variables(*vars, i);
+			*vars = NULL;
+			*vars_size = 0;
+			return;
+		}
+	}
+	*vars_size = all_vars.count;
+	evaluator_destroy(evaluator);
+}
+
+void rb_monitor_free_op_variables(char **vars, size_t vars_size) {
+	for (size_t i=0; i<vars_size; ++i) {
+		free(vars[i]);
+	}
+	free(vars);
+}
+
 /** Free a const string.
   @todo remove this, is ugly
   */
@@ -217,16 +257,26 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 							"name", NULL);
 	char *aux_split_op = PARSE_CJSON_CHILD_STR(json_monitor,
 							"split_op", NULL);
+
+	int aux_timestamp_given = PARSE_CJSON_CHILD_INT64(json_monitor,
+							"timestamp_given", 0);
+
 	if (NULL == aux_name) {
 		rdlog(LOG_ERR, "Monitor with no name");
 		return NULL;
 	}
 
 	if (aux_split_op && !valid_split_op(aux_split_op)) {
-		rdlog(LOG_ERR, "Invalid split op %s of monitor %s",
+		rdlog(LOG_WARNING, "Invalid split op %s of monitor %s",
 			aux_split_op, aux_name);
 		free(aux_split_op);
 		aux_split_op = NULL;
+	}
+
+	if (type == RB_MONITOR_T__OP && aux_timestamp_given) {
+		rdlog(LOG_WARNING, "Can't provide timestamp in op monitor (%s)",
+			aux_name);
+		aux_timestamp_given = 0;
 	}
 
 	/// tmp monitor to locate all string parameters
@@ -252,8 +302,7 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 							"group_name", NULL);
 	ret->group_id = PARSE_CJSON_CHILD_STR(json_monitor, "group_id", NULL);
 	ret->nonzero = PARSE_CJSON_CHILD_INT64(json_monitor, "nonzero", 0);
-	ret->timestamp_given = PARSE_CJSON_CHILD_INT64(json_monitor,
-							"timestamp_given", 0);
+	ret->timestamp_given = aux_timestamp_given;
 	ret->send = PARSE_CJSON_CHILD_INT64(json_monitor, "send", 1);
 	ret->integer = PARSE_CJSON_CHILD_INT64(json_monitor, "integer", 0);
 	ret->type = type;
@@ -340,7 +389,7 @@ static struct monitor_value *process_vector_monitor(
   */
 static struct monitor_value *rb_monitor_get_external_value(
 		struct process_sensor_monitor_ctx *process_ctx,
-		const rb_monitor_t *monitor, const rb_sensor_t *sensor,
+		const rb_monitor_t *monitor,
 		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
 						void *ctx, const char *arg),
 		void *get_value_cb_ctx) {
@@ -394,9 +443,10 @@ static struct monitor_value *rb_monitor_get_external_value(
 
 /** Convenience function to obtain system values */
 static struct monitor_value *rb_monitor_get_system_external_value(
-			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(process_ctx, monitor, sensor,
+				const rb_monitor_t *monitor,
+				struct process_sensor_monitor_ctx *process_ctx,
+				rb_monitor_value_array_t *ops_vars) {
+	return rb_monitor_get_external_value(process_ctx, monitor,
 						system_solve_response, NULL);
 }
 
@@ -409,9 +459,10 @@ static bool snmp_solve_response0(char *value_buf, size_t value_buf_len,
 
 /** Convenience function to obtain SNMP values */
 static struct monitor_value *rb_monitor_get_snmp_external_value(
-			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			struct process_sensor_monitor_ctx *process_ctx) {
-	return rb_monitor_get_external_value(process_ctx, monitor, sensor,
+				const rb_monitor_t *monitor,
+				struct process_sensor_monitor_ctx *process_ctx,
+				rb_monitor_value_array_t *op_vars) {
+	return rb_monitor_get_external_value(process_ctx, monitor,
 				snmp_solve_response0, process_ctx->snmp_sessp);
 }
 
@@ -434,82 +485,6 @@ static const char *strmstr(const char *haystack, const char **needles,
 	}
 
 	return ret;
-}
-
-/** Extract needed variables from a math operation
-  @param evaluator libmatheval evaluator
-  @param sensor Sensor this variable belong
-  @param monitor Monitor this variable belongs
-  @param vars Where to store variables
-  @param vectors_len Length of the vectors
-  @todo make sensor const, and return variables const too
-  @return Number of vectors found, -1 if failed
-  */
-static rb_monitor_value_array_t *rb_monitor_get_op_variables(void *evaluator,
-		const rb_sensor_t *csensor, const rb_monitor_t *monitor) {
-	rb_sensor_t *sensor = (rb_sensor_t *)csensor;
-	struct {
-		char **vars;
-		int count;
-	} all_vars;
-
-	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
-	rb_monitor_value_array_t *ret =
-				rb_monitor_value_array_new(all_vars.count);
-	struct monitor_values_tree *mv_tree
-					= rb_sensor_monitor_values_tree(sensor);
-	const char *monitor_group_id = rb_monitor_group_id(monitor);
-	for (int i=0; i<all_vars.count; ++i) {
-		struct monitor_value *mv = find_monitor_value(mv_tree,
-					all_vars.vars[i], monitor_group_id);
-		if (!mv) {
-			rdlog(LOG_ERR,
-				"Invalid operation [%s], couldn't find [%s]",
-				evaluator_get_string(evaluator),
-				all_vars.vars[i]);
-			goto err;
-		} else {
-			rb_monitor_value_array_add(ret, mv);
-		}
-	}
-
-	if (ret->count == 0) {
-		goto zero_vars;
-	}
-
-	/// @todo this could be checked at parse time with splittok
-	// Check that all other elements are a raw value
-	const struct monitor_value *mv_0 = rb_monitor_value_array_at(ret, 0);
-	for (size_t i=1; i<ret->count; ++i) {
-		const struct monitor_value *mv_i = rb_monitor_value_array_at(
-									ret, i);
-		if (mv_i->type != mv_0->type) {
-			rdlog(LOG_ERR, "Invalid type operation: [%s] is %s, "
-				"[%s] is not", mv_0->name,
-				mv_0->type == MONITOR_VALUE_T__ARRAY ?
-					"array" : "value", mv_i->name);
-			goto err;
-		}
-
-		if (MONITOR_VALUE_T__ARRAY == mv_0->type
-				&& (mv_i->array.children_count
-					!= mv_0->array.children_count)) {
-			rdlog(LOG_ERR,
-				"Invalid operation [%s]: array length mismatch."
-				" (%s:%zu,%s:%zu)",
-				evaluator_get_string(evaluator),
-				mv_0->name, mv_0->array.children_count,
-				mv_i->name, mv_i->array.children_count);
-			goto err;
-		}
-	}
-
-	return ret;
-
-zero_vars:
-err:
-	rb_monitor_value_array_done(ret);
-	return rb_monitor_value_array_new(0);
 }
 
 /** Checks if an operation contains a previously marked bad value
@@ -537,6 +512,8 @@ static struct libmatheval_vars *op_libmatheval_vars(
 					rb_monitor_value_array_t *op_vars) {
 	struct libmatheval_vars *libmatheval_vars = new_libmatheval_vars(
 								op_vars->count);
+	size_t expected_v_elms = 0;
+	unsigned int expected_mv_type = 0;
 	if (NULL == libmatheval_vars) {
 		/// @todo error treatment
 		return NULL;
@@ -545,10 +522,39 @@ static struct libmatheval_vars *op_libmatheval_vars(
 	for (size_t i=0; i<op_vars->count; ++i) {
 		struct monitor_value *mv = rb_monitor_value_array_at(op_vars,
 									i);
-		libmatheval_vars->names[i] = (char *)mv->name;
+
+		if (mv) {
+			libmatheval_vars->names[i] = (char *)mv->name;
+
+			if (0==libmatheval_vars->count) {
+				expected_mv_type = mv->type;
+				if (MONITOR_VALUE_T__ARRAY == mv->type) {
+					expected_v_elms =
+						mv->array.children_count;
+				}
+			} else if (expected_mv_type != mv->type) {
+				rdlog(LOG_ERR,
+					"trying to operate with vector and array");
+				goto err;
+			} else if (mv->type == MONITOR_VALUE_T__ARRAY
+					&& mv->array.children_count
+							!= expected_v_elms) {
+				rdlog(LOG_ERR,
+					"trying to operate on vectors of different size:"
+					"[(previous size):%zu] != [%s:%zu]",
+					expected_v_elms, mv->name,
+					mv->array.children_count);
+				goto err;
+			}
+
+			libmatheval_vars->count++;
+		}
 	}
 
 	return libmatheval_vars;
+err:
+	delete_libmatheval_vars(libmatheval_vars);
+	return NULL;
 }
 
 /** Do a monitor operation
@@ -713,13 +719,22 @@ static struct monitor_value *rb_monitor_op_vector(void *f,
   @return New monitor value with operation result
   */
 static struct monitor_value *rb_monitor_get_op_result(
-			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			struct process_sensor_monitor_ctx *process_ctx) {
+			const rb_monitor_t *monitor,
+			struct process_sensor_monitor_ctx *process_ctx,
+			rb_monitor_value_array_t *op_vars) {
+	struct monitor_value *ret = NULL;
 	const char *operation = monitor->cmd_arg;
 
 	if (operation_bad_values(operation, process_ctx->bad_names.names,
 						process_ctx->bad_names.pos)) {
 		/* @TODO memory management */
+		return NULL;
+	}
+
+	/// @todo error treatment in this cases
+	if (NULL == op_vars) {
+		return NULL;
+	} else if (0 == op_vars->count) {
 		return NULL;
 	}
 
@@ -729,44 +744,48 @@ static struct monitor_value *rb_monitor_get_op_result(
 			operation);
 		return NULL;
 	}
-	rb_monitor_value_array_t *op_vars = rb_monitor_get_op_variables(f,
-							sensor, monitor);
-
-	/// @todo error treatment in this cases
-	if (NULL == op_vars) {
-		return NULL;
-	} else if (0 == op_vars->count) {
-		return NULL;
-	}
 
 	const time_t now = time(NULL);
 	struct libmatheval_vars *libmatheval_vars = op_libmatheval_vars(
 								op_vars);
+	if (NULL == libmatheval_vars) {
+		goto libmatheval_error;
+	}
 
 	const struct monitor_value *mv_0 = rb_monitor_value_array_at(op_vars,
 									0);
-	switch(mv_0->type) {
-	case MONITOR_VALUE_T__ARRAY:
-		return rb_monitor_op_vector(f, op_vars, libmatheval_vars,
-								monitor, now);
-	case MONITOR_VALUE_T__VALUE:
-		return rb_monitor_op_value(f, op_vars, libmatheval_vars,
-								monitor, now);
-	default:
-		/// @todo error treatment
-		rdlog(LOG_CRIT, "Unknown operation monitor type!");
-		return NULL;
-	};
+	if (mv_0) {
+		switch(mv_0->type) {
+		case MONITOR_VALUE_T__ARRAY:
+			ret = rb_monitor_op_vector(f, op_vars,
+						libmatheval_vars, monitor, now);
+			break;
+		case MONITOR_VALUE_T__VALUE:
+			ret = rb_monitor_op_value(f, op_vars,
+						libmatheval_vars, monitor, now);
+			break;
+		default:
+			/// @todo error treatment
+			rdlog(LOG_CRIT, "Unknown operation monitor type!");
+			ret = NULL;
+			break;
+		};
+	}
+
+	delete_libmatheval_vars(libmatheval_vars);
+libmatheval_error:
+	evaluator_destroy(f);
+	return ret;
 }
 
 struct monitor_value *process_sensor_monitor(
 				struct process_sensor_monitor_ctx *process_ctx,
 				const rb_monitor_t *monitor,
-				rb_sensor_t *sensor) {
+				rb_monitor_value_array_t *op_vars) {
 	switch (monitor->type) {
 #define _X(menum,cmd,type,fn)                                                  \
 	case menum:                                                            \
-		return fn(monitor, sensor, process_ctx);                       \
+		return fn(monitor, process_ctx, op_vars);                      \
 		break;                                                         \
 
 	MONITOR_CMDS_X
