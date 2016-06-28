@@ -24,7 +24,6 @@
 #include <signal.h>
 #include <pthread.h>
 #include <librd/rdtypes.h>
-#include <librd/rdavl.h>
 #include <librd/rdmem.h>
 
 #include <stdbool.h>
@@ -48,9 +47,6 @@ struct monitor_value {
 		/// This is an array of monitors values
 		MONITOR_VALUE_T__ARRAY,
 	} type;
-
-	rd_avl_node_t avl_node;
-
 
 	/// Monitor name
 	/// @todo delete it
@@ -100,17 +96,27 @@ typedef struct rb_array rb_monitor_value_array_t;
 /** Destroy a sensors array */
 #define rb_monitor_value_array_done(array) rb_array_done(array)
 
-/** Checks if a sensor array is full */
+/** Checks if a monitor value array is full */
 #define rb_monitor_value_array_full(array) rb_array_full(array)
 
-/** Add a sensor to sensors array
+/** Add a monitor value to monitor values array
   @note Wrapper function allows typechecking */
 static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
-					struct monitor_value *sensor) RD_UNUSED;
+					struct monitor_value *mv) RD_UNUSED;
 static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
-					struct monitor_value *sensor) {
-	rb_array_add(array, sensor);
+					struct monitor_value *mv) {
+	rb_array_add(array, mv);
 }
+
+/** Select individual positions of original array
+  @param array Original array
+  @param pos list of positions (-1 terminated)
+  @return New monitor array, that needs to be free with
+        rb_monitor_value_array_done
+  @note Monitors are from original array, so they should not be touched
+  */
+rb_monitor_value_array_t *rb_monitor_value_array_select(
+		rb_monitor_value_array_t *array, ssize_t *pos);
 
 /** Return monitor value of an array
   @param array Array
@@ -123,7 +129,9 @@ static struct monitor_value *rb_monitor_value_array_at(
 static struct monitor_value *rb_monitor_value_array_at(
 				rb_monitor_value_array_t *array, size_t i) {
 	struct monitor_value *ret = array->elms[i];
-	rb_monitor_value_assert(ret);
+	if (ret) {
+		rb_monitor_value_assert(ret);
+	}
 	return ret;
 }
 

@@ -72,13 +72,13 @@ struct rb_sensor_s;
 /** Process a sensor monitor
   @param process_ctx Process context
   @param monitor Monitor to process
-  @todo sensor should be const
+  @param op_vars Variables that require operations
   @param ret Returned messages
   */
 struct monitor_value *process_sensor_monitor(
-                                struct process_sensor_monitor_ctx *process_ctx,
-                                const rb_monitor_t *monitor,
-                                struct rb_sensor_s *sensor);
+				struct process_sensor_monitor_ctx *process_ctx,
+				const rb_monitor_t *monitor,
+				rb_monitor_value_array_t *op_vars);
 
 /** Gets if monitor expect timestamp
   @param monitor Monitor to get data
@@ -139,3 +139,24 @@ const char *rb_monitor_unit(const rb_monitor_t *monitor);
   @return requested data
   */
 bool rb_monitor_send(const rb_monitor_t *monitor);
+
+/** Gets monitor operation (snmp, system, op...) param
+  @param monitor Monitor to get data
+  @return requested data
+  */
+const char *rb_monitor_get_cmd_data(const rb_monitor_t *monitor);
+
+/** Gets monitor operation needed variables
+  @param monitor Monitor to get data
+  @param vars Char array to store vars
+  @param vars_size length of store vars
+  @return true if success, false in other case
+  */
+void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
+							size_t *vars_size);
+
+/** Free data returned by rb_monitor_op_variables_get
+  @param vars Variables
+  @param vars_size Length of vars
+  */
+void rb_monitor_free_op_variables(char **vars, size_t vars_size);

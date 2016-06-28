@@ -280,6 +280,37 @@ rb_message_array_t *print_monitor_value(
 	return ret;
 }
 
+static ssize_t pos_array_length(ssize_t *pos) {
+	assert(pos);
+	ssize_t i = 0;
+	for (i=0; -1 != pos[i]; ++i);
+	return i;
+}
+
+rb_monitor_value_array_t *rb_monitor_value_array_select(
+				rb_monitor_value_array_t *array, ssize_t *pos) {
+	if (NULL == pos || NULL == array) {
+		return NULL;
+	}
+
+	const size_t ret_size = pos_array_length(pos);
+	rb_monitor_value_array_t *ret = rb_monitor_value_array_new(ret_size);
+	if (NULL == ret) {
+		rdlog(LOG_ERR, "Couldn't allocate select return (OOM?)");
+		return NULL;
+	}
+
+
+	assert(array);
+	assert(pos);
+
+	for (ssize_t i=0; -1 != pos[i]; ++i) {
+		rb_monitor_value_array_add(ret, array->elms[pos[i]]);
+	}
+
+	return ret;
+}
+
 void rb_monitor_value_done(struct monitor_value *mv) {
 	if (MONITOR_VALUE_T__ARRAY == mv->type) {
 		for (size_t i=0; i<mv->array.children_count; ++i) {
