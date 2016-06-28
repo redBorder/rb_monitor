@@ -1,0 +1,31 @@
+{
+   SNMP new session memory leak (Centos 6.5)
+   Memcheck:Leak
+   fun:calloc
+   fun:snmp_sess_add_ex
+   fun:snmp_sess_add
+   fun:snmp_sess_open
+   fun:new_snmp_session
+   ...
+}
+
+{
+   Net-SNMP never-freed
+   Memcheck:Leak
+   ...
+   obj:/usr/lib64/libsnmp.so.20.0.0
+   fun:snmp_sess_init
+   ...
+}
+
+{
+   Libmatheval once memory leak
+   Memcheck:Leak
+   fun:malloc
+   fun:yyalloc
+   fun:yy_create_buffer
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   ...
+}
