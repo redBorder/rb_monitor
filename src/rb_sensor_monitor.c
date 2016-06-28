@@ -140,11 +140,15 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 		int count;
 	} all_vars;
 
+	if (monitor->type != RB_MONITOR_T__OP) {
+		goto no_deps;
+	}
+
 	void *const evaluator = evaluator_create((char *)monitor->cmd_arg);
 	if (NULL == evaluator) {
-		*vars = NULL;
-		*vars_size = 0;
-		return;
+		rdlog(LOG_ERR, "Couldn't create an evaluator from %s",
+			monitor->cmd_arg);
+		goto no_deps;
 	}
 
 	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
@@ -154,13 +158,17 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 		if (NULL == (*vars)[i]) {
 			rdlog(LOG_ERR, "Couldn't strdup (OOM?)");
 			rb_monitor_free_op_variables(*vars, i);
-			*vars = NULL;
-			*vars_size = 0;
-			return;
+			evaluator_destroy(evaluator);
+			goto no_deps;
 		}
 	}
-	*vars_size = all_vars.count;
 	evaluator_destroy(evaluator);
+	*vars_size = all_vars.count;
+	return;
+
+no_deps:
+	*vars = NULL;
+	*vars_size = 0;
 }
 
 void rb_monitor_free_op_variables(char **vars, size_t vars_size) {
