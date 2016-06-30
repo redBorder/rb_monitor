@@ -220,9 +220,14 @@ static void sensor_done(rb_sensor_t *sensor) {
 	free_const_str(sensor->data.snmp_params.peername);
 	free_const_str(sensor->data.sensor_name);
 	free_const_str(sensor->data.snmp_params.session.community);
-	free_monitors_dependencies(sensor->op_vars, sensor->monitors->count);
-	rb_monitors_array_done(sensor->monitors);
-	for (size_t i=0; i<sensor->last_vals->count; ++i) {
+	if (sensor->op_vars) {
+		free_monitors_dependencies(sensor->op_vars,
+						sensor->monitors->count);
+	}
+	if (sensor->monitors) {
+		rb_monitors_array_done(sensor->monitors);
+	}
+	for (size_t i=0; sensor->last_vals && i<sensor->last_vals->count; ++i) {
 		if (sensor->last_vals->elms[i]) {
 			rb_monitor_value_done(sensor->last_vals->elms[i]);
 		}
