@@ -38,6 +38,26 @@ static const char invalid_monitor[] = "{\n"
 		"{\"name\": \"bad_var_op\", \"op\": \"bad_var+1\","
 					" \"unit\": \"%\", \"send\": 1},\n"
 
+		// Unknown variable
+		"{\"name\": \"unknown_var_op\", \"op\": \"no_var+1\","
+					" \"unit\": \"%\", \"send\": 1},\n"
+
+		// Unknown operation
+		"{\"name\": \"unknown_op\", \"op\": \"no_var\\\\1\","
+					" \"unit\": \"%\", \"send\": 1},\n"
+
+		// Operation with timestamp involved (invalid), split and with
+		// no monitors variables in operation
+		"{\"name\": \"unknown_op\", \"op\": \"1+1\","
+			"\"unit\": \"%\", \"send\": 1,"
+			"\"split\":\";\",\"split_op\":\"sum\","
+			"\"timestamp_given\":1},\n"
+
+		// Can't convert number
+		"{\"name\": \"v1\","
+		"\"system\": \"echo '9e999999999999999999999999999999999999'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\"},\n"
+
 		// operation over two vector of different sizes
 		"{\"name\": \"v1\", \"system\": \"echo '0;1;2;3'\","
 			" \"unit\": \"%\", \"send\": 0, \"split\":\";\"},\n"
