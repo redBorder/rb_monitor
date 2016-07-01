@@ -22,6 +22,10 @@ static const char invalid_monitor[] = "{\n"
 		// Monitor with no name
 		"{\"system\":  \"echo 3\", \"send\": 1},\n"
 
+		// Unknown monitor type (no system, oid, op)
+		"{\"name\": \"unknown_op\","
+					" \"unit\": \"%\", \"send\": 1},\n"
+
 		// Empty returned value
 		"{\"name\": \"null\", \"system\": \"echo -n\","
 					" \"unit\": \"%\", \"send\": 1},\n"
@@ -29,14 +33,6 @@ static const char invalid_monitor[] = "{\n"
 		// Unknown monitor key
 		"{\"name\": \"invalid_key\", \"system\":  \"echo 12\","
 			" \"unit\": \"%\", \"send\": 1, \"invalid_key\":1},\n"
-
-		// Get a bad variable
-		"{\"name\": \"bad_var\", \"system\": \"echo 0\", \"nonzero\":1,"
-					" \"unit\": \"%\", \"send\": 1},\n"
-
-		// Use previous bad variable
-		"{\"name\": \"bad_var_op\", \"op\": \"bad_var+1\","
-					" \"unit\": \"%\", \"send\": 1},\n"
 
 		// Unknown variable
 		"{\"name\": \"unknown_var_op\", \"op\": \"no_var+1\","
