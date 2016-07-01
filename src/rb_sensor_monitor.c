@@ -67,7 +67,6 @@ struct rb_monitor_s {
 	const char *group_id;         ///< Sensor group id
 	const char *group_name;       ///< Sensor group name
 	uint64_t send; ///< Send the monitor to output or not
-	uint64_t nonzero; ///< Monitor value must not be 0
 	uint64_t timestamp_given; ///< Timestamp is given in response
 	uint64_t integer; ///< Response must be an integer
 	const char *splittok; ///< How to split response
@@ -307,7 +306,6 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	ret->group_name = PARSE_CJSON_CHILD_STR(json_monitor,
 							"group_name", NULL);
 	ret->group_id = PARSE_CJSON_CHILD_STR(json_monitor, "group_id", NULL);
-	ret->nonzero = PARSE_CJSON_CHILD_INT64(json_monitor, "nonzero", 0);
 	ret->timestamp_given = aux_timestamp_given;
 	ret->send = PARSE_CJSON_CHILD_INT64(json_monitor, "send", 1);
 	ret->integer = PARSE_CJSON_CHILD_INT64(json_monitor, "integer", 0);
@@ -342,14 +340,6 @@ rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor) {
 /** Context of sensor monitors processing */
 struct process_sensor_monitor_ctx {
 	struct monitor_snmp_session *snmp_sessp; ///< Base SNMP session
-	/// Bad marked variables
-	struct {
-		/// @TODO change by an array/trie/hashtable/something, or
-		/// rb_array
-		const char **names;
-		size_t pos;
-		size_t size;
-	} bad_names;
 };
 
 struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
@@ -359,9 +349,6 @@ struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
 	if (NULL == ret) {
 		rdlog(LOG_ERR, "Couldn't allocate process sensor monitors ctx");
 	} else {
-		ret->bad_names.names = calloc(monitors_count,
-					sizeof(ret->bad_names.names[0]));
-		ret->bad_names.size = monitors_count;
 		ret->snmp_sessp = snmp_sessp;
 	}
 
@@ -370,7 +357,6 @@ struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
 
 void destroy_process_sensor_monitor_ctx(
 				struct process_sensor_monitor_ctx *ctx) {
-	free(ctx->bad_names.names);
 	free(ctx);
 }
 
@@ -428,22 +414,6 @@ static struct monitor_value *rb_monitor_get_external_value(
 								time(NULL));
 	}
 
-	/** @todo move to process_novector_monitor */
-	if(monitor->nonzero && rd_dz(number))
-	{
-		assert(process_ctx->bad_names.pos
-					< process_ctx->bad_names.size);
-		/// @TODO be able to difference between system and oid
-		/// in error message
-		rdlog(LOG_ALERT,
-			"value oid=%s is 0, but nonzero setted. skipping.",
-			monitor->cmd_arg);
-		size_t bad_names_pos = process_ctx->bad_names.pos++;
-		process_ctx->bad_names.names[bad_names_pos++] = monitor->name;
-		rb_monitor_value_done(ret);
-		ret = NULL;
-	}
-
 	return ret;
 }
 
@@ -470,47 +440,6 @@ static struct monitor_value *rb_monitor_get_snmp_external_value(
 				rb_monitor_value_array_t *op_vars) {
 	return rb_monitor_get_external_value(process_ctx, monitor,
 				snmp_solve_response0, process_ctx->snmp_sessp);
-}
-
-/** search if a string contains any of other strings, returning the first
-  coincidence
-  @param haystack String to search into
-  @param needles Strings to search
-  @param needles_size Number of needles. Return what needle found
-  @return Position of the needle in the haystack, or NULL if not found
-*/
-static const char *strmstr(const char *haystack, const char **needles,
-							size_t *needles_size) {
-	const char *ret = NULL;
-
-	for (size_t i=0; NULL == ret && i<*needles_size; ++i) {
-		ret = strstr(needles[i],haystack);
-		if (ret) {
-			*needles_size = i;
-		}
-	}
-
-	return ret;
-}
-
-/** Checks if an operation contains a previously marked bad value
-  @param operation Operation to check
-  @param bad_names Bad names array
-  @param bad_names_size Size of bad_names, and position of the bad name found
-         (if any)
-  @return true if operation has bad values, false if not
-  */
-static bool operation_bad_values(const char *operation, const char **bad_names,
-							size_t bad_names_size) {
-	if (NULL == strmstr(operation, bad_names, &bad_names_size)) {
-		return false;
-	}
-
-	rdlog(LOG_NOTICE,
-		"OP %s Uses a previously bad marked value variable (%s"
-								"). Skipping",
-		operation, bad_names[bad_names_size]);
-	return NULL;
 }
 
 /** Create a libmatheval vars using op_vars */
@@ -581,12 +510,6 @@ static struct monitor_value *rb_monitor_op_value0(void *f,
 
 	rdlog(LOG_DEBUG, "Result of operation [%s]: %lf", monitor->cmd_arg,
 									number);
-
-	if(monitor->nonzero && rd_dz(number) == 0) {
-		rdlog(LOG_ERR, "OP %s return 0, and nonzero setted. Skipping.",
-			operation);
-		return NULL;
-	}
 
 	if(!isnormal(number)) {
 		rdlog(LOG_ERR, "OP %s return a bad value: %lf. Skipping.",
@@ -730,12 +653,6 @@ static struct monitor_value *rb_monitor_get_op_result(
 			rb_monitor_value_array_t *op_vars) {
 	struct monitor_value *ret = NULL;
 	const char *operation = monitor->cmd_arg;
-
-	if (operation_bad_values(operation, process_ctx->bad_names.names,
-						process_ctx->bad_names.pos)) {
-		/* @TODO memory management */
-		return NULL;
-	}
 
 	/// @todo error treatment in this cases
 	if (NULL == op_vars) {
