@@ -206,11 +206,9 @@ void rb_monitor_done(rb_monitor_t *monitor) {
   @return double
   */
 static double toDouble(const char *str) {
-	char * endPtr;
+	char *endPtr;
 	errno=0;
 	double d = strtod(str,&endPtr);
-	if(errno==0 && endPtr==str)
-		errno = EINVAL;
 	return d;
 }
 
@@ -894,9 +892,11 @@ static bool extract_vector_value(const char *vector_values,
 	}
 
 	*value = toDouble(vector_values);
-	if (rd_dz(*value) && errno != 0) {
-		rdlog(LOG_WARNING,"Invalid double: %*.s. Not counting.",
-			(int)(end_token-vector_values), vector_values);
+	if (errno != 0) {
+		char perrbuf[BUFSIZ];
+		const char *errbuf = strerror_r(errno,perrbuf,sizeof(perrbuf));
+		rdlog(LOG_WARNING,"Invalid double: %.*s (%s). Not counting.",
+			(int)(end_token-vector_values), vector_values, errbuf);
 		return false;
 	}
 
