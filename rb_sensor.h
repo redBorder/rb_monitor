@@ -16,7 +16,7 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <json/json.h>
+#include <json-c/json.h>
 
 #define RB_SENSOR_MAGIC 0xB30A1CB30A1CL
 

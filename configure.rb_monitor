@@ -48,7 +48,7 @@ function checks {
          void *f();void *f(){return pthread_mutex_init;}"
 
     mkl_lib_check json HAVE_JSON_C fail CC "-ljson-c" \
-        "#include <json/json.h>"
+        "#include <json-c/json.h>"
 
     # Check that librdkafka is available, and allow to link it statically.
     mkl_meta_set "librdkafka" "desc" "librdkafka is available at http://github.com/edenhill/librdkafka."

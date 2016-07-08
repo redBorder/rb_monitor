@@ -20,7 +20,7 @@
 
 #include <librd/rdlog.h>
 #include <librd/rdmem.h>
-#include <json/printbuf.h>
+#include <json-c/printbuf.h>
 
 /* Copy just the 'useful' data of the node, not list-related */
 void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)

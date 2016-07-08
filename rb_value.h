@@ -26,7 +26,7 @@
 #include <librd/rdmem.h>
 
 #include <stdbool.h>
-#include <json/json.h>
+#include <json-c/json.h>
 
 
 // #define MONITOR_VALUE_MAGIC 0x12345678

@@ -21,7 +21,7 @@
 #include <stdbool.h>
 #include "librd/rdlru.h"
 #include "librd/rdavl.h"
-#include <json/printbuf.h>
+#include <json-c/printbuf.h>
 
 #include "rb_value.h"
 
