@@ -216,8 +216,8 @@ static double toDouble(const char *str) {
   @param monitor Monitor to save command
   @param json_monitor JSON monitor to extract command
   */
-static bool extract_monitor_cmd(enum monitor_cmd_type *type,
-			const char **cmd_arg, struct json_object *json_monitor) {
+static const char *extract_monitor_cmd(enum monitor_cmd_type *type,
+			/* @todo const */ struct json_object *json_monitor) {
 	static const char *cmd_keys[] = {
 #define _X(menum,cmd,type,fn) cmd,
 	MONITOR_CMDS_X
@@ -230,12 +230,11 @@ static bool extract_monitor_cmd(enum monitor_cmd_type *type,
 						cmd_keys[i], &json_cmd_arg);
 		if (get_rc) {
 			*type = i;
-			*cmd_arg = json_object_get_string(json_cmd_arg);
-			return true;
+			return json_object_get_string(json_cmd_arg);
 		}
 	}
 
-	return false;
+	return NULL;
 }
 
 /** Checks if a split operation is valid
@@ -318,15 +317,9 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 
 rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor) {
 	enum monitor_cmd_type cmd_type;
-	const char *cmd_arg = NULL;
-
-	const bool extract_cmd_rc = extract_monitor_cmd(&cmd_type, &cmd_arg,
-								json_monitor);
-	if (!extract_cmd_rc){
+	const char *cmd_arg = extract_monitor_cmd(&cmd_type, json_monitor);
+	if(NULL == cmd_arg) {
 		rdlog(LOG_ERR, "Couldn't extract monitor command");
-		return NULL;
-	} else if(NULL == cmd_arg) {
-		rdlog(LOG_ERR, "Couldn't extract monitor command value");
 		return NULL;
 	} else {
 		rb_monitor_t *ret = parse_rb_monitor0(cmd_type, cmd_arg,
