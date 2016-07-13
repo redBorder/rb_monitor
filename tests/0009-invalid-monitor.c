@@ -26,6 +26,10 @@ static const char invalid_monitor[] = "{\n"
 		"{\"name\": \"unknown_op\","
 					" \"unit\": \"%\", \"send\": 1},\n"
 
+		// Unknown op command
+		"{\"name\": \"unknown_op_arg\",\"system\":null,"
+					" \"unit\": \"%\", \"send\": 1},\n"
+
 		// Empty returned value
 		"{\"name\": \"null\", \"system\": \"echo -n\","
 					" \"unit\": \"%\", \"send\": 1},\n"
