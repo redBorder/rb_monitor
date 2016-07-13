@@ -883,18 +883,11 @@ static struct monitor_value *process_vector_monitor(
 		const double result = (0==strcmp("sum", monitor->splitop)) ?
 			sum : sum/mean_count;
 
-		if (isfinite(result)) {
-			/// @todo check snprint result
-			snprintf(split_op_result, sizeof(split_op_result),
-								"%lf", result);
-			split_op = process_novector_monitor(monitor,
-						split_op_result, result, now);
-		} else if (rd_dz(sum)) {
-			rdlog(LOG_ERR,
-				"%s Gives a non finite value: "
-				"(sum=%lf)/(count=%zu)", monitor->name, sum,
-				mean_count);
-		}
+		/// @todo check snprint result
+		snprintf(split_op_result, sizeof(split_op_result),
+							"%lf", result);
+		split_op = process_novector_monitor(monitor,
+					split_op_result, result, now);
 	}
 
 	return new_monitor_value_array(monitor->name, n_children, children,
