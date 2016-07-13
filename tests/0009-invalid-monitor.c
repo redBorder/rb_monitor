@@ -49,6 +49,24 @@ static const char invalid_monitor[] = "{\n"
 			"\"split\":\";\",\"split_op\":\"sum\","
 			"\"timestamp_given\":1},\n"
 
+		// Operation with timestamp involved (invalid), timestamp
+		// separation with no value
+		"{\"name\": \"invalid_ts1\", \"system\": \"echo '1:'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
+		// Operation with timestamp involved (invalid), timestamp
+		// separator with no timestamp
+		"{\"name\": \"invalid_ts2\", \"system\": \"echo '1:2;7;3:4'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
+		// Operation with timestamp involved (invalid), timestamp
+		// separator at the end of string
+		"{\"name\": \"invalid_ts2\", \"system\": \"echo '1:2;7:4;3'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
 		// Can't convert number
 		"{\"name\": \"v1\","
 		"\"system\": \"echo '9e999999999999999999999999999999999999'\","
