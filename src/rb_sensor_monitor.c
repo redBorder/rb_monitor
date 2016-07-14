@@ -27,6 +27,7 @@
 #include "rb_json.h"
 
 #include <matheval.h>
+#include <math.h>
 #include <librd/rdfloat.h>
 
 static const char DEFAULT_TIMESTAMP_SEP[] = ":";
