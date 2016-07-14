@@ -11,9 +11,10 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
-#define LOAD_5_OP "[[ -f $PPID.pid ]] && " \
-	"(echo '10:20;60:40'; rm $PPID.pid;) || " \
-	"(echo '10:20;30:40'; touch $PPID.pid;)"
+#define LOAD_5_OP                                                              \
+  "test -f $PPID.pid  && "                                                     \
+  "(echo '10:20;60:40'; rm $PPID.pid;) || "                                    \
+  "(echo '10:20;30:40'; touch $PPID.pid;)"
 
 /** Sensor with timestamp given in response */
 static const char split_op_timestamp[] =  "{"
