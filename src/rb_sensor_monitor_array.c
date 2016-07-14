@@ -304,9 +304,11 @@ static ssize_t find_monitor_pos(const rb_monitors_array_t *monitors_array,
 		const char *i_name = rb_monitor_name(monitors_array->elms[i]);
 		const char *i_gid =
 				rb_monitor_group_id(monitors_array->elms[i]);
-		if (0 == strcmp(name, i_name) &&
-					((!i_gid && !group_id)
-					|| 0 == strcmp(group_id, i_gid))) {
+		if (0 == strcmp(name, i_name) && // If equal name
+				((!i_gid && !group_id) // Both no groups
+				// or both have group and same group
+				|| ((i_gid && group_id)
+					&& 0 == strcmp(group_id, i_gid)))) {
 			return (ssize_t)i;
 		}
 	}
