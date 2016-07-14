@@ -38,8 +38,8 @@
 #include <librd/rdfloat.h>
 #include <librd/rdlog.h>
 #include <stdlib.h>
-#include <json/json.h>
-#include <json/printbuf.h>
+#include <json-c/json.h>
+#include <json-c/printbuf.h>
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
