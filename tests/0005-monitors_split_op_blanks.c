@@ -34,6 +34,22 @@ static const char split_op_sensor_blanks[] =  "{"
 				"\"split\":\";\",\"split_op\":\"mean\","
 				"\"instance_prefix\":\"load-instance-\","
 				"\"unit\": \"%\"},"
+
+		"{\"name\": \"v1\", \"system\": \"echo ';12;11;10'\","
+				"\"name_split_suffix\":\"_per_instance\","
+				"\"split\":\";\",\"split_op\":\"sum\","
+				"\"instance_prefix\":\"load-\",\"send\":0,"
+				"\"unit\": \"%\"},"
+		"{\"name\": \"v2\", \"system\": \"echo '14;16;;10'\","
+				"\"name_split_suffix\":\"_per_instance\","
+				"\"split\":\";\",\"split_op\":\"mean\","
+				"\"instance_prefix\":\"load-\",\"send\":0,"
+				"\"unit\": \"%\"},"
+		"{\"name\": \"v1+v2\", \"op\": \"v1+v2\","
+				"\"name_split_suffix\":\"_per_instance\","
+				"\"split\":\";\",\"split_op\":\"mean\","
+				"\"instance_prefix\":\"load-instance-\","
+				"\"unit\": \"%\"},"
 	"]"
 	"}";
 
@@ -77,6 +93,25 @@ static void prepare_split_op_monitor_blanks_checks(check_list_t *check_list) {
 	check_list_push_checks(check_list, checks_v, RD_ARRAYSIZE(checks_v),
 								TEST1_V_SIZE);
 	check_list_push_checks(check_list, checks_op, 1, TEST1_AVG_SIZE);
+
+	struct json_key_test *checks_vars[] = {
+		TEST1_CHECKS0_I("v1+v2_per_instance","14.000000",
+							"load-instance-0"),
+		TEST1_CHECKS0_I("v1+v2_per_instance","28.000000",
+							"load-instance-1"),
+		TEST1_CHECKS0_I("v1+v2_per_instance","11.000000",
+							"load-instance-2"),
+		TEST1_CHECKS0_I("v1+v2_per_instance","20.000000",
+							"load-instance-3")
+	};
+
+	struct json_key_test *checks_vars_op[] = {
+		TEST1_CHECKS0_AVG("v1+v2", "18.250000")
+	};
+
+	check_list_push_checks(check_list, checks_vars, RD_ARRAYSIZE(checks_vars),
+								TEST1_V_SIZE);
+	check_list_push_checks(check_list, checks_vars_op, 1, TEST1_AVG_SIZE);
 }
 
 /** Test with blanks in instances */
