@@ -47,3 +47,71 @@
    fun:sensor_common_attrs
    fun:parse_rb_sensor
 }
+
+{
+   libmatheval internal malloc fail
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   ...
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+   fun:mem_parse_sensor
+   ...
+}
+
+{
+   libmatheval internal malloc fail 1
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   ...
+   fun:evaluator_get_variables
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+   fun:mem_parse_sensor
+   ...
+}
+
+{
+   libmatheval internal malloc fail 2
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   fun:symbol_table_insert
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+}
+
+{
+   libmatheval internal malloc fail 3
+   Memcheck:Leak
+   fun:malloc
+   fun:yyalloc
+   fun:yyensure_buffer_stack
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+}

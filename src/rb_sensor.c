@@ -128,8 +128,12 @@ static bool sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 		const size_t monitors_count = sensor->monitors->count;
 		sensor->op_vars = get_monitors_dependencies(sensor->monitors);
 		sensor->last_vals = rb_monitor_value_array_new(monitors_count);
-		sensor->last_vals->count = monitors_count;
-		/// @todo error checking
+		if (NULL == sensor->last_vals) {
+			rdlog(LOG_CRIT, "Couldn't allocate memory for sensor");
+			return false;
+		} else {
+			sensor->last_vals->count = monitors_count;
+		}
 	}
 	return NULL != sensor->monitors && NULL != sensor->last_vals;
 }

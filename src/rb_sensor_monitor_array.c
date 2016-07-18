@@ -42,7 +42,7 @@ rb_monitors_array_t *parse_rb_monitors(
 							monitors_array_json);
 	rb_monitors_array_t *ret = rb_monitors_array_new(monitors_len);
 
-	for (size_t i=0; i<monitors_len; ++i) {
+	for (size_t i=0; ret && i<monitors_len; ++i) {
 		if (rb_monitors_array_full(ret)) {
 			rdlog(LOG_CRIT,
 				"Sensors array full at %zu, can't add %zu",

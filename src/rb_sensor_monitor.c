@@ -135,6 +135,10 @@ const char *rb_monitor_get_cmd_data(const rb_monitor_t *monitor) {
 
 void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 							size_t *vars_size) {
+	void *evaluator = NULL;
+	(*vars) = NULL;
+	*vars_size = 0;
+
 	struct {
 		char **vars;
 		int count;
@@ -144,7 +148,7 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 		goto no_deps;
 	}
 
-	void *const evaluator = evaluator_create((char *)monitor->cmd_arg);
+	evaluator = evaluator_create((char *)monitor->cmd_arg);
 	if (NULL == evaluator) {
 		rdlog(LOG_ERR, "Couldn't create an evaluator from %s",
 			monitor->cmd_arg);
@@ -153,22 +157,36 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 
 	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
 	(*vars) = malloc(all_vars.count*sizeof((*vars)[0]));
-	for (int i=0; vars && i<all_vars.count; ++i) {
+	if (*vars == NULL) {
+		rdlog(LOG_CRIT, "Couldn't allocate memory");
+		goto no_deps;
+	}
+	for (int i=0; i<all_vars.count; ++i) {
 		(*vars)[i] = strdup(all_vars.vars[i]);
 		if (NULL == (*vars)[i]) {
-			rdlog(LOG_ERR, "Couldn't strdup (OOM?)");
-			rb_monitor_free_op_variables(*vars, i);
-			evaluator_destroy(evaluator);
+			rdlog(LOG_ERR, "Couldn't strdup %s (OOM?)",
+				all_vars.vars[i]);
+			for (int j=0; j<i; ++j) {
+				free((*vars)[j]);
+				(*vars)[j] = NULL;
+			}
 			goto no_deps;
 		}
 	}
-	evaluator_destroy(evaluator);
 	*vars_size = all_vars.count;
+	evaluator_destroy(evaluator);
 	return;
 
 no_deps:
+	if (*vars) {
+		free(*vars);
+	}
 	*vars = NULL;
 	*vars_size = 0;
+
+	if (evaluator) {
+		evaluator_destroy(evaluator);
+	}
 }
 
 void rb_monitor_free_op_variables(char **vars, size_t vars_size) {
@@ -260,16 +278,17 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 			const char *cmd_arg, struct json_object *json_monitor) {
 	char *aux_name = PARSE_CJSON_CHILD_STR(json_monitor,
 							"name", NULL);
+	if (NULL == aux_name) {
+		rdlog(LOG_ERR, "Monitor with no name");
+		return NULL;
+	}
+
 	char *aux_split_op = PARSE_CJSON_CHILD_STR(json_monitor,
 							"split_op", NULL);
 
 	int aux_timestamp_given = PARSE_CJSON_CHILD_INT64(json_monitor,
 							"timestamp_given", 0);
 
-	if (NULL == aux_name) {
-		rdlog(LOG_ERR, "Monitor with no name");
-		return NULL;
-	}
 
 	if (aux_split_op && !valid_split_op(aux_split_op)) {
 		rdlog(LOG_WARNING, "Invalid split op %s of monitor %s",
@@ -288,6 +307,8 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	rb_monitor_t *ret = calloc(1, sizeof(*ret));
 	if (NULL == ret) {
 		rdlog(LOG_ERR, "Can't alloc sensor monitor (out of memory?)");
+		free(aux_name);
+		free(aux_split_op);
 		return NULL;
 	}
 
@@ -311,6 +332,12 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	ret->integer = PARSE_CJSON_CHILD_INT64(json_monitor, "integer", 0);
 	ret->type = type;
 	ret->cmd_arg = strdup(cmd_arg);
+
+	if (NULL == ret->cmd_arg) {
+		rdlog(LOG_CRIT, "Couldn't allocate cmd_arg (OOM?)");
+		rb_monitor_done(ret);
+		ret = NULL;
+	}
 
 	return ret;
 }
@@ -836,6 +863,7 @@ static struct monitor_value *process_vector_monitor(
 	if (NULL == children) {
 		rdlog(LOG_ERR,
 			"Couldn't allocate vector children (out of memory?)");
+		return NULL;
 	}
 
 	size_t mean_count = 0, count = 0;

@@ -30,6 +30,16 @@ struct monitor_value *new_monitor_value_array(const char *name,
 		struct monitor_value *split_op) {
 	struct monitor_value *ret = calloc(1, sizeof(*ret));
 	if (NULL == ret) {
+		if (split_op) {
+			rb_monitor_value_done(split_op);
+		}
+		for (size_t i=0; i<n_children; ++i) {
+			if (children[i]) {
+				rb_monitor_value_done(children[i]);
+			}
+		}
+		free(children);
+
 		rdlog(LOG_ERR, "Couldn't allocate monitor value");
 		return NULL;
 	}
