@@ -43,9 +43,11 @@ struct process_sensor_monitor_ctx;
 
 /** Parse a rb_monitor element
   @param json_monitor monitor in JSON format
+  @param sensor_enrichment enrichment given to the sensor
   @return Parsed rb_monitor.
   */
-rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor);
+rb_monitor_t *parse_rb_monitor(json_object *json_monitor,
+					json_object *sensor_enrichment);
 
 /** Free resources allocated by a monitor
   @param monitor Monitor to free
@@ -58,8 +60,8 @@ void rb_monitor_done(rb_monitor_t *monitor);
   @return New monitor process ctx
   */
 struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
-                                size_t monitors_count,
-                                struct monitor_snmp_session *snmp_sessp);
+				size_t monitors_count,
+				struct monitor_snmp_session *snmp_sessp);
 
 /** Destroy process sensor monitor context
   @param ctx Context to free
@@ -110,35 +112,24 @@ const char *rb_monitor_name(const rb_monitor_t *monitor);
   */
 const char *rb_monitor_group_id(const rb_monitor_t *monitor);
 
-/** Gets monitor group_name
-  @param monitor Monitor to get data
-  @return requested data
-  */
-const char *rb_monitor_group_name(const rb_monitor_t *monitor);
-
 /** Gets monitor integer status
   @param monitor Monitor to get data
   @return requested data
   */
 bool rb_monitor_is_integer(const rb_monitor_t *monitor);
 
-/** Gets monitor type
-  @param monitor Monitor to get data
-  @return requested data
-  */
-const char *rb_monitor_type(const rb_monitor_t *monitor);
-
-/** Gets monitor unit
-  @param monitor Monitor to get data
-  @return requested data
-  */
-const char *rb_monitor_unit(const rb_monitor_t *monitor);
-
 /** Gets monitor send variable
   @param monitor Monitor to get data
   @return requested data
   */
 bool rb_monitor_send(const rb_monitor_t *monitor);
+
+/** Get monitor enrichment
+ * @param monitor Monitor to get enrichment
+ * @return Monitor enrichment
+ * @todo make const
+ */
+const json_object *rb_monitor_enrichment(const rb_monitor_t *monitor);
 
 /** Gets monitor operation (snmp, system, op...) param
   @param monitor Monitor to get data

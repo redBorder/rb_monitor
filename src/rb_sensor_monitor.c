@@ -66,14 +66,13 @@ struct rb_monitor_s {
 	  key with value instance-%d */
 	const char *instance_prefix;
 	const char *group_id;         ///< Sensor group id
-	const char *group_name;       ///< Sensor group name
 	uint64_t send; ///< Send the monitor to output or not
 	uint64_t timestamp_given; ///< Timestamp is given in response
 	uint64_t integer; ///< Response must be an integer
 	const char *splittok; ///< How to split response
 	const char *splitop; ///< Do a final operation with tokens
-	const char *unit; ///< Monitor unit
 	const char *cmd_arg; ///< Argument given to command
+	json_object *enrichment;
 };
 
 #ifndef NDEBUG
@@ -97,6 +96,10 @@ const char *rb_monitor_name(const rb_monitor_t *monitor) {
 	return monitor->name;
 }
 
+const json_object *rb_monitor_enrichment(const rb_monitor_t *monitor) {
+	return monitor->enrichment;
+}
+
 const char *rb_monitor_instance_prefix(const rb_monitor_t *monitor) {
 	return monitor->instance_prefix;
 }
@@ -113,16 +116,8 @@ const char *rb_monitor_group_id(const rb_monitor_t *monitor) {
 	return monitor->group_id;
 }
 
-const char *rb_monitor_group_name(const rb_monitor_t *monitor) {
-	return monitor->group_name;
-}
-
 bool rb_monitor_is_integer(const rb_monitor_t *monitor) {
 	return monitor->integer;
-}
-
-const char *rb_monitor_unit(const rb_monitor_t *monitor) {
-	return monitor->unit;
 }
 
 bool rb_monitor_send(const rb_monitor_t *monitor) {
@@ -211,11 +206,12 @@ void rb_monitor_done(rb_monitor_t *monitor) {
 	free_const_str(monitor->name_split_suffix);
 	free_const_str(monitor->instance_prefix);
 	free_const_str(monitor->group_id);
-	free_const_str(monitor->group_name);
 	free_const_str(monitor->splittok);
 	free_const_str(monitor->splitop);
-	free_const_str(monitor->unit);
 	free_const_str(monitor->cmd_arg);
+	if (monitor->enrichment) {
+		json_object_put(monitor->enrichment);
+	}
 	free(monitor);
 }
 
@@ -275,9 +271,13 @@ static bool valid_split_op(const char *split_op) {
   @return New monitor
   */
 static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
-			const char *cmd_arg, struct json_object *json_monitor) {
-	char *aux_name = PARSE_CJSON_CHILD_STR(json_monitor,
-							"name", NULL);
+			const char *cmd_arg, json_object *json_monitor,
+			json_object *sensor_enrichment) {
+	assert(cmd_arg);
+	assert(json_monitor);
+	assert(sensor_enrichment);
+
+	char *aux_name = PARSE_CJSON_CHILD_STR(json_monitor, "name", NULL);
 	if (NULL == aux_name) {
 		rdlog(LOG_ERR, "Monitor with no name");
 		return NULL;
@@ -285,10 +285,13 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 
 	char *aux_split_op = PARSE_CJSON_CHILD_STR(json_monitor,
 							"split_op", NULL);
+	char *unit = PARSE_CJSON_CHILD_STR(json_monitor, "unit", NULL);
+	char *group_name =
+			PARSE_CJSON_CHILD_STR(json_monitor, "group_name", NULL);
+
 
 	int aux_timestamp_given = PARSE_CJSON_CHILD_INT64(json_monitor,
 							"timestamp_given", 0);
-
 
 	if (aux_split_op && !valid_split_op(aux_split_op)) {
 		rdlog(LOG_WARNING, "Invalid split op %s of monitor %s",
@@ -309,6 +312,7 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 		rdlog(LOG_ERR, "Can't alloc sensor monitor (out of memory?)");
 		free(aux_name);
 		free(aux_split_op);
+		free(unit);
 		return NULL;
 	}
 
@@ -323,9 +327,6 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 						"name_split_suffix", NULL);
 	ret->instance_prefix = PARSE_CJSON_CHILD_STR(json_monitor,
 						"instance_prefix", NULL);
-	ret->unit = PARSE_CJSON_CHILD_STR(json_monitor, "unit", NULL);
-	ret->group_name = PARSE_CJSON_CHILD_STR(json_monitor,
-							"group_name", NULL);
 	ret->group_id = PARSE_CJSON_CHILD_STR(json_monitor, "group_id", NULL);
 	ret->timestamp_given = aux_timestamp_given;
 	ret->send = PARSE_CJSON_CHILD_INT64(json_monitor, "send", 1);
@@ -333,16 +334,53 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	ret->type = type;
 	ret->cmd_arg = strdup(cmd_arg);
 
+	ret->enrichment = json_object_object_copy(sensor_enrichment);
+	if (NULL == ret->enrichment) {
+		rdlog(LOG_CRIT, "Couldn't allocate monitor enrichment (OOM?)");
+		rb_monitor_done(ret);
+		ret = NULL;
+		goto err;
+	}
+
+#define RB_MONITOR_ENRICHMENT_STR(mkey, mval) {                                \
+		.key = mval ? mkey : NULL,                                     \
+		.val = mval ? json_object_new_string(mval) : NULL,             \
+	}
+
+	const struct {
+		const char *key;
+		json_object *val;
+	} enrichment_add[] = {
+		{
+			.key="type",
+			.val = json_object_new_string(rb_monitor_type(ret)),
+		},
+		RB_MONITOR_ENRICHMENT_STR("unit", unit),
+		RB_MONITOR_ENRICHMENT_STR("group_name", group_name),
+	};
+
+	for (size_t i=0; i<RD_ARRAYSIZE(enrichment_add); ++i) {
+		/// @todo check additions
+		if (enrichment_add[i].key) {
+			json_object_object_add(ret->enrichment,
+				enrichment_add[i].key, enrichment_add[i].val);
+		}
+	}
+
 	if (NULL == ret->cmd_arg) {
 		rdlog(LOG_CRIT, "Couldn't allocate cmd_arg (OOM?)");
 		rb_monitor_done(ret);
 		ret = NULL;
 	}
 
+err:
+	free(group_name);
+	free(unit);
 	return ret;
 }
 
-rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor) {
+rb_monitor_t *parse_rb_monitor(json_object *json_monitor,
+			/* @todo const */ json_object *sensor_enrichment) {
 	enum monitor_cmd_type cmd_type;
 	const char *cmd_arg = extract_monitor_cmd(&cmd_type, json_monitor);
 	if(NULL == cmd_arg) {
@@ -350,7 +388,7 @@ rb_monitor_t *parse_rb_monitor(struct json_object *json_monitor) {
 		return NULL;
 	} else {
 		rb_monitor_t *ret = parse_rb_monitor0(cmd_type, cmd_arg,
-								json_monitor);
+					json_monitor, sensor_enrichment);
 
 		return ret;
 	}
@@ -465,7 +503,7 @@ static struct monitor_value *rb_monitor_get_snmp_external_value(
 
 /** Create a libmatheval vars using op_vars */
 static struct libmatheval_vars *op_libmatheval_vars(
-					rb_monitor_value_array_t *op_vars) {
+		rb_monitor_value_array_t *op_vars, char **names) {
 	struct libmatheval_vars *libmatheval_vars = new_libmatheval_vars(
 								op_vars->count);
 	size_t expected_v_elms = 0;
@@ -480,7 +518,7 @@ static struct libmatheval_vars *op_libmatheval_vars(
 									i);
 
 		if (mv) {
-			libmatheval_vars->names[i] = (char *)mv->name;
+			libmatheval_vars->names[i] = names[i];
 
 			if (0==libmatheval_vars->count) {
 				expected_mv_type = mv->type;
@@ -498,7 +536,7 @@ static struct libmatheval_vars *op_libmatheval_vars(
 				rdlog(LOG_ERR,
 					"trying to operate on vectors of different size:"
 					"[(previous size):%zu] != [%s:%zu]",
-					expected_v_elms, mv->name,
+					expected_v_elms, names[i],
 					mv->array.children_count);
 				goto err;
 			}
@@ -675,6 +713,11 @@ static struct monitor_value *rb_monitor_get_op_result(
 	struct monitor_value *ret = NULL;
 	const char *operation = monitor->cmd_arg;
 
+	struct {
+		char **vars;
+		int vars_len;
+	} f_vars;
+
 	/// @todo error treatment in this cases
 	if (NULL == op_vars) {
 		return NULL;
@@ -689,9 +732,11 @@ static struct monitor_value *rb_monitor_get_op_result(
 		return NULL;
 	}
 
+	evaluator_get_variables(f, &f_vars.vars, &f_vars.vars_len);
+
 	const time_t now = time(NULL);
 	struct libmatheval_vars *libmatheval_vars = op_libmatheval_vars(
-								op_vars);
+							op_vars, f_vars.vars);
 	if (NULL == libmatheval_vars) {
 		goto libmatheval_error;
 	}
@@ -766,8 +811,6 @@ static struct monitor_value *process_novector_monitor(
 		mv->magic = MONITOR_VALUE_MAGIC; // just sanity check
 		#endif
 		mv->type = MONITOR_VALUE_T__VALUE;
-		mv->name = monitor->name;
-		mv->group_id = monitor->group_id;
 		mv->value.timestamp = now;
 		mv->value.value = value;
 	} else {

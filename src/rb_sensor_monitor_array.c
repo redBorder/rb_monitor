@@ -37,7 +37,8 @@ rb_monitor_t *rb_monitors_array_elm_at(rb_monitors_array_t *array, size_t i) {
 }
 
 rb_monitors_array_t *parse_rb_monitors(
-				struct json_object *monitors_array_json) {
+				json_object *monitors_array_json,
+				json_object *sensor_enrichment) {
 	const size_t monitors_len = json_object_array_length(
 							monitors_array_json);
 	rb_monitors_array_t *ret = rb_monitors_array_new(monitors_len);
@@ -52,7 +53,8 @@ rb_monitors_array_t *parse_rb_monitors(
 
 		json_object *monitor_json = json_object_array_get_idx(
 							monitors_array_json, i);
-		rb_monitor_t *monitor = parse_rb_monitor(monitor_json);
+		rb_monitor_t *monitor = parse_rb_monitor(monitor_json,
+							sensor_enrichment);
 		if (monitor) {
 			rb_monitors_array_add(ret, monitor);
 		}
@@ -111,8 +113,6 @@ static rb_message_array_t *process_monitor_value_v_print(
 		.magic = MONITOR_VALUE_MAGIC,
 #endif
 		.type = MONITOR_VALUE_T__ARRAY,
-		.name = new_mv->name,
-		.group_id = new_mv->group_id,
 		.array = {
 			.children_count = new_mv->array.children_count,
 			.split_op_result = new_mv->array.split_op_result,

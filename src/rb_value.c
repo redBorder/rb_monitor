@@ -49,7 +49,6 @@ struct monitor_value *new_monitor_value_array(const char *name,
 #endif
 
 	ret->type = MONITOR_VALUE_T__ARRAY;
-	ret->name = name;
 	ret->array.children_count = n_children;
 	ret->array.split_op_result = split_op;
 	ret->array.children = children;
@@ -68,13 +67,6 @@ void monitor_value_copy(struct monitor_value *dst,
 #ifdef MONITOR_VALUE_MAGIC
 	dst->magic = MONITOR_VALUE_MAGIC;
 #endif
-
-        if(src->name) {
-                dst->name      = strdup(src->name);
-        }
-        if(src->group_id) {
-		dst->group_id  = strdup(src->group_id);
-	}
 
         switch(src->type) {
         case MONITOR_VALUE_T__VALUE:
@@ -107,48 +99,67 @@ void monitor_value_copy(struct monitor_value *dst,
         };
 }
 
-/// @TODO we should print all with this function
-static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_object *_enrichment)
-{
-	json_object *enrichment = (json_object *)_enrichment;
+static void print_monitor_value_enrichment_str(struct printbuf *printbuf,
+					const char *key, json_object *val) {
+	const char *str = json_object_get_string(val);
+	if(NULL == str) {
+		rdlog(LOG_ERR,
+			"Cannot extract string value of enrichment key %s",
+			key);
+	} else {
+		sprintbuf(printbuf, ",\"%s\":\"%s\"",
+			key,str);
+	}
+}
 
-	char *key; struct json_object *val; struct lh_entry *entry;
-	for(entry = json_object_get_object(enrichment)->head;
-		(entry ? (key = (char*)entry->k, val = (struct json_object*)entry->v, entry) : 0);
-		entry = entry->next){
-	//json_object_object_foreach(enrichment,key,val) {
+static void print_monitor_value_enrichment_int(struct printbuf *printbuf,
+					const char *key, json_object *val) {
+	errno = 0;
+	int64_t integer = json_object_get_int64(val);
+	if(errno != 0) {
+		char errbuf[BUFSIZ];
+		const char *errstr = strerror_r(errno, errbuf, sizeof(errbuf));
+		rdlog(LOG_ERR,
+			"Cannot extract int value of enrichment key %s: %s",
+			key, errstr);
+	} else {
+		sprintbuf(printbuf, ",\"%s\":%ld", key, integer);
+	}
+}
+
+/// @TODO we should print all with this function
+static void print_monitor_value_enrichment(struct printbuf *printbuf,
+					const json_object *const_enrichment) {
+	json_object *enrichment = (json_object *)const_enrichment;
+
+	for (struct json_object_iterator i = json_object_iter_begin(enrichment),
+					end = json_object_iter_end(enrichment);
+					!json_object_iter_equal(&i, &end);
+					json_object_iter_next(&i)) {
+		const char *key = json_object_iter_peek_name(&i);
+		json_object *val = json_object_iter_peek_value(&i);
+
 		const json_type type = json_object_get_type(val);
 		switch(type){
 			case json_type_string:
-			{
-				const char *str = json_object_get_string(val);
-				if(NULL == str) {
-					rdlog(LOG_ERR,"Cannot extract string value of enrichment key %s",key);
-				} else {
-					sprintbuf(printbuf, ",\"%s\":\"%s\"",key,str);
-				}
+				print_monitor_value_enrichment_str(
+					printbuf, key, val);
 				break;
-			}
+
 			case json_type_int:
-			{
-				errno = 0;
-				int64_t integer = json_object_get_int64(val);
-				if(errno != 0) {
-					rdlog(LOG_ERR,"Cannot extract int value of enrichment key %s",key);
-				} else {
-					sprintbuf(printbuf, ",\"%s\":%ld",key,integer);
-				}
+				print_monitor_value_enrichment_int(
+					printbuf, key, val);
 				break;
-			}
+
 			case json_type_null:
-			{
 				sprintbuf(printbuf, ",\"%s\":null",key);
 				break;
-			}
+
 			case json_type_boolean:
 			{
 				const json_bool b = json_object_get_boolean(val);
-				sprintbuf(printbuf, ",\"%s\":%s",key,b==FALSE ? "false" : "true");
+				sprintbuf(printbuf, ",\"%s\":%s", key,
+						b==FALSE ? "false" : "true");
 				break;
 			}
 			case json_type_double:
@@ -160,7 +171,8 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 			case json_type_object:
 			case json_type_array:
 			{
-				rdlog(LOG_ERR,"Can't enrich with objects/array at this time");
+				rdlog(LOG_ERR,
+					"Can't enrich with objects/array at this time");
 				break;
 			}
 		};
@@ -170,42 +182,28 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 #define NO_INSTANCE -1
 static void print_monitor_value0(rb_message *message,
 			const struct monitor_value *monitor_value,
-			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
-			int instance) {
+			const rb_monitor_t *monitor, int instance) {
 	assert(monitor_value->type == MONITOR_VALUE_T__VALUE);
 
 	struct printbuf * printbuf = printbuf_new();
 	if(likely(NULL!=printbuf)) {
-		const int sensor_id = rb_sensor_id(sensor);
-		const char *sensor_name = rb_sensor_name(sensor);
-		const char *monitor_group_name = rb_monitor_group_name(monitor);
-		const char *monitor_type = rb_monitor_type(monitor);
-		const char *monitor_unit = rb_monitor_unit(monitor);
 		const char *monitor_instance_prefix =
 					rb_monitor_instance_prefix(monitor);
 		const char *monitor_name_split_suffix =
 					rb_monitor_name_split_suffix(monitor);
-		struct json_object *sensor_enrichment =
-						rb_sensor_enrichment(sensor);
+		const struct json_object *monitor_enrichment =
+						rb_monitor_enrichment(monitor);
 		// @TODO use printbuf_memappend_fast instead! */
 		sprintbuf(printbuf, "{");
 		sprintbuf(printbuf, "\"timestamp\":%lu",
 						monitor_value->value.timestamp);
-		if (sensor_id) {
-			sprintbuf(printbuf, ",\"sensor_id\":%lu", sensor_id);
-		}
-		if (sensor_name) {
-			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",
-						sensor_name);
-		}
-
 		if (NO_INSTANCE != instance && monitor_name_split_suffix) {
 			sprintbuf(printbuf, ",\"monitor\":\"%s%s\"",
-						monitor_value->name,
+						rb_monitor_name(monitor),
 						monitor_name_split_suffix);
 		} else {
 			sprintbuf(printbuf, ",\"monitor\":\"%s\"",
-							monitor_value->name);
+						rb_monitor_name(monitor));
 		}
 
 		if (NO_INSTANCE != instance && monitor_instance_prefix) {
@@ -220,23 +218,16 @@ static void print_monitor_value0(rb_message *message,
 			sprintbuf(printbuf, ",\"value\":\"%lf\"",
 						monitor_value->value.value);
 		}
-		if (monitor_type) {
-			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_type);
-		}
-		if (monitor_unit) {
-			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_unit);
-		}
-		if (monitor_group_name){
-			sprintbuf(printbuf, ",\"group_name\":\"%s\"",
-							monitor_group_name);
-		}
-		if (monitor_value->group_id){
+
+		if (rb_monitor_group_id(monitor)) {
 			sprintbuf(printbuf, ",\"group_id\":%s",
-						monitor_value->group_id);
+			rb_monitor_group_id(monitor));
 		}
-		if (sensor_enrichment) {
+
+
+		if (monitor_enrichment) {
 			print_monitor_value_enrichment(printbuf,
-							sensor_enrichment);
+							monitor_enrichment);
 		}
 		sprintbuf(printbuf, "}");
 
@@ -264,7 +255,7 @@ rb_message_array_t *print_monitor_value(
 
 	if (monitor_value->type == MONITOR_VALUE_T__VALUE) {
 		print_monitor_value0(&ret->msgs[0], monitor_value, monitor,
-			sensor, NO_INSTANCE);
+			NO_INSTANCE);
 	} else {
 		size_t i_msgs = 0;
 		assert(monitor_value->type == MONITOR_VALUE_T__ARRAY);
@@ -272,7 +263,7 @@ rb_message_array_t *print_monitor_value(
 			if (monitor_value->array.children[i]) {
 				print_monitor_value0(&ret->msgs[i_msgs++],
 					monitor_value->array.children[i],
-					monitor, sensor, i);
+					monitor, i);
 			}
 		}
 
@@ -281,7 +272,7 @@ rb_message_array_t *print_monitor_value(
 			assert(NULL == msg->payload);
 			print_monitor_value0(msg,
 				monitor_value->array.split_op_result, monitor,
-				sensor, NO_INSTANCE);
+				NO_INSTANCE);
 		}
 
 		ret->count = i_msgs;

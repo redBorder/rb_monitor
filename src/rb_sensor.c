@@ -28,12 +28,13 @@
 #include <librd/rdlog.h>
 #include <librd/rdfloat.h>
 
+static const char SENSOR_NAME_ENRICHMENT_KEY[] = "sensor_name";
+static const char SENSOR_ID_ENRICHMENT_KEY[] = "sensor_id";
+
 /// Sensor data
 typedef struct {
-	struct snmp_params_s snmp_params; ///< SNMP parameters
 	json_object *enrichment; ///< Enrichment to use in monitors
-	char *sensor_name;       ///< Sensor name to append in monitors
-	uint64_t sensor_id;      ///< Sensor id to append in monitors
+	struct snmp_params_s snmp_params; ///< SNMP parameters
 } sensor_data_t;
 
 /// Sensor to monitor
@@ -56,13 +57,22 @@ void assert_rb_sensor(rb_sensor_t *sensor) {
 }
 #endif
 
+/** We assume that sensor name is only requested in config errors, so we only
+  save it in enrichment json
+ * @param sensor Sensor to obtain string
+ * @return Sensor name or "(some_sensor)" string if not defined
+ */
 const char *rb_sensor_name(const rb_sensor_t *sensor) {
-	return sensor->data.sensor_name;
+	static const char failsafe_ret[] = "(some_sensor)";
+	json_object *jsensor_name = NULL;
+	const bool get_rc = json_object_object_get_ex(sensor->data.enrichment,
+				SENSOR_NAME_ENRICHMENT_KEY, &jsensor_name);
+
+	const char *ret = (get_rc && jsensor_name) ?
+				json_object_get_string(jsensor_name) : NULL;
+	return ret ? ret : failsafe_ret;
 }
 
-uint64_t rb_sensor_id(const rb_sensor_t *sensor) {
-	return sensor->data.sensor_id;
-}
 
 struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor) {
 	return sensor->data.enrichment;
@@ -83,8 +93,8 @@ static void check_setted(const void *ptr, bool *aok, const char *errmsg,
 
 	if(*aok && ptr == NULL){
 		*aok = 0;
-		rdlog(LOG_ERR, "%s%s", errmsg,
-				sensor_name ? sensor_name : "(some sensor)");
+		rdlog(LOG_ERR, "%s%s", errmsg, sensor_name);
+
 	}
 }
 
@@ -94,48 +104,99 @@ static void check_setted(const void *ptr, bool *aok, const char *errmsg,
   */
 static bool sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 					/* const */ json_object *sensor_info) {
+	char errbuf[BUFSIZ];
 	struct json_object *sensor_monitors = NULL;
+	const int64_t sensor_id = PARSE_CJSON_CHILD_INT64(sensor_info,
+						SENSOR_ID_ENRICHMENT_KEY, 0);
+	char *sensor_name = PARSE_CJSON_CHILD_STR(sensor_info,
+					SENSOR_NAME_ENRICHMENT_KEY, NULL);
+
+	if (NULL == sensor_name) {
+		rdlog(LOG_ERR, "Sensor with no name, couldn't parse");
+		goto err;
+	}
+
 	json_object_object_get_ex(sensor_info, "monitors", &sensor_monitors);
 	if (NULL == sensor_monitors) {
 		rdlog(LOG_ERR,
 			"Could not obtain JSON sensors monitors. Skipping");
-		return false;
+		goto err;
 	}
 
 	sensor->data.snmp_params.session.timeout = PARSE_CJSON_CHILD_INT64(
 			sensor_info, "timeout",
 			(int64_t)sensor->data.snmp_params.session.timeout);
-	sensor->data.sensor_id = PARSE_CJSON_CHILD_INT64(sensor_info,
-			"sensor_id", 0);
-	sensor->data.sensor_name = PARSE_CJSON_CHILD_STR(sensor_info,
-			"sensor_name", NULL);
 	sensor->data.snmp_params.peername = PARSE_CJSON_CHILD_STR(sensor_info,
 			"sensor_ip", NULL);
 	sensor->data.snmp_params.session.community = PARSE_CJSON_CHILD_STR(
 						sensor_info, "community", NULL);
 
-	json_object_object_get_ex(sensor_info, "enrichment",
-						&sensor->data.enrichment);
 	const char *snmp_version = PARSE_CJSON_CHILD_STR(sensor_info,
 							"snmp_version", NULL);
 	if (snmp_version) {
 		sensor->data.snmp_params.session.version = net_snmp_version(
-					snmp_version, sensor->data.sensor_name);
+					snmp_version, sensor_name);
 	}
 
-	sensor->monitors = parse_rb_monitors(sensor_monitors);
+	json_object_object_get_ex(sensor_info, "enrichment",
+						&sensor->data.enrichment);
+	if ((sensor_name || sensor_id>0) && NULL == sensor->data.enrichment) {
+		sensor->data.enrichment = json_object_new_object();
+		if (NULL == sensor->data.enrichment) {
+			rdlog(LOG_CRIT,
+				"Couldn't allocate sensor %s enrichment",
+				sensor_name);
+			goto err;
+		}
+	}
+
+	if (sensor_name) {
+		const bool name_rc = ADD_JSON_STRING(sensor->data.enrichment,
+					SENSOR_NAME_ENRICHMENT_KEY, sensor_name,
+					errbuf, sizeof(errbuf));
+		if (!name_rc) {
+			rdlog(LOG_ERR,
+				"Couldn't add sensor name to enrichment: %s",
+				errbuf);
+			goto err;
+		}
+		free(sensor_name);
+		sensor_name = NULL;
+	}
+
+	if (sensor_id > 0) {
+		const bool id_rc = ADD_JSON_INT64(sensor->data.enrichment,
+					SENSOR_ID_ENRICHMENT_KEY, sensor_id,
+					errbuf, sizeof(errbuf));
+		if (!id_rc) {
+			rdlog(LOG_ERR,
+				"Couldn't add sensor id to enrichment: %s",
+				errbuf);
+			goto err;
+		}
+	}
+
+	sensor->monitors = parse_rb_monitors(sensor_monitors,
+						sensor->data.enrichment);
 	if (NULL != sensor->monitors) {
 		const size_t monitors_count = sensor->monitors->count;
 		sensor->op_vars = get_monitors_dependencies(sensor->monitors);
 		sensor->last_vals = rb_monitor_value_array_new(monitors_count);
 		if (NULL == sensor->last_vals) {
 			rdlog(LOG_CRIT, "Couldn't allocate memory for sensor");
-			return false;
+			goto err;
 		} else {
 			sensor->last_vals->count = monitors_count;
 		}
+	} else {
+		goto err;
 	}
-	return NULL != sensor->monitors && NULL != sensor->last_vals;
+
+	return true;
+
+err:
+	free(sensor_name);
+	return false;
 }
 
 /** Checks if a sensor is OK
@@ -145,16 +206,15 @@ static bool sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 static bool sensor_common_attrs_check_sensor(const rb_sensor_t *sensor) {
 	bool aok = true;
 
-	const char *sensor_name = sensor->data.sensor_name;
-
-	check_setted(sensor->data.sensor_name,&aok,
-		"[CONFIG] Sensor_name not setted in ", NULL);
 	check_setted(sensor->data.snmp_params.peername,&aok,
-		"[CONFIG] Peername not setted in sensor ", sensor_name);
+				"[CONFIG] Peername not setted in a sensor",
+							rb_sensor_name(sensor));
 	check_setted(sensor->data.snmp_params.session.community,&aok,
-		"[CONFIG] Community not setted in sensor ", sensor_name);
+				"[CONFIG] Community not setted in a sensor",
+							rb_sensor_name(sensor));
 	check_setted(sensor->monitors,&aok,
-		"[CONFIG] Monitors not setted in sensor ", sensor_name);
+				"[CONFIG] Monitors not setted in a sensor",
+							rb_sensor_name(sensor));
 
 	return aok;
 }
@@ -222,7 +282,6 @@ static void free_const_str(const char *str) {
   */
 static void sensor_done(rb_sensor_t *sensor) {
 	free_const_str(sensor->data.snmp_params.peername);
-	free_const_str(sensor->data.sensor_name);
 	free_const_str(sensor->data.snmp_params.session.community);
 	if (sensor->op_vars) {
 		free_monitors_dependencies(sensor->op_vars,
@@ -237,6 +296,9 @@ static void sensor_done(rb_sensor_t *sensor) {
 		}
 	}
 	rb_monitor_value_array_done(sensor->last_vals);
+	if (sensor->data.enrichment) {
+		json_object_put(sensor->data.enrichment);
+	}
 	free(sensor);
 }
 

@@ -36,11 +36,12 @@ typedef struct rb_array rb_monitors_array_t;
 
 /** Extract monitors array from a JSON array.
   @param monitors_array_json JSON monitors template
-  @param sensor Sensor this monitor's belong
+  @param sensor_enrichment Sensor imposed enrichment
   @return New monitors array
   @note Need to free returned monitors with rb_monitors_array_done
   */
-rb_monitors_array_t *parse_rb_monitors(struct json_object *monitors_array_json);
+rb_monitors_array_t *parse_rb_monitors(json_object *monitors_array_json,
+						json_object *sensor_enrichment);
 
 /// @todo Delete this FW declaration, we only need to use operation previous
 /// values

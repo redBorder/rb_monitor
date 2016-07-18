@@ -48,13 +48,6 @@ struct monitor_value {
 		MONITOR_VALUE_T__ARRAY,
 	} type;
 
-	/// Monitor name
-	/// @todo delete it
-	const char *name;
-	/// Monitor group id
-	/// @todo delete it
-	const char *group_id;
-
 	/* response */
 	union {
 		struct {
