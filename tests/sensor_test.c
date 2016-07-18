@@ -20,21 +20,84 @@
 
 #include "rb_sensor.h"
 
-void test_sensor_n(const char *cjson_sensor, check_list_t *checks,
-                                                                size_t n) {
-        struct _worker_info worker_info;
-        memset(&worker_info, 0, sizeof(worker_info));
 
-        snmp_sess_init(&worker_info.default_session);
-        struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
-        rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
-        json_object_put(json_sensor);
+static void test_exec_sensor_cb(const char *cjson_sensor,
+		void (*msg_cb)(void *opaque, rb_message_list *msgs, size_t i),
+		void *opaque, size_t n) {
+	const size_t aux_mem_wrap_fail_in = mem_wrap_fail_in; // Exclude this code
+	mem_wrap_fail_in = 0;
+	struct _worker_info worker_info;
+	memset(&worker_info, 0, sizeof(worker_info));
 
-        for (size_t i=0;i<n;++i) {
-                rb_message_list messages;
-                rb_message_list_init(&messages);
-                process_rb_sensor(&worker_info, sensor, &messages);
-                json_list_check(&checks[i], &messages);
-        }
-        rb_sensor_put(sensor);
+	snmp_sess_init(&worker_info.default_session);
+	struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
+	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
+	json_object_put(json_sensor);
+
+	mem_wrap_fail_in = aux_mem_wrap_fail_in;
+	for (size_t i=0; i<n; ++i) {
+		rb_message_list messages;
+		rb_message_list_init(&messages);
+		process_rb_sensor(&worker_info, sensor, &messages);
+		msg_cb(opaque, &messages, i);
+	}
+	rb_sensor_put(sensor);
+
 }
+
+static void test_sensor_n_cb(void *vchecks, rb_message_list *msgs, size_t i) {
+	check_list_t *checks = vchecks;
+	json_list_check(&checks[i], msgs);
+}
+
+void test_sensor_n(const char *cjson_sensor, check_list_t *checks,
+								size_t n) {
+	test_exec_sensor_cb(cjson_sensor, test_sensor_n_cb, checks, n);
+}
+
+static void test_sensor_void_cb(void *opaque, rb_message_list *msgs, size_t i) {
+	(void)opaque;
+	(void)i;
+
+	while(!(rb_message_list_empty(msgs))) {
+		rb_message_array_t *array = rb_message_list_first(msgs);
+		rb_message_list_remove(msgs, array);
+		for (size_t j=0; j<array->count; ++j) {
+			free(array->msgs[j].payload);
+		}
+
+		message_array_done(array);
+	}
+}
+
+void test_sensor_void(const char *cjson_sensor) {
+	test_exec_sensor_cb(cjson_sensor, test_sensor_void_cb, NULL, 1);
+}
+
+/* malloc / calloc fails tests */
+
+size_t mem_wrap_fail_in = 0;
+
+void mem_wraps_set_fail_in(size_t i) {
+	mem_wrap_fail_in = i;
+}
+
+size_t mem_wraps_get_fail_in() {
+	return mem_wrap_fail_in;
+}
+
+#define COMMA ,
+
+#define WRAP_MEM_FN(fun, ret_t, args, real_args)                               \
+ret_t __real_##fun (args);                                              \
+ret_t __wrap_##fun (args) {                                             \
+	return (mem_wrap_fail_in == 0 || --mem_wrap_fail_in) ?                 \
+						__real_##fun (real_args) : 0;\
+}
+
+WRAP_MEM_FN(malloc, void *, size_t m, m)
+WRAP_MEM_FN(realloc, void *, void *ptr COMMA size_t m, ptr COMMA m)
+WRAP_MEM_FN(calloc, void *, size_t n COMMA size_t m, n COMMA m)
+WRAP_MEM_FN(strdup, char *, const char *str, str)
+WRAP_MEM_FN(json_object_new_object, json_object *,,)
+WRAP_MEM_FN(evaluator_create, void *, char *str, str)

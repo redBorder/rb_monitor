@@ -74,8 +74,12 @@ tests/%.xml: tests/%.test
 
 tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
 OBJ_DEPS_TESTS := tests/json_test.o tests/sensor_test.o
+MALLOC_FUNCTIONS := $(strip malloc calloc strdup realloc \
+	json_object_new_object evaluator_create)
+WRAP_ALLOC_FUNCTIONS := $(foreach fn, $(MALLOC_FUNCTIONS)\
+						,-Wl,-u,$(fn) -Wl,-wrap,$(fn))
 tests/%.test: tests/%.o $(filter-out src/main.o,$(OBJS)) $(OBJ_DEPS_TESTS)
-	$(CC) $(CPPFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS) -lcmocka
+	$(CC) $(WRAP_ALLOC_FUNCTIONS) $(CPPFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS) -lcmocka
 
 check_coverage:
 	@( if [[ "x$(WITH_COVERAGE)" == "xn" ]]; then \

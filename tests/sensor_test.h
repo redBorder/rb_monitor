@@ -22,6 +22,11 @@
 
 #include "json_test.h"
 
+/** Check cjson_sensor but only free returned messages
+ * @param cjson_sensor Sensor in JSON format
+ */
+void test_sensor_void(const char *cjson_sensor);
+
 /** Checks to pass a sensor n times
   @param cjson_sensor Sensor in json text format
   @param checks Checks to pass every time a sensor is processed
@@ -66,3 +71,5 @@ static void fn_name() { \
 	typeof(prepare_checks_cb) *cb = &prepare_checks_cb; \
 	basic_test_checks_cb(&cb, 1, json_sensor); \
 }
+
+extern size_t mem_wrap_fail_in;
