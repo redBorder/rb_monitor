@@ -41,32 +41,24 @@ static const char split_op_sensor[] =  "{"
 	"}";
 
 #define TEST1_CHECKS0_V(mmonitor,mvalue)                                       \
-	CHILD_I("sensor_id",1),                                                \
-	CHILD_S("sensor_name","sensor-arriba"),                                \
-	CHILD_S("monitor",mmonitor),                                           \
-	CHILD_S("value",mvalue),                                               \
-	CHILD_S("type","op"),                                                  \
-	CHILD_S("unit","%"),                                                   \
-	CHILD_I("group_id",1),                                               \
-	CHILD_S("group_name","first_group")
+	CHILD_I("sensor_id",1,                                                 \
+	CHILD_S("sensor_name","sensor-arriba",                                 \
+	CHILD_S("monitor",mmonitor,                                            \
+	CHILD_S("value",mvalue,                                                \
+	CHILD_S("type","op",                                                   \
+	CHILD_S("unit","%",                                                    \
+	CHILD_I("group_id",1,                                                  \
+	CHILD_S("group_name","first_group", NULL))))))))
 
-#define TEST1_CHECKS0_I(mmonitor,mvalue,minstance) (struct json_key_test[]) {  \
-	TEST1_CHECKS0_V(mmonitor,mvalue),                                      \
-	CHILD_S("instance",minstance),                                         \
-}
+#define TEST1_CHECKS0_I(mmonitor,mvalue,minstance)                             \
+	JSON_KEY_TEST(CHILD_S("instance",minstance,                            \
+					TEST1_CHECKS0_V(mmonitor,mvalue)))
 
-#define TEST1_CHECKS0_AVG(mmonitor,mvalue) (struct json_key_test[]) {          \
-	TEST1_CHECKS0_V(mmonitor,mvalue)                                       \
-}
-
-#define TEST1_V_SAMPLE TEST1_CHECKS0_I("a","b","1")
-#define TEST1_V_SIZE sizeof(TEST1_V_SAMPLE)/sizeof(TEST1_V_SAMPLE[0])
-
-#define TEST1_AVG_SAMPLE TEST1_CHECKS0_AVG("a","b")
-#define TEST1_AVG_SIZE sizeof(TEST1_AVG_SAMPLE)/sizeof(TEST1_AVG_SAMPLE[0])
+#define TEST1_CHECKS0_AVG(mmonitor,mvalue)                                     \
+	JSON_KEY_TEST(TEST1_CHECKS0_V(mmonitor,mvalue))
 
 static void prepare_split_op_monitor_checks(check_list_t *check_list) {
-	struct json_key_test *checks_v[] = {
+	json_key_test checks_v[] = {
 		TEST1_CHECKS0_I("load_1+5_per_instance","8.000000",
 							"load-instance-1"),
 		TEST1_CHECKS0_I("load_1+5_per_instance","9.000000",
@@ -75,13 +67,12 @@ static void prepare_split_op_monitor_checks(check_list_t *check_list) {
 							"load-instance-3")
 	};
 
-	struct json_key_test *checks_op[] = {
+	json_key_test checks_op[] = {
 		TEST1_CHECKS0_AVG("load_1+5", "9.000000")
 	};
 
-	check_list_push_checks(check_list, checks_v, RD_ARRAYSIZE(checks_v),
-								TEST1_V_SIZE);
-	check_list_push_checks(check_list, checks_op, 1, TEST1_AVG_SIZE);
+	check_list_push_checks(check_list, checks_v, RD_ARRAYSIZE(checks_v));
+	check_list_push_checks(check_list, checks_op, 1);
 }
 
 /** @TODO merge with previous tests */

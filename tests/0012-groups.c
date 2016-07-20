@@ -58,60 +58,50 @@ static const char ops_monitor[] =  "{"
 	"]"
 	"}";
 
-#define TEST_CHECKS0(mmonitor,mvalue,mtype)                                   \
-	CHILD_I("sensor_id",1),                                                \
-	CHILD_S("sensor_name","sensor-arriba"),                                \
-	CHILD_S("monitor",mmonitor),                                           \
-	CHILD_S("value",mvalue),                                               \
-	CHILD_S("type",mtype),                                                 \
-	CHILD_S("unit","%"),                                                   \
+#define TEST_CHECKS0(mmonitor,mvalue,mtype)                                    \
+	CHILD_I("sensor_id",1,                                                 \
+	CHILD_S("sensor_name","sensor-arriba",                                 \
+	CHILD_S("monitor",mmonitor,                                            \
+	CHILD_S("value",mvalue,                                                \
+	CHILD_S("type",mtype,                                                  \
+	CHILD_S("unit","%", NULL))))))
 
-#define TEST_CHECKS(mmonitor,mvalue,mtype) (struct json_key_test[]) {          \
-	TEST_CHECKS0(mmonitor,mvalue,mtype)                                   \
-}
+#define TEST_CHECKS(mmonitor,mvalue,mtype)                                     \
+	JSON_KEY_TEST(TEST_CHECKS0(mmonitor,mvalue,mtype))
 
-#define TEST_CHECKSG(mmonitor,mvalue,mtype,gid,gn) (struct json_key_test[]) { \
-	TEST_CHECKS0(mmonitor,mvalue,mtype)                                   \
-	CHILD_I("group_id",gid),                                               \
-	CHILD_S("group_name",gn),                                              \
-}
-
-#define TEST_SAMPLE TEST_CHECKS("a","b","c")
-#define TEST_SIZE sizeof(TEST_SAMPLE)/sizeof(TEST_SAMPLE[0])
-
-#define TEST_SAMPLEG TEST_CHECKSG("a","b","c",1,"e")
-#define TEST_SIZEG sizeof(TEST_SAMPLEG)/sizeof(TEST_SAMPLEG[0])
+#define TEST_CHECKSG(mmonitor,mvalue,mtype,gid,gn) JSON_KEY_TEST(              \
+	CHILD_I("group_id",gid,                                                \
+	CHILD_S("group_name",gn,                                               \
+	TEST_CHECKS0(mmonitor,mvalue,mtype))))
 
 static void prepare_math_ops_checks(check_list_t *check_list) {
 	enum {G1, NO_GROUP, G2};
 
-	struct json_key_test *checks_G1[] = {
+	json_key_test checks_G1[] = {
 		TEST_CHECKSG("load_1","13.000000","system",1,"g1"),
 		TEST_CHECKSG("load_5","12.000000","system",1,"g1"),
 		TEST_CHECKSG("100load_5","1200.000000","op",1,"g1"),
 		TEST_CHECKSG("load_5_x_load_1","156.000000","op",1,"g1"),
 	};
 
-	struct json_key_test *checks_NO_GROUP[] = {
+	json_key_test checks_NO_GROUP[] = {
 		TEST_CHECKS("load_1","23.000000","system"),
 		TEST_CHECKS("load_5","22.000000","system"),
 		TEST_CHECKS("100load_5","2200.000000","op"),
 		TEST_CHECKS("load_5_x_load_1","506.000000","op"),
 	};
 
-	struct json_key_test *checks_G2[] = {
+	json_key_test checks_G2[] = {
 		TEST_CHECKSG("load_1","33.000000","system",2,"g2"),
 		TEST_CHECKSG("load_5","32.000000","system",2,"g2"),
 		TEST_CHECKSG("100load_5","3200.000000","op",2,"g2"),
 		TEST_CHECKSG("load_5_x_load_1","1056.000000","op",2,"g2"),
 	};
 
-	check_list_push_checks(check_list, checks_G1,
-				RD_ARRAYSIZE(checks_G1), TEST_SIZEG);
+	check_list_push_checks(check_list, checks_G1, RD_ARRAYSIZE(checks_G1));
 	check_list_push_checks(check_list, checks_NO_GROUP,
-				RD_ARRAYSIZE(checks_NO_GROUP), TEST_SIZE);
-	check_list_push_checks(check_list, checks_G2,
-				RD_ARRAYSIZE(checks_G2), TEST_SIZEG);
+						RD_ARRAYSIZE(checks_NO_GROUP));
+	check_list_push_checks(check_list, checks_G2, RD_ARRAYSIZE(checks_G2));
 
 }
 

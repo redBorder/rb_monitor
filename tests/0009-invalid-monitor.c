@@ -95,30 +95,24 @@ static const char invalid_monitor[] = "{\n"
 	"}";
 
 #define TEST1_CHECKS0(mmonitor,mtype,mvalue_type,mvalue)                       \
-	(struct json_key_test[]) {                                             \
-		CHILD_I("sensor_id",1),                                        \
-		CHILD_S("sensor_name","sensor-arriba"),                        \
-		CHILD_S("monitor",mmonitor),                                   \
-		mvalue_type("value",mvalue),                                   \
-		CHILD_S("type",mtype),                                         \
-		CHILD_S("unit","%"),                                           \
-	}
+		CHILD_I("sensor_id",1,                                         \
+		CHILD_S("sensor_name","sensor-arriba",                         \
+		CHILD_S("monitor",mmonitor,                                    \
+		mvalue_type("value",mvalue,                                    \
+		CHILD_S("type",mtype,                                          \
+		CHILD_S("unit","%", NULL))))))
 
 #define TEST1_CHECKS(mtype,mmonitor,mvalue) \
-	TEST1_CHECKS0(mmonitor,mtype,CHILD_S,mvalue)
-
-#define TEST1_SAMPLE TEST1_CHECKS("t","a","b")
-#define TEST1_SIZE sizeof(TEST1_SAMPLE)/sizeof(TEST1_SAMPLE[0])
+	JSON_KEY_TEST(TEST1_CHECKS0(mmonitor,mtype,CHILD_S,mvalue))
 
 /// @TODO prepare empty_check
 static void prepare_invalid_monitor_checks(check_list_t *check_list) {
-	struct json_key_test *checks[] = {
+	json_key_test checks[] = {
 		TEST1_CHECKS("system","invalid_key","12.000000"),
 		// TEST1_CHECKS("op","bad_var_op","1.000000"),
 	};
 
-	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),
-								TEST1_SIZE);
+	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks));
 }
 
 /** Basic test */

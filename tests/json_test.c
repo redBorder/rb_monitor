@@ -101,13 +101,12 @@ void check_list_push(check_list_t *list, struct json_check *object) {
 }
 
 void check_list_push_checks(check_list_t *check_list,
-		struct json_key_test **checks, size_t checks_list_size,
-		size_t checks_size) {
+			json_key_test *checks, size_t checks_list_size) {
 	size_t i;
 
 	for (i=0; i<checks_list_size; ++i) {
 		struct json_check *check = prepare_test_basic_sensor_check(
-							checks_size, checks[i]);
+								&checks[i]);
 		check_list_push(check_list, check);
 	}
 }
@@ -141,17 +140,16 @@ void json_list_check(check_list_t *check_list, rb_message_list *msgs) {
 	assert_true(TAILQ_EMPTY(check_list));
 }
 
-struct json_check *prepare_test_basic_sensor_check(size_t childs_len,
-				struct json_key_test *childs) {
-	size_t i;
+struct json_check *prepare_test_basic_sensor_check(json_key_test *childs) {
+	struct json_key_test_elm *i = NULL;
 	struct json_check *ret = calloc(1, sizeof(ret[0]));
 	assert_non_null(ret);
 	ret->json = json_object_new_object();
 	assert_non_null(ret->json);
 
-	for (i=0; i<childs_len; ++i) {
+	SLIST_FOREACH(i, childs, entry) {
 		/* const int add_rc = */ json_object_object_add(ret->json,
-			childs[i].key, childs[i].val);
+			i->key, i->val);
 		// assert_int_equal(add_rc, 0);
 	}
 

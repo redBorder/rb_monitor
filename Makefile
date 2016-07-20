@@ -9,6 +9,7 @@ OBJS = $(SRCS:.c=.o)
 TESTS_C = $(sort $(wildcard tests/0*.c))
 
 TESTS = $(TESTS_C:.c=.test)
+OBJ_DEPS_TESTS := tests/json_test.o tests/sensor_test.o
 TESTS_OBJS = $(TESTS:.test=.o)
 TESTS_CHECKS_XML = $(TESTS_C:.c=.xml)
 TESTS_MEM_XML = $(TESTS_C:.c=.mem.xml)
@@ -36,7 +37,7 @@ version.c:
 	@echo "const char *version=\"6.13.`date +"%y%m%d"`\";" >> $@
 
 clean: bin-clean
-	rm -f $(TESTS) $(TESTS_OBJS) $(TESTS_XML) $(COV_FILES)
+	rm -f $(TESTS) $(TESTS_OBJS) $(TESTS_XML) $(COV_FILES) $(OBJ_DEPS_TESTS)
 
 install: bin-install
 
@@ -73,7 +74,6 @@ tests/%.xml: tests/%.test
 	@CMOCKA_XML_FILE="$@" CMOCKA_MESSAGE_OUTPUT=XML "./$<" >/dev/null 2>&1
 
 tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
-OBJ_DEPS_TESTS := tests/json_test.o tests/sensor_test.o
 MALLOC_FUNCTIONS := $(strip malloc calloc strdup realloc \
 	json_object_new_object evaluator_create)
 WRAP_ALLOC_FUNCTIONS := $(foreach fn, $(MALLOC_FUNCTIONS)\

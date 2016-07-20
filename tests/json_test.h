@@ -24,23 +24,30 @@
 #include <sys/queue.h>
 
 /// Convenience wrapper to create a json test object
-struct json_key_test {
+struct json_key_test_elm {
 	const char *key;
 	struct json_object *val;
+	SLIST_ENTRY(json_key_test_elm) entry;
 };
 
+typedef SLIST_HEAD(,json_key_test_elm) json_key_test;
+#define JSON_KEY_TEST(check) {.slh_first = check}
+
+
 /// Convenience macro for a string check
-#define CHILD_X(mkey,new_f,mval) {.key = mkey, .val = new_f(mval)}
-#define CHILD_I(mkey,mval) CHILD_X(mkey, json_object_new_int64, mval)
-#define CHILD_S(mkey,mval) CHILD_X(mkey, json_object_new_string, mval)
+#define CHILD_X(mkey,new_f,mval,next) (struct json_key_test_elm[])             \
+	{{.key = mkey, .val = new_f(mval), .entry.sle_next = next}}
+#define CHILD_I(mkey,mval,next) \
+	(CHILD_X(mkey, json_object_new_int64, mval, next))
+#define CHILD_S(mkey,mval,next) \
+	(CHILD_X(mkey, json_object_new_string, mval, next))
 
 struct json_check;
 /** Construct a check from childs
   @param childs_len length of childs
   @param childs Childs to test
   */
-struct json_check *prepare_test_basic_sensor_check(size_t childs_len,
-						struct json_key_test *childs);
+struct json_check *prepare_test_basic_sensor_check(json_key_test *childs);
 
 typedef TAILQ_HEAD(, json_check) check_list_t;
 void check_list_init(check_list_t *);
@@ -52,6 +59,5 @@ void check_list_push(check_list_t *list, struct json_check *check);
 	@param checks_size size of each individual check
 	*/
 void check_list_push_checks(check_list_t *check_list,
-		struct json_key_test **checks, size_t checks_list_size,
-		size_t checks_size);
+		json_key_test *checks, size_t checks_list_size);
 void json_list_check(check_list_t *check_list, rb_message_list *msgs);
