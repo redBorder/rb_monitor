@@ -101,22 +101,30 @@ bool snmp_solve_response(char *value_buf, size_t value_buf_len, double *number,
 		rdlog(LOG_DEBUG,"SNMP OID %s response type %d: %s\n",oid_string,response->variables->type,value_buf);
 		const size_t effective_len = RD_MIN(value_buf_len,response->variables->val_len);
 
-		switch(response->variables->type) // See in /usr/include/net-snmp/types.h
+		// See in /usr/include/net-snmp/types.h
+		switch(response->variables->type)
 		{
 			case ASN_GAUGE:
 			case ASN_INTEGER:
-				snprintf(value_buf,value_buf_len,"%ld",*response->variables->val.integer);
+				snprintf(value_buf,value_buf_len,"%ld",
+					*response->variables->val.integer);
 				*number = *response->variables->val.integer;
 				ret = 1;
 				break;
 			case ASN_OCTET_STR:
-				/* We don't know if it's a double inside a string; We try to convert and save */
-				strncpy(value_buf,(const char *)response->variables->val.string,effective_len-1);
-				// @TODO check val_len before copy string.
-				value_buf[effective_len] = '\0';
-				*number = strtod((const char *)value_buf,NULL);
+				if (effective_len == 0) {
+					ret = 0;
+					break;
+				}
+
+				snprintf(value_buf,value_buf_len, "%.*s",
+					(int)response->variables->val_len,
+					response->variables->val.string);
+
+				*number = strtod(value_buf,NULL);
 				ret = 1;
 				break;
+
 			default:
 				rdlog(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d",response->variables->type,__LINE__);
 		};
