@@ -77,9 +77,6 @@ struct monitor_value *new_monitor_value_array(const char *name,
 
 void rb_monitor_value_done(struct monitor_value *mv);
 
-void monitor_value_copy(struct monitor_value *dst,
-					const struct monitor_value *src);
-
 /** Sensors array */
 typedef struct rb_array rb_monitor_value_array_t;
 

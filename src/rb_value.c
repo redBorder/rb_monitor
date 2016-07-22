@@ -56,49 +56,6 @@ struct monitor_value *new_monitor_value_array(const char *name,
 	return ret;
 }
 
-/* Copy just the 'useful' data of the node, not list-related */
-void monitor_value_copy(struct monitor_value *dst,
-					const struct monitor_value *src) {
-	assert(src);
-	assert(dst);
-
-	memset(dst, 0, sizeof(*dst));
-
-#ifdef MONITOR_VALUE_MAGIC
-	dst->magic = MONITOR_VALUE_MAGIC;
-#endif
-
-        switch(src->type) {
-        case MONITOR_VALUE_T__VALUE:
-        	dst->value.timestamp = src->value.timestamp;
-        	dst->value.bad_value = src->value.bad_value;
-        	dst->value.value     = src->value.value;
-		if(src->value.string_value) {
-			dst->value.string_value = strdup(src->value.string_value);
-		}
-
-        	break;
-	case MONITOR_VALUE_T__ARRAY:
-		dst->array.children_count = src->array.children_count;
-		if (src->array.split_op_result) {
-			dst->array.split_op_result = calloc(1,
-					sizeof(dst->array.split_op_result));
-			if (dst->array.split_op_result) {
-				monitor_value_copy(dst->array.split_op_result,
-					src->array.split_op_result);
-			} else {
-				/// @TODO error treatment
-			}
-		}
-
-		for (size_t i=0; i<dst->array.children_count; ++i) {
-			monitor_value_copy(dst->array.children[i],
-					src->array.children[i]);
-		}
-		break;
-        };
-}
-
 static void print_monitor_value_enrichment_str(struct printbuf *printbuf,
 					const char *key, json_object *val) {
 	const char *str = json_object_get_string(val);
