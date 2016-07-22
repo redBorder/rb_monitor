@@ -73,11 +73,6 @@ const char *rb_sensor_name(const rb_sensor_t *sensor) {
 	return ret ? ret : failsafe_ret;
 }
 
-
-struct json_object *rb_sensor_enrichment(const rb_sensor_t *sensor) {
-	return sensor->data.enrichment;
-}
-
 /** Checks if a property is set. If not, it will show error message and will
   set aok to false
   @param ptr Pointer to check if a property is set.

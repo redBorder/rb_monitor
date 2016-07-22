@@ -177,7 +177,7 @@ static void rb_zk_mutex_error_done(struct rb_zk *zk,struct rb_zk_mutex *mutex,
   RD_AVL_REMOVE_ELM(&zk->leaders_avl,mutex);
   rb_zk_mutex_list_remove(&zk->leaders_nodes_list, mutex);
   pthread_rwlock_unlock(&zk->leaders_lock);
-  
+
   if(mutex->error_cb) {
     mutex->error_cb(zk,mutex,error,rc,mutex->cb_opaque);
   }
@@ -236,10 +236,10 @@ static int parent_node(char *path) {
   return NULL!=last_separator;
 }
 
-static void leader_get_children_complete(int rc, const struct String_vector *strings, 
+static void leader_get_children_complete(int rc, const struct String_vector *strings,
                                                                    const void *data);
 
-static void previous_leader_watcher(zhandle_t *zh, int type, int state, const char *path, 
+static void previous_leader_watcher(zhandle_t *zh, int type, int state, const char *path,
                                                                       void *_mutex) {
   char buf[BUFSIZ];
   snprintf(buf,sizeof(buf),"%s",path);
@@ -284,7 +284,7 @@ static void leader_get_children_complete(int rc, const struct String_vector *str
 
   if(0 != rc) {
     rdlog(LOG_ERR,"Can't get leader children list (%d)",rc);
-    
+
     return;
   }
 
@@ -396,7 +396,7 @@ static void zk_watcher_do_pending_locks(struct rb_zk *context) {
 
   if(zoo_state(context->handler) != ZOO_CONNECTED_STATE)
     return; //still can't do anything
-  
+
   pthread_mutex_lock(&context->pending_leaders_lock);
   pthread_rwlock_wrlock(&context->leaders_lock);
   rb_zk_mutex_list_foreach_safe(i,aux,&context->pending_leaders) {
@@ -411,7 +411,7 @@ static void zk_watcher_do_pending_locks(struct rb_zk *context) {
 
 struct rb_zk_mutex * rb_zk_mutex_lock(struct rb_zk *zk,const char *leader_path,
   rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque) {
-  
+
   struct rb_zk_mutex *_mutex = rb_zk_mutex_create_entry(zk,leader_path,
                                             schange_cb,error_cb,cb_opaque);
   rb_zk_mutex_list_insert(&zk->pending_leaders,_mutex);
@@ -437,7 +437,7 @@ void rb_zk_mutex_unlock(struct rb_zk *zk,struct rb_zk_mutex *mutex) {
   } else {
     // mutex already unlocked, since locks are ephimerals -> free resources
     delete_mutex_completed(0,mutex);
-  } 
+  }
 }
 
 static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
@@ -447,7 +447,7 @@ static void zk_watcher_clean_mutex(struct rb_zk *context,int type,int state) {
 
   snprintf(buf,sizeof(buf),"ZK disconnected [type=%s][state=%s]",
     type2String(type),state2String(state));
-  
+
   pthread_rwlock_wrlock(&context->leaders_lock);
   mutex_list_aux = context->leaders_nodes_list;
   rb_zk_mutex_list_init(&context->leaders_nodes_list);
@@ -485,7 +485,7 @@ struct rb_zk_queue_element {
   char *queue_element_path;
   void *opaque;
 
-  /// Watcher setted, but node added to list when setting, so we should 
+  /// Watcher setted, but node added to list when setting, so we should
   /// ignore it
   int should_ignore_watcher;
 
@@ -607,7 +607,7 @@ static void rb_zk_queue_get_element(int rc, const char *value,int value_len,
   }
 }
 
-static void rb_zk_queue_child_watcher(zhandle_t *zh, int type, int state, 
+static void rb_zk_queue_child_watcher(zhandle_t *zh, int type, int state,
                                     const char *path, void *watcherCtx) {
   if(type != ZOO_CHILD_EVENT) {
     rdlog(LOG_ERR,"Received an event != zhild event. returning.");
@@ -622,7 +622,7 @@ static void rb_zk_queue_child_watcher(zhandle_t *zh, int type, int state,
   }
 }
 
-static void rb_zk_queue_pop_minimum0(int rc, 
+static void rb_zk_queue_pop_minimum0(int rc,
   const struct String_vector *strings, const void *_data, int watcher_setted);
 
 static void rb_zk_queue_pop_minimum_no_watcher_setted(int rc,
@@ -635,7 +635,7 @@ static void rb_zk_queue_pop_minimum_watcher_setted(int rc,
   rb_zk_queue_pop_minimum0(rc,strings,_data,1);
 }
 
-static void rb_zk_queue_pop_minimum0(int rc, 
+static void rb_zk_queue_pop_minimum0(int rc,
   const struct String_vector *strings, const void *_data, int watcher_setted) {
 
   char buf[BUFSIZ];
@@ -706,7 +706,7 @@ static void rb_zk_queue_mutex_status_change(struct rb_zk_mutex *mutex,void *opaq
 
   const int mutex_obtained = rb_zk_mutex_obtained(mutex);
   rdlog(LOG_DEBUG,"Queue mutex status changed to %d",mutex_obtained);
-  
+
   if(mutex_obtained) {
     rb_zk_queue_pop_nolock(qelm->rb_zk,qelm);
   }

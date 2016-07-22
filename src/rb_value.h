@@ -64,9 +64,15 @@ struct monitor_value {
 	};
 };
 
-struct monitor_value *new_monitor_value_array(const char *name,
-		size_t n_children, struct monitor_value **children,
-		struct monitor_value *split_op);
+/** Creates a new monitor value array
+ * @param n_children Number of childrens
+ * @param children Childrens
+ * @param split_op Split operation
+ * @return New monitor value of array type
+ */
+struct monitor_value *new_monitor_value_array(size_t n_children,
+						struct monitor_value **children,
+						struct monitor_value *split_op);
 
 #ifdef MONITOR_VALUE_MAGIC
 #define rb_monitor_value_assert(monitor) \
@@ -132,14 +138,11 @@ struct rb_sensor_s;
 /** Print a sensor value
   @param monitor_value Value to print
   @param monitor Value's monitor
-  @param sensor  Monitor's sensor
-  @param prev_timestamp Do not print monitor value instance if instance
-         timestamp is below this value (if provided)
-  @return new printbuf with result string (has to be freed with )
+  @return Message array with monitor value
   */
 rb_message_array_t *print_monitor_value(
- 	const struct monitor_value *monitor_value,
-	const struct rb_monitor_s *monitor, const struct rb_sensor_s *sensor);
+			 	const struct monitor_value *monitor_value,
+				const struct rb_monitor_s *monitor);
 
 /** Compare monitor's timestamp
   @param m1 First monitor to compare

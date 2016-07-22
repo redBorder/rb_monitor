@@ -26,7 +26,7 @@
 struct monitor_snmp_new_session_config{
 	const char * community;
 	int timeout;
-	int flags;
+	u_long flags;
 	long version;
 };
 

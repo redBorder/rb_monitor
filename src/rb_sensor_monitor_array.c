@@ -39,7 +39,7 @@ rb_monitor_t *rb_monitors_array_elm_at(rb_monitors_array_t *array, size_t i) {
 rb_monitors_array_t *parse_rb_monitors(
 				json_object *monitors_array_json,
 				json_object *sensor_enrichment) {
-	const size_t monitors_len = json_object_array_length(
+	const size_t monitors_len = (size_t)json_object_array_length(
 							monitors_array_json);
 	rb_monitors_array_t *ret = rb_monitors_array_new(monitors_len);
 
@@ -72,7 +72,6 @@ rb_monitors_array_t *parse_rb_monitors(
   */
 static rb_message_array_t *process_monitor_value_v_print(
 					const rb_monitor_t *monitor,
-					const rb_sensor_t *sensor,
 					const struct monitor_value *new_mv,
 					const struct monitor_value *old_mv) {
 	assert(new_mv->type == MONITOR_VALUE_T__ARRAY);
@@ -120,7 +119,7 @@ static rb_message_array_t *process_monitor_value_v_print(
 		},
 	};
 
-	return print_monitor_value(&to_print, monitor, sensor);
+	return print_monitor_value(&to_print, monitor);
 }
 
 /// Swap two pointers
@@ -128,13 +127,11 @@ static rb_message_array_t *process_monitor_value_v_print(
 
 /** Print all elements of new array that have changed
   @param monitor Monitor of monitors values
-  @param sensor Sensor of monitor
   @param new_mv New monitor value
   @param old_mv Previous monitor value we had
   @return Monitor messages to send
   */
 static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
-					const rb_sensor_t *sensor,
 					struct monitor_value *new_mv,
 					struct monitor_value *old_mv) {
 	rb_message_array_t *ret = NULL;
@@ -143,8 +140,7 @@ static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
 	assert(old_mv->type == MONITOR_VALUE_T__ARRAY);
 
 	if (rb_monitor_send(monitor)) {
-		ret = process_monitor_value_v_print(monitor, sensor, new_mv,
-									old_mv);
+		ret = process_monitor_value_v_print(monitor, new_mv, old_mv);
 	}
 
 	SWAP(old_mv->array.children_count, new_mv->array.children_count);
@@ -155,14 +151,12 @@ static rb_message_array_t *process_monitor_value_v(const rb_monitor_t *monitor,
 
 /** Process a monitor value
   @param monitor Monitor this monitor value is related
-  @param sensor  Sensor of the monitor
   @param monitor_value New monitor value to process
   @param old_mv Last known monitor value
   @param ret Message list to report
   @return New monitor value we should save
   */
 static struct monitor_value *process_monitor_value(const rb_monitor_t *monitor,
-				struct rb_sensor_s *sensor,
 				struct monitor_value *monitor_value,
 				struct monitor_value *old_mv,
 				rb_message_list *ret) {
@@ -180,8 +174,7 @@ static struct monitor_value *process_monitor_value(const rb_monitor_t *monitor,
 
 	if (update_value) {
 		if(rb_monitor_send(monitor)) {
-			msgs = print_monitor_value(monitor_value, monitor,
-									sensor);
+			msgs = print_monitor_value(monitor_value, monitor);
 		}
 
 		if (old_mv) {
@@ -189,8 +182,7 @@ static struct monitor_value *process_monitor_value(const rb_monitor_t *monitor,
 		}
 		ret_mv = monitor_value;
 	} else if (monitor_value->type == MONITOR_VALUE_T__ARRAY) {
-		msgs = process_monitor_value_v(monitor, sensor, monitor_value,
-									old_mv);
+		msgs = process_monitor_value_v(monitor, monitor_value, old_mv);
 	} else {
 		// No use for the new monitor value
 		rb_monitor_value_done(monitor_value);
@@ -243,8 +235,7 @@ bool process_monitors_array(struct _worker_info *worker_info,
 		}
 		pthread_mutex_unlock(&worker_info->snmp_session_mutex);
 
-		process_ctx = new_process_sensor_monitor_ctx(monitors->count,
-								snmp_sessp);
+		process_ctx = new_process_sensor_monitor_ctx(snmp_sessp);
 	}
 
 	for (size_t i=0; aok && i<monitors->count; ++i) {
@@ -261,7 +252,7 @@ bool process_monitors_array(struct _worker_info *worker_info,
 					last_known_monitor_values->elms[i];
 
 			last_known_monitor_values->elms[i] =
-				process_monitor_value(monitor, sensor, value,
+				process_monitor_value(monitor, value,
 					last_known_monitor_value_i, ret);
 		}
 

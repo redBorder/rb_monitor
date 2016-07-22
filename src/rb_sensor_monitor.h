@@ -60,7 +60,6 @@ void rb_monitor_done(rb_monitor_t *monitor);
   @return New monitor process ctx
   */
 struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
-				size_t monitors_count,
 				struct monitor_snmp_session *snmp_sessp);
 
 /** Destroy process sensor monitor context

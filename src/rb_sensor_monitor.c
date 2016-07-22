@@ -66,9 +66,9 @@ struct rb_monitor_s {
 	  key with value instance-%d */
 	const char *instance_prefix;
 	const char *group_id;         ///< Sensor group id
-	uint64_t send; ///< Send the monitor to output or not
-	uint64_t timestamp_given; ///< Timestamp is given in response
-	uint64_t integer; ///< Response must be an integer
+	bool send; ///< Send the monitor to output or not
+	bool timestamp_given; ///< Timestamp is given in response
+	bool integer; ///< Response must be an integer
 	const char *splittok; ///< How to split response
 	const char *splitop; ///< Do a final operation with tokens
 	const char *cmd_arg; ///< Argument given to command
@@ -81,7 +81,7 @@ void assert_rb_monitor(const rb_monitor_t *monitor) {
 }
 #endif
 
-const char *rb_monitor_type(const rb_monitor_t *monitor) {
+static const char *rb_monitor_type(const rb_monitor_t *monitor) {
 	assert(monitor);
 
 	switch(monitor->type) {
@@ -151,9 +151,10 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 	}
 
 	evaluator_get_variables(evaluator, &all_vars.vars, &all_vars.count);
-	(*vars) = malloc(all_vars.count*sizeof((*vars)[0]));
+	(*vars) = malloc((size_t)all_vars.count*sizeof((*vars)[0]));
 	if (*vars == NULL) {
-		rdlog(LOG_CRIT, "Couldn't allocate memory");
+		rdlog(LOG_CRIT, "Couldn't allocate memory for %d vars",
+			all_vars.count);
 		goto no_deps;
 	}
 	for (int i=0; i<all_vars.count; ++i) {
@@ -168,7 +169,7 @@ void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
 			goto no_deps;
 		}
 	}
-	*vars_size = all_vars.count;
+	*vars_size = (size_t)all_vars.count;
 	evaluator_destroy(evaluator);
 	return;
 
@@ -290,6 +291,7 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 			PARSE_CJSON_CHILD_STR(json_monitor, "group_name", NULL);
 
 
+	/// @todo change to true/false
 	int aux_timestamp_given = PARSE_CJSON_CHILD_INT64(json_monitor,
 							"timestamp_given", 0);
 
@@ -402,7 +404,6 @@ struct process_sensor_monitor_ctx {
 };
 
 struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
-				size_t monitors_count,
 				struct monitor_snmp_session *snmp_sessp) {
 	struct process_sensor_monitor_ctx *ret = calloc(1, sizeof(*ret));
 	if (NULL == ret) {
@@ -420,26 +421,21 @@ void destroy_process_sensor_monitor_ctx(
 }
 
 /* FW declaration */
-static struct monitor_value *process_novector_monitor(
-			const rb_monitor_t *monitor, const char *value_buf,
+static struct monitor_value *process_novector_monitor(const char *value_buf,
 			double number, time_t now);
 
 static struct monitor_value *process_vector_monitor(
 			const rb_monitor_t *monitor, const char *value_buf,
-			double number, time_t now);
+			time_t now);
 
 /** Base function to obtain an external value, and to manage it as a vector or
   as an integer
-  @param process_ctx Processing context
   @param monitor Monitor to process
-  @param send Send value to kafka
-  @todo delete send argument, just do not add to valueslist vector!
   @param get_value_cb Callback to get value
   @param get_value_cb_ctx Context send to get_value_cb
   @return Monitor values array
   */
 static struct monitor_value *rb_monitor_get_external_value(
-		struct process_sensor_monitor_ctx *process_ctx,
 		const rb_monitor_t *monitor,
 		bool (*get_value_cb)(char *buf, size_t bufsiz, double *number,
 						void *ctx, const char *arg),
@@ -464,13 +460,9 @@ static struct monitor_value *rb_monitor_get_external_value(
 						monitor->name);
 			return false;
 		}
-		ret = process_novector_monitor(monitor, value_buf, number,
-								time(NULL));
+		ret = process_novector_monitor(value_buf, number, time(NULL));
 	} else /* We have a vector here */ {
-		/** @todo delete parameters that could be sent
-			using monitor */
-		ret = process_vector_monitor(monitor, value_buf, number,
-								time(NULL));
+		ret = process_vector_monitor(monitor, value_buf, time(NULL));
 	}
 
 	return ret;
@@ -481,8 +473,10 @@ static struct monitor_value *rb_monitor_get_system_external_value(
 				const rb_monitor_t *monitor,
 				struct process_sensor_monitor_ctx *process_ctx,
 				rb_monitor_value_array_t *ops_vars) {
-	return rb_monitor_get_external_value(process_ctx, monitor,
-						system_solve_response, NULL);
+	(void)process_ctx;
+	(void)ops_vars;
+	return rb_monitor_get_external_value(monitor, system_solve_response,
+									NULL);
 }
 
 /** Convenience function */
@@ -497,8 +491,9 @@ static struct monitor_value *rb_monitor_get_snmp_external_value(
 				const rb_monitor_t *monitor,
 				struct process_sensor_monitor_ctx *process_ctx,
 				rb_monitor_value_array_t *op_vars) {
-	return rb_monitor_get_external_value(process_ctx, monitor,
-				snmp_solve_response0, process_ctx->snmp_sessp);
+	(void)op_vars;
+	return rb_monitor_get_external_value(monitor, snmp_solve_response0,
+						process_ctx->snmp_sessp);
 }
 
 /** Create a libmatheval vars using op_vars */
@@ -579,7 +574,7 @@ static struct monitor_value *rb_monitor_op_value0(void *f,
 	char val_buf[64];
 	sprintf(val_buf,"%lf",number);
 
-	return process_novector_monitor(monitor, val_buf, number, now);
+	return process_novector_monitor(val_buf, number, now);
 }
 
 /** Do a monitor value operation, with no array involved
@@ -692,12 +687,12 @@ static struct monitor_value *rb_monitor_op_vector(void *f,
 		snprintf(string_value, sizeof(string_value), "%lf",
 								split_op_value);
 
-		split_op = process_novector_monitor(monitor, string_value,
+		split_op = process_novector_monitor(string_value,
 			split_op_value, now);
 	}
 
-	return new_monitor_value_array(monitor->name,
-		mv_0->array.children_count, children, split_op);
+	return new_monitor_value_array(mv_0->array.children_count, children,
+								split_op);
 }
 
 /** Process an operation monitor
@@ -710,6 +705,7 @@ static struct monitor_value *rb_monitor_get_op_result(
 			const rb_monitor_t *monitor,
 			struct process_sensor_monitor_ctx *process_ctx,
 			rb_monitor_value_array_t *op_vars) {
+	(void)process_ctx;
 	struct monitor_value *ret = NULL;
 	const char *operation = monitor->cmd_arg;
 
@@ -797,8 +793,7 @@ struct monitor_value *process_sensor_monitor(
   @param value Value in double format
   @param now Time of processing
 */
-static struct monitor_value *process_novector_monitor(
-			const rb_monitor_t *monitor, const char *value_buf,
+static struct monitor_value *process_novector_monitor(const char *value_buf,
 			double value, time_t now) {
 	struct monitor_value *mv = NULL;
 
@@ -882,20 +877,19 @@ static bool extract_vector_value(const char *vector_values,
 	}
 
 	*str_value = vector_values;
-	*str_size = end_token - vector_values;
+	*str_size = (size_t)(end_token - vector_values);
 	return true;
 }
 
 /** Process a vector monitor
   @param monitor Monitor to process
   @param value_buf Value to process (string format)
-  @param number Value to process (double format)
   @param now This time
   @todo this could be joint with operation on vector
 */
 static struct monitor_value *process_vector_monitor(
 			const rb_monitor_t *monitor, const char *value_buf,
-			double number, time_t now) {
+			time_t now) {
 	const size_t n_children = vector_elements(value_buf,
 							monitor->splittok);
 	const char *tok = NULL;
@@ -939,7 +933,7 @@ static struct monitor_value *process_vector_monitor(
 			continue;
 		}
 
-		children[count] = process_novector_monitor(monitor,
+		children[count] = process_novector_monitor(
 			i_value_str, i_value, i_timestamp ? i_timestamp : now);
 
 		if (NULL != children[count]) {
@@ -957,10 +951,9 @@ static struct monitor_value *process_vector_monitor(
 		/// @todo check snprint result
 		snprintf(split_op_result, sizeof(split_op_result),
 							"%lf", result);
-		split_op = process_novector_monitor(monitor,
-					split_op_result, result, now);
+		split_op = process_novector_monitor(split_op_result, result,
+									now);
 	}
 
-	return new_monitor_value_array(monitor->name, n_children, children,
-								split_op);
+	return new_monitor_value_array(n_children, children, split_op);
 }

@@ -84,7 +84,7 @@ static const char *str_default_config = /* "conf:" */ "{"
 
 struct _main_info{
 	const char * syslog_indent;
-	int64_t sleep_main,threads;
+	uint64_t sleep_main,threads;
 #ifdef HAVE_ZOOKEEPER
 	struct rb_monitor_zk *zk;
 #endif
@@ -149,7 +149,7 @@ static void parse_rdkafka_config_json(struct _worker_info *worker_info,
 #ifdef HAVE_ZOOKEEPER
 static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_info *worker_info,json_object *zk_config) {
 	char *host = NULL;
-	uint64_t pop_watcher_timeout = 0,push_timeout = 0;
+	int64_t pop_watcher_timeout = 0,push_timeout = 0;
 	json_object *zk_sensors = NULL;
 
 	json_object_object_foreach(zk_config, key, val) {
@@ -178,10 +178,17 @@ static void parse_zookeeper_json(struct _main_info *main_info, struct _worker_in
 	} else if (0 == push_timeout) {
 		rdlog(LOG_INFO,"No pop push_timeout specified. We will never be ZK masters.");
 		return;
+	} else if (push_timeout < 0) {
+		rdlog(LOG_ERR, "Can't set a zk push timeout < 0 (%"PRId64")",
+			push_timeout);
+		return;
+	} else if (pop_watcher_timeout < 0) {
+		rdlog(LOG_ERR, "Can't set a zk pop timeout < 0 (%"PRId64")",
+			pop_watcher_timeout);
 	}
 
-	main_info->zk = init_rbmon_zk(host,pop_watcher_timeout,
-		push_timeout,zk_sensors,worker_info->queue);
+	main_info->zk = init_rbmon_zk(host, (uint64_t)pop_watcher_timeout,
+		(uint64_t)push_timeout, zk_sensors, worker_info->queue);
 }
 #endif
 
@@ -191,11 +198,11 @@ static json_bool parse_json_config(json_object * config,struct _worker_info *wor
 	int ret = TRUE;
 	json_object_object_foreach(config, key, val){
 		errno = 0;
-		if(0==strncmp(key,"debug",sizeof "debug"-1))
+		if(0==strcmp(key,"debug"))
 		{
 			rd_log_set_severity(json_object_get_int64(val));
 		}
-		else if(0==strncmp(key,"stdout",sizeof "stdout"-1))
+		else if (0==strcmp(key,"stdout"))
 		{
 #if 0
 			/// @TODO recover
@@ -205,7 +212,7 @@ static json_bool parse_json_config(json_object * config,struct _worker_info *wor
 				worker_info->debug_output_flags &= ~DEBUG_STDOUT;
 #endif
 		}
-		else if(0==strncmp(key,"syslog",sizeof "syslog"-1))
+		else if (0==strcmp(key,"syslog"))
 		{
 #if 0
 			/// @TODO recover
@@ -215,77 +222,87 @@ static json_bool parse_json_config(json_object * config,struct _worker_info *wor
 				worker_info->debug_output_flags &= ~DEBUG_SYSLOG;
 #endif
 		}
-		else if(0==strncmp(key,"threads",sizeof "threads"-1))
+		else if (0==strcmp(key,"threads"))
 		{
-			main_info->threads = json_object_get_int64(val);
+			int64_t threads = json_object_get_int64(val);
+			if (threads <= 0) {
+				rdlog(LOG_WARNING,
+					"Can't use %"PRId64" threads",
+					threads);
+			} else {
+				main_info->threads = (uint64_t) threads;
+			}
 		}
-		else if(0==strncmp(key,"timeout",sizeof "timeout"-1))
+		else if (0==strcmp(key,"timeout"))
 		{
 			worker_info->timeout = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"max_snmp_fails",sizeof "max_snmp_fails"-1))
+		else if (0==strcmp(key,"max_snmp_fails"))
 		{
 			worker_info->max_snmp_fails = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"max_kafka_fails",sizeof "max_kafka_fails"-1))
+		else if (0==strcmp(key,"max_kafka_fails"))
 		{
 			worker_info->max_kafka_fails = json_object_get_string(val);
 		}
-		else if(0==strncmp(key,"sleep_main",sizeof "sleep_main"-1))
+		else if (0==strcmp(key,"sleep_main"))
 		{
-			main_info->sleep_main = json_object_get_int64(val);
+			int64_t sleep = json_object_get_int64(val);
+			if (sleep <= 0) {
+				rdlog(LOG_WARNING,
+					"Can't sleep for %"PRId64"\"", sleep);
+			} else {
+				main_info->sleep_main = (uint64_t)sleep;
+			}
 		}
-		else if(0==strncmp(key,"kafka_broker", strlen("kafka_broker")))
+		else if (0==strcmp(key,"kafka_broker"))
 		{
-			worker_info->kafka_broker	= json_object_get_string(val);
+			worker_info->kafka_broker = json_object_get_string(val);
 		}
-		else if(0==strncmp(key,"kafka_topic", strlen("kafka_topic")))
+		else if (0==strcmp(key,"kafka_topic"))
 		{
-			worker_info->kafka_topic	= json_object_get_string(val);
+			worker_info->kafka_topic = json_object_get_string(val);
 		}
-		else if(0==strncmp(key,"kafka_start_partition", strlen("kafka_start_partition"))
-			 || 0==strncmp(key,"kafka_end_partition", strlen("kafka_end_partition")))
-		{
-			rdlog(LOG_WARNING,"%s Can only be specified in kafka 0.7. Skipping",key);
-		}
-		else if(0==strncmp(key,"kafka_timeout", strlen("kafka_timeout")))
+		else if (0==strcmp(key,"kafka_timeout"))
 		{
 			worker_info->kafka_timeout = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"sleep_worker",sizeof "sleep_worker"-1))
+		else if (0==strcmp(key,"sleep_worker"))
 		{
 			worker_info->sleep_worker = json_object_get_int64(val);
 		}
-		else if (0 == strncmp(key, "http_endpoint", strlen("http_endpoint")))
+		else if (0 == strcmp(key, "http_endpoint"))
 		{
 #ifdef HAVE_RBHTTP
-			worker_info->http_endpoint	= json_object_get_string(val);
+			worker_info->http_endpoint = json_object_get_string(val);
 #else
-			rdlog(LOG_ERR,"rb_monitor does not have librbhttp support, so %s key is invalid. Please compile it with %s",
-					key,ENABLE_RBHTTP_CONFIGURE_OPT);
+			rdlog(LOG_ERR,
+				"rb_monitor does not have librbhttp support, so"
+				" %s key is invalid. Please compile it with %s",
+					key, ENABLE_RBHTTP_CONFIGURE_OPT);
 #endif
 		}
-		else if (0==strncmp(key, CONFIG_RDKAFKA_KEY, strlen(CONFIG_RDKAFKA_KEY)))
+		else if (0==strcmp(key, CONFIG_RDKAFKA_KEY))
 		{
 			parse_rdkafka_config_json(worker_info,key,val);
 		}
-		else if(0==strncmp(key,"http_max_total_connections",sizeof "http_max_total_connections"-1))
+		else if (0==strcmp(key,"http_max_total_connections"))
 		{
 			worker_info->http_max_total_connections = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"http_timeout",sizeof "http_timeout"-1))
+		else if (0==strcmp(key,"http_timeout"))
 		{
 			worker_info->http_timeout = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"http_connttimeout",sizeof "http_connttimeout"-1))
+		else if (0==strcmp(key,"http_connttimeout"))
 		{
 			worker_info->http_connttimeout = json_object_get_int64(val);
 		}
-		else if(0==strncmp(key,"http_verbose",sizeof "http_verbose"-1))
+		else if (0==strcmp(key,"http_verbose"))
 		{
 			worker_info->http_verbose = json_object_get_int64(val);
 		}
-		else if(0==strcmp(key,"http_insecure"))
+		else if (0==strcmp(key,"http_insecure"))
 		{
 #ifdef HAVE_RBHTTP
 			worker_info->http_insecure = json_object_get_int64(val);
@@ -294,11 +311,11 @@ static json_bool parse_json_config(json_object * config,struct _worker_info *wor
 					key,ENABLE_RBHTTP_CONFIGURE_OPT);
 #endif
 		}
-		else if(0==strncmp(key,"rb_http_max_messages",sizeof "rb_http_max_messages"-1))
+		else if (0==strcmp(key,"rb_http_max_messages"))
 		{
 			worker_info->rb_http_max_messages = json_object_get_int64(val);
 		}
-		else if(0==strcmp(key,"rb_http_mode"))
+		else if (0==strcmp(key,"rb_http_mode"))
 		{
 #ifdef HAVE_RBHTTP
 			const char *sval = json_object_get_string(val);
@@ -525,7 +542,8 @@ static rb_sensors_array_t *parse_sensors(struct _worker_info *worker_info,
 		return NULL;
 	}
 
-	const size_t sensors_length = json_object_array_length(json_sensors);
+	const size_t sensors_length = (size_t)json_object_array_length(
+								json_sensors);
 	rb_sensors_array_t *ret = rb_sensors_array_new(sensors_length);
 
 	for (size_t i=0; i<sensors_length; ++i) {
@@ -742,7 +760,7 @@ int main(int argc, char  *argv[])
 			rdlog(LOG_CRIT,"[EE] Unable to allocate threads memory. Exiting.");
 		}else{
 			rdlog(LOG_INFO,"Main thread started successfuly. Starting workers threads.");
-			for(int i=0;i<main_info.threads;++i){
+			for(size_t i=0; i<main_info.threads; ++i){
 				pthread_create(&pd_thread[i], NULL, worker, (void*)&worker_info);
 			}
 
@@ -752,7 +770,7 @@ int main(int argc, char  *argv[])
 			}
 			rdlog(LOG_INFO,"Leaving, wait for workers...");
 
-			for(int i=0;i<main_info.threads;++i){
+			for(size_t i=0; i<main_info.threads; ++i){
 				pthread_join(pd_thread[i], NULL);
 			}
 			free(pd_thread);

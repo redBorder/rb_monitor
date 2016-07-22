@@ -25,9 +25,9 @@
 #include <librd/rdmem.h>
 #include <json-c/printbuf.h>
 
-struct monitor_value *new_monitor_value_array(const char *name,
-		size_t n_children, struct monitor_value **children,
-		struct monitor_value *split_op) {
+struct monitor_value *new_monitor_value_array(size_t n_children,
+					struct monitor_value **children,
+					struct monitor_value *split_op) {
 	struct monitor_value *ret = calloc(1, sizeof(*ret));
 	if (NULL == ret) {
 		if (split_op) {
@@ -97,7 +97,7 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,
 		json_object *val = json_object_iter_peek_value(&i);
 
 		const json_type type = json_object_get_type(val);
-		switch(type){
+		switch(type) {
 			case json_type_string:
 				print_monitor_value_enrichment_str(
 					printbuf, key, val);
@@ -132,6 +132,11 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,
 					"Can't enrich with objects/array at this time");
 				break;
 			}
+			default:
+				rdlog(LOG_ERR,
+					"Don't know how to duplicate JSON type "
+					"%d", type);
+				break;
 		};
 	}
 }
@@ -189,7 +194,7 @@ static void print_monitor_value0(rb_message *message,
 		sprintbuf(printbuf, "}");
 
 		message->payload = printbuf->buf;
-		message->len = printbuf->bpos;
+		message->len = (size_t)printbuf->bpos;
 
 		printbuf->buf = NULL;
 		printbuf_free(printbuf);
@@ -198,8 +203,8 @@ static void print_monitor_value0(rb_message *message,
 }
 
 rb_message_array_t *print_monitor_value(
-		const struct monitor_value *monitor_value,
-		const rb_monitor_t *monitor, const rb_sensor_t *sensor) {
+				const struct monitor_value *monitor_value,
+				const rb_monitor_t *monitor) {
 	const size_t ret_size = monitor_value->type == MONITOR_VALUE_T__VALUE ?
 		1 : monitor_value->array.children_count +
 			(monitor_value->array.split_op_result ? 1 : 0);
@@ -238,9 +243,9 @@ rb_message_array_t *print_monitor_value(
 	return ret;
 }
 
-static ssize_t pos_array_length(ssize_t *pos) {
+static size_t pos_array_length(ssize_t *pos) {
 	assert(pos);
-	ssize_t i = 0;
+	size_t i = 0;
 	for (i=0; -1 != pos[i]; ++i);
 	return i;
 }
@@ -262,7 +267,7 @@ rb_monitor_value_array_t *rb_monitor_value_array_select(
 	assert(array);
 	assert(pos);
 
-	for (ssize_t i=0; -1 != pos[i]; ++i) {
+	for (size_t i=0; -1 != pos[i]; ++i) {
 		rb_monitor_value_array_add(ret, array->elms[pos[i]]);
 	}
 
