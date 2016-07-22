@@ -42,7 +42,6 @@ function checks {
     mkl_define_set "OS name" "osName" "`uname`"
 
     mkl_lib_check "librd" "" fail CC "-lrd -lpthread -lz -lrt"
-    mkl_lib_check "pcap" "" fail CC "-lpcap"
 
     mkl_lib_check pthread HAVE_LIBPTHREAD fail CC "-lpthread" \
         "#include <pthread.h>
