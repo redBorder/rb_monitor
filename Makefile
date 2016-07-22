@@ -97,4 +97,7 @@ coverage: check_coverage $(TESTS)
 				${COVERAGE_OUTPUT_DIRECTORY} > coverage.out
 	# ./display_coverage.sh
 
+rpm: clean
+	$(MAKE) -C packaging/rpm
+
 -include $(DEPS)

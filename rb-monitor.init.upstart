@@ -1,0 +1,24 @@
+description "rb-monitor service" 
+author      "jjprieto@redborder.com" 
+
+start on filesystem or runlevel [2345]
+stop on shutdown
+
+respawn
+
+script
+
+    echo $$ > /var/run/rb-monitor.pid
+    exec /opt/rb/bin/rb_monitor -c /opt/rb/etc/rb-monitor/config.json
+
+end script
+
+pre-start script
+    logger -t rb-monitor "Starting rb-monitor" 
+end script
+
+pre-stop script
+    rm /var/run/rb-monitor.pid
+    logger -t rb-monitor "Stopping rb-monitor" 
+end script
+
