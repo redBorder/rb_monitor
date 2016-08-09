@@ -31,6 +31,9 @@ after_success:
   - coveralls --exclude /usr/lib --exclude tests --gcov-options '\-lp'
 
 before_deploy:
+  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make clean
+  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor ./configure
+  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make 
   - tar -cvzf rb_monitor-${TRAVIS_TAG}.tar.gz rb_monitor
 
 deploy:
