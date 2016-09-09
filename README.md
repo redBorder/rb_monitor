@@ -1,5 +1,5 @@
-[![Build Status](https://travis-ci.org/redBorder/rb_monitor.svg?branch=redborder)](https://travis-ci.org/redBorder/rb_monitor)
-[![Coverage Status](https://coveralls.io/repos/github/redBorder/rb_monitor/badge.svg?branch=redborder)](https://coveralls.io/github/redBorder/rb_monitor?branch=redborder)
+[![Build Status](https://travis-ci.org/redBorder/rb_monitor.svg?branch=master)](https://travis-ci.org/redBorder/rb_monitor)
+[![Coverage Status](https://coveralls.io/repos/github/redBorder/rb_monitor/badge.svg?branch=master)](https://coveralls.io/github/redBorder/rb_monitor?branch=redborder)
 
 # rb_monitor
 
