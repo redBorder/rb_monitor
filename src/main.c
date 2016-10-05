@@ -57,19 +57,6 @@ static const char CONFIG_SENSORS_KEY[] = "sensors";
 
 static const char ENABLE_RBHTTP_CONFIGURE_OPT[] = "--enable-rbhttp";
 
-#ifndef SIMPLEQ_FOREACH_SAFE
-/*
-* SIMPLEQ_FOREACH_SAFE() provides a traversal where the current iterated element
-* may be freed or unlinked.
-* It does not allow freeing or modifying any other element in the list,
-* at least not the next element.
-*/
-#define SIMPLEQ_FOREACH_SAFE(elm,tmpelm,head,field)   \
-for ((elm) = SIMPLEQ_FIRST(head) ;                    \
-(elm) && ((tmpelm) = SIMPLEQ_NEXT((elm), field), 1) ; \
-(elm) = (tmpelm))
-#endif
-
 /// Fallback config in json format
 static const char *str_default_config = /* "conf:" */ "{"
     "\"debug\": 100,"
