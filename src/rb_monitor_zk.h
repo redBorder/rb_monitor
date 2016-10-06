@@ -15,6 +15,7 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+
 #pragma once
 
 #include "config.h"
@@ -25,8 +26,11 @@
 #include <librd/rdqueue.h>
 
 struct rb_monitor_zk;
-struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
-  uint64_t push_timeout,json_object *zk_sensors,rd_fifoq_t *workers_queue);
+struct rb_monitor_zk *init_rbmon_zk(char *host,
+				    uint64_t pop_watcher_timeout,
+				    uint64_t push_timeout,
+				    json_object *zk_sensors,
+				    rd_fifoq_t *workers_queue);
 
 void stop_zk(struct rb_monitor_zk *zk);
 

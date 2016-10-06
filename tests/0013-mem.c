@@ -8,10 +8,14 @@
 #include <librd/rd.h>
 #include <librd/rdfloat.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
+
+#include <stdarg.h>
+#include <string.h>
+
+// clang-format off
 
 /// Just include enough stuff to use all c/mallocs in rb_monitor!
 static const char basic_sensor[] = "{\n"

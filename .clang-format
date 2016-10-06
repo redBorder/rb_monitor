@@ -1,0 +1,35 @@
+BasedOnStyle:  LLVM
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBraces: Attach
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: false
+AlignEscapedNewlinesLeft: false
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakBeforeMultilineStrings: false
+UseTab: Always
+IndentWidth: 8
+TabWidth: 8
+ColumnLimit: 80
+
+# TODO: Do not apply in initializers! a = {1, 2} is (badly) also indented
+ContinuationIndentWidth: 16
+
+#
+# Penalties
+#
+
+# Penalty for putting the return type of a function onto its own line.
+PenaltyReturnTypeOnItsOwnLine: 0
+
+# The penalty for breaking a function call after “call(”.
+PenaltyBreakBeforeFirstCallParameter: 10
+
+# The penalty for each line break introduced inside a comment.
+PenaltyBreakComment: 00
+
+#The penalty for each line break introduced inside a string literal.
+PenaltyBreakString: 100
+
+# The penalty for each character outside of the column limit.
+PenaltyExcessCharacter: 1000

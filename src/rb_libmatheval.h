@@ -23,7 +23,7 @@
 
 /** Libmatheval needed variables */
 struct libmatheval_vars {
-	char **names; ///< Variable names
+	char **names;   ///< Variable names
 	double *values; ///< Variable values
 	size_t count;
 };

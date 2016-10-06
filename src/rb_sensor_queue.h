@@ -18,11 +18,12 @@
 
 #pragma once
 
-#include <assert.h>
-
 #include "rb_sensor.h"
-#include <librd/rdthread.h>
+
 #include <librd/rdqueue.h>
+#include <librd/rdthread.h>
+
+#include <assert.h>
 
 /// Sensors queue
 typedef rd_fifoq_t sensor_queue_t;
@@ -47,11 +48,11 @@ void sensor_queue_done(sensor_queue_t *queue);
   @tmo_ms Timeout in ms
   @return Sensor extracted, or NULL if any
   */
-static rb_sensor_t *pop_sensor(sensor_queue_t *queue, int tmo_ms)
-							__attribute__((unused));
+static rb_sensor_t *
+pop_sensor(sensor_queue_t *queue, int tmo_ms) __attribute__((unused));
 static rb_sensor_t *pop_sensor(sensor_queue_t *queue, int tmo_ms) {
 	rb_sensor_t *sensor = NULL;
-	rd_fifoq_elm_t *elm = rd_fifoq_pop_timedwait(queue,tmo_ms);
+	rd_fifoq_elm_t *elm = rd_fifoq_pop_timedwait(queue, tmo_ms);
 	if (elm) {
 		sensor = elm->rfqe_ptr;
 		rd_fifoq_elm_release(queue, elm);

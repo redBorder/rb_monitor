@@ -25,8 +25,8 @@
   @return New messages array
   */
 rb_message_array_t *new_messages_array(size_t s) {
-	rb_message_array_t *ret = calloc(1,sizeof(ret) +
-							s*sizeof(ret->msgs[0]));
+	rb_message_array_t *ret =
+			calloc(1, sizeof(ret) + s * sizeof(ret->msgs[0]));
 	if (ret) {
 		ret->count = s;
 	}

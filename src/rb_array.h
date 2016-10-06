@@ -20,9 +20,9 @@
 
 #include "config.h"
 
-#include <string.h>
-#include <stdlib.h>
 #include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
 /** Generic array */
 struct rb_array {
@@ -47,8 +47,8 @@ static bool rb_array_full(struct rb_array *array) {
 }
 
 /** Add an element to sensors array */
-static void rb_array_add(struct rb_array *array, void *elm)
-							__attribute__((unused));
+static void
+rb_array_add(struct rb_array *array, void *elm) __attribute__((unused));
 static void rb_array_add(struct rb_array *array, void *elm) {
 	if (!rb_array_full(array)) {
 		array->elms[array->count++] = elm;

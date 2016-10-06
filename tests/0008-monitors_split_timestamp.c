@@ -6,32 +6,55 @@
 #include <librd/rd.h>
 #include <librd/rdfloat.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
 
-#define TIME_VARIABLE_CMD(pid_prefix, FIRST_ACTION, SECOND_ACTION) \
-	"test -f \\\"" pid_prefix "$PPID.pid\\\" && " \
-	"(" SECOND_ACTION "; rm \\\"" pid_prefix "$PPID.pid\\\";) || " \
+#include <stdarg.h>
+#include <string.h>
+
+#define TIME_VARIABLE_CMD(pid_prefix, FIRST_ACTION, SECOND_ACTION)             \
+	"test -f \\\"" pid_prefix "$PPID.pid\\\" && "                          \
+	"(" SECOND_ACTION "; rm \\\"" pid_prefix "$PPID.pid\\\";) || "         \
 	"(" FIRST_ACTION "; touch \\\"" pid_prefix "$PPID.pid\\\";)"
 
-#define LOAD_5_OP TIME_VARIABLE_CMD("load-5", "echo '10:20;30:40'", \
-							"echo '10:20;60:40'")
-#define V_INCR_END TIME_VARIABLE_CMD("v-increase-end", "echo '10:20;'",\
-							 "echo '10:20;30:40'")
-#define V_INCR_STA TIME_VARIABLE_CMD("v-increase-start", "echo ';30:40'", \
-							"echo '10:20;30:40'")
-#define V_DECR_END TIME_VARIABLE_CMD("v-decrease-end", "echo '10:20;30:40'", \
-							"echo '10:20;'")
-#define V_DECR_STA TIME_VARIABLE_CMD("v-decrease-start", "echo '10:20;30:40'", \
-							"echo ';30:40'")
-#define V_INCR_N TIME_VARIABLE_CMD("v-increase-n", "echo '10:20'", \
-							"echo '10:20;30:40'")
-#define V_DECR_N TIME_VARIABLE_CMD("v-decrease-n", "echo '10:20;30:40'", \
-							"echo '30:80'")
-#define V_DIFF_V TIME_VARIABLE_CMD("v-diferent-v", "echo '10:20;30:40'", \
-							"echo '10:20;30:80'")
+#define LOAD_5_OP                                                              \
+	TIME_VARIABLE_CMD("load-5",                                            \
+			  "echo '10:20;30:40'",                                \
+			  "echo "                                              \
+			  "'10:20;60:40'")
+#define V_INCR_END                                                             \
+	TIME_VARIABLE_CMD("v-increase-end",                                    \
+			  "echo '10:20;'",                                     \
+			  "echo '10:20;30:40'")
+#define V_INCR_STA                                                             \
+	TIME_VARIABLE_CMD("v-increase-start",                                  \
+			  "echo ';30:40'",                                     \
+			  "echo '10:20;30:40'")
+#define V_DECR_END                                                             \
+	TIME_VARIABLE_CMD("v-decrease-end",                                    \
+			  "echo '10:20;30:40'",                                \
+			  "echo '10:20;'")
+#define V_DECR_STA                                                             \
+	TIME_VARIABLE_CMD("v-decrease-start",                                  \
+			  "echo '10:20;30:40'",                                \
+			  "echo ';30:40'")
+#define V_INCR_N                                                               \
+	TIME_VARIABLE_CMD("v-increase-n",                                      \
+			  "echo '10:20'",                                      \
+			  "echo "                                              \
+			  "'10:20;30:40'")
+#define V_DECR_N                                                               \
+	TIME_VARIABLE_CMD("v-decrease-n",                                      \
+			  "echo '10:20;30:40'",                                \
+			  "echo "                                              \
+			  "'30:80'")
+#define V_DIFF_V                                                               \
+	TIME_VARIABLE_CMD("v-diferent-v",                                      \
+			  "echo '10:20;30:40'",                                \
+			  "echo '10:20;30:80'")
+
+// clang-format off
 
 /** Sensor with timestamp given in response */
 static const char split_op_timestamp[] =  "{"

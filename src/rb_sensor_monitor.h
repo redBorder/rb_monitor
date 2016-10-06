@@ -18,8 +18,8 @@
 
 #pragma once
 
-#include "rb_value.h"
 #include "rb_snmp.h"
+#include "rb_value.h"
 
 #include <json-c/json.h>
 
@@ -46,8 +46,8 @@ struct process_sensor_monitor_ctx;
   @param sensor_enrichment enrichment given to the sensor
   @return Parsed rb_monitor.
   */
-rb_monitor_t *parse_rb_monitor(json_object *json_monitor,
-					json_object *sensor_enrichment);
+rb_monitor_t *
+parse_rb_monitor(json_object *json_monitor, json_object *sensor_enrichment);
 
 /** Free resources allocated by a monitor
   @param monitor Monitor to free
@@ -59,8 +59,8 @@ void rb_monitor_done(rb_monitor_t *monitor);
   @param snmp_sessp Session to make SNMP request
   @return New monitor process ctx
   */
-struct process_sensor_monitor_ctx *new_process_sensor_monitor_ctx(
-				struct monitor_snmp_session *snmp_sessp);
+struct process_sensor_monitor_ctx *
+new_process_sensor_monitor_ctx(struct monitor_snmp_session *snmp_sessp);
 
 /** Destroy process sensor monitor context
   @param ctx Context to free
@@ -76,10 +76,10 @@ struct rb_sensor_s;
   @param op_vars Variables that require operations
   @param ret Returned messages
   */
-struct monitor_value *process_sensor_monitor(
-				struct process_sensor_monitor_ctx *process_ctx,
-				const rb_monitor_t *monitor,
-				rb_monitor_value_array_t *op_vars);
+struct monitor_value *
+process_sensor_monitor(struct process_sensor_monitor_ctx *process_ctx,
+		       const rb_monitor_t *monitor,
+		       rb_monitor_value_array_t *op_vars);
 
 /** Gets if monitor expect timestamp
   @param monitor Monitor to get data
@@ -142,8 +142,9 @@ const char *rb_monitor_get_cmd_data(const rb_monitor_t *monitor);
   @param vars_size length of store vars
   @return true if success, false in other case
   */
-void rb_monitor_get_op_variables(const rb_monitor_t *monitor,char ***vars,
-							size_t *vars_size);
+void rb_monitor_get_op_variables(const rb_monitor_t *monitor,
+				 char ***vars,
+				 size_t *vars_size);
 
 /** Free data returned by rb_monitor_op_variables_get
   @param vars Variables
