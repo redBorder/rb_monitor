@@ -74,4 +74,7 @@ basic_test_checks_cb(void (*prepare_checks_cb[])(check_list_t *checks),
 		basic_test_checks_cb(&cb, 1, json_sensor);                     \
 	}
 
+void mem_wraps_set_fail_in(size_t i);
+size_t mem_wraps_get_fail_in();
+
 extern size_t mem_wrap_fail_in;

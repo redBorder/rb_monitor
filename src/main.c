@@ -253,13 +253,13 @@ static json_bool parse_json_config(json_object *config,
 			worker_info->max_kafka_fails =
 					json_object_get_string(val);
 		} else if (0 == strcmp(key, "sleep_main")) {
-			int64_t sleep = json_object_get_int64(val);
-			if (sleep <= 0) {
+			int64_t sleep_s = json_object_get_int64(val);
+			if (sleep_s <= 0) {
 				rdlog(LOG_WARNING,
 				      "Can't sleep for %" PRId64 "\"",
-				      sleep);
+				      sleep_s);
 			} else {
-				main_info->sleep_main = (uint64_t)sleep;
+				main_info->sleep_main = (uint64_t)sleep_s;
 			}
 		} else if (0 == strcmp(key, "kafka_broker")) {
 			worker_info->kafka_broker = json_object_get_string(val);

@@ -91,6 +91,7 @@ size_t mem_wraps_get_fail_in() {
 
 #define WRAP_MEM_FN(fun, ret_t, args, real_args)                               \
 	ret_t __real_##fun(args);                                              \
+	ret_t __wrap_##fun(args);                                              \
 	ret_t __wrap_##fun(args) {                                             \
 		return (mem_wrap_fail_in == 0 || --mem_wrap_fail_in)           \
 				       ? __real_##fun(real_args)               \

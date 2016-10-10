@@ -56,7 +56,7 @@ struct monitor_value *new_monitor_value_array(size_t n_children,
 	return ret;
 }
 
-static void print_monitor_value_enrichment_str(struct printbuf *printbuf,
+static void print_monitor_value_enrichment_str(struct printbuf *buf,
 					       const char *key,
 					       json_object *val) {
 	const char *str = json_object_get_string(val);
@@ -65,11 +65,11 @@ static void print_monitor_value_enrichment_str(struct printbuf *printbuf,
 		      "Cannot extract string value of enrichment key %s",
 		      key);
 	} else {
-		sprintbuf(printbuf, ",\"%s\":\"%s\"", key, str);
+		sprintbuf(buf, ",\"%s\":\"%s\"", key, str);
 	}
 }
 
-static void print_monitor_value_enrichment_int(struct printbuf *printbuf,
+static void print_monitor_value_enrichment_int(struct printbuf *buf,
 					       const char *key,
 					       json_object *val) {
 	errno = 0;
@@ -82,13 +82,13 @@ static void print_monitor_value_enrichment_int(struct printbuf *printbuf,
 		      key,
 		      errstr);
 	} else {
-		sprintbuf(printbuf, ",\"%s\":%ld", key, integer);
+		sprintbuf(buf, ",\"%s\":%ld", key, integer);
 	}
 }
 
 /// @TODO we should print all with this function
 static void
-print_monitor_value_enrichment(struct printbuf *printbuf,
+print_monitor_value_enrichment(struct printbuf *buf,
 			       const json_object *const_enrichment) {
 	json_object *enrichment = (json_object *)const_enrichment;
 
@@ -102,20 +102,20 @@ print_monitor_value_enrichment(struct printbuf *printbuf,
 		const json_type type = json_object_get_type(val);
 		switch (type) {
 		case json_type_string:
-			print_monitor_value_enrichment_str(printbuf, key, val);
+			print_monitor_value_enrichment_str(buf, key, val);
 			break;
 
 		case json_type_int:
-			print_monitor_value_enrichment_int(printbuf, key, val);
+			print_monitor_value_enrichment_int(buf, key, val);
 			break;
 
 		case json_type_null:
-			sprintbuf(printbuf, ",\"%s\":null", key);
+			sprintbuf(buf, ",\"%s\":null", key);
 			break;
 
 		case json_type_boolean: {
 			const json_bool b = json_object_get_boolean(val);
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"%s\":%s",
 				  key,
 				  b == FALSE ? "false" : "true");
@@ -123,7 +123,7 @@ print_monitor_value_enrichment(struct printbuf *printbuf,
 		}
 		case json_type_double: {
 			const double d = json_object_get_double(val);
-			sprintbuf(printbuf, ",\"%s\":%lf", key, d);
+			sprintbuf(buf, ",\"%s\":%lf", key, d);
 			break;
 		}
 		case json_type_object:
@@ -149,8 +149,8 @@ static void print_monitor_value0(rb_message *message,
 				 int instance) {
 	assert(monitor_value->type == MONITOR_VALUE_T__VALUE);
 
-	struct printbuf *printbuf = printbuf_new();
-	if (likely(NULL != printbuf)) {
+	struct printbuf *buf = printbuf_new();
+	if (likely(NULL != buf)) {
 		const char *monitor_instance_prefix =
 				rb_monitor_instance_prefix(monitor);
 		const char *monitor_name_split_suffix =
@@ -158,55 +158,54 @@ static void print_monitor_value0(rb_message *message,
 		const struct json_object *monitor_enrichment =
 				rb_monitor_enrichment(monitor);
 		// @TODO use printbuf_memappend_fast instead! */
-		sprintbuf(printbuf, "{");
-		sprintbuf(printbuf,
+		sprintbuf(buf, "{");
+		sprintbuf(buf,
 			  "\"timestamp\":%lu",
 			  monitor_value->value.timestamp);
 		if (NO_INSTANCE != instance && monitor_name_split_suffix) {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"monitor\":\"%s%s\"",
 				  rb_monitor_name(monitor),
 				  monitor_name_split_suffix);
 		} else {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"monitor\":\"%s\"",
 				  rb_monitor_name(monitor));
 		}
 
 		if (NO_INSTANCE != instance && monitor_instance_prefix) {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"instance\":\"%s%d\"",
 				  monitor_instance_prefix,
 				  instance);
 		}
 
 		if (rb_monitor_is_integer(monitor)) {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"value\":%" PRId64,
 				  (int64_t)monitor_value->value.value);
 		} else {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"value\":\"%lf\"",
 				  monitor_value->value.value);
 		}
 
 		if (rb_monitor_group_id(monitor)) {
-			sprintbuf(printbuf,
+			sprintbuf(buf,
 				  ",\"group_id\":%s",
 				  rb_monitor_group_id(monitor));
 		}
 
 		if (monitor_enrichment) {
-			print_monitor_value_enrichment(printbuf,
-						       monitor_enrichment);
+			print_monitor_value_enrichment(buf, monitor_enrichment);
 		}
-		sprintbuf(printbuf, "}");
+		sprintbuf(buf, "}");
 
-		message->payload = printbuf->buf;
-		message->len = (size_t)printbuf->bpos;
+		message->payload = buf->buf;
+		message->len = (size_t)buf->bpos;
 
-		printbuf->buf = NULL;
-		printbuf_free(printbuf);
+		buf->buf = NULL;
+		printbuf_free(buf);
 	}
 }
 

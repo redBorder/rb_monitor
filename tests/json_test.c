@@ -28,11 +28,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-/// Convenience function
-static void assert_int_equal2(LargestIntegralType a, LargestIntegralType b) {
-	assert_in_set(a, &b, 1);
-}
-
 struct json_check {
 	struct json_object *json;
 	TAILQ_ENTRY(json_check) entry;
@@ -64,8 +59,8 @@ static void json_check(/*const*/ json_object *check,
 					   json_object_get_double(o_val)));
 			break;
 		case json_type_int:
-			assert_int_equal2(json_object_get_int64(val),
-					  json_object_get_int64(o_val));
+			assert_true(json_object_get_int64(val) ==
+				    json_object_get_int64(o_val));
 			break;
 		case json_type_object: {
 			/*const*/ struct json_object *chld = NULL;
