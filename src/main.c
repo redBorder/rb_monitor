@@ -399,6 +399,96 @@ static void *get_report_thread(void *http_handler) {
 
 	return NULL;
 }
+
+static void process_rb_http_options(struct _worker_info *worker_info) {
+	const struct {
+		const char *option_key;
+		int64_t *worker_info_opt;
+	} http_opts = {
+			// clang-format off
+		{
+			.option_key = "HTTP_MAX_TOTAL_CONNECTIONS",
+			.worker_info_opt = &worker_info->http_max_total_connections,
+		},
+		{
+			.option_key = "HTTP_TIMEOUT",
+			.worker_info_opt = &worker_info->http_timeout,
+		},
+		{
+			.option_key = "HTTP_CONNTTIMEOUT",
+			.worker_info_opt = &worker_info->http_connttimeout,
+		},
+		{
+			.option_key = "HTTP_VERBOSE",
+			.worker_info_opt = &worker_info->http_verbose,
+		},
+		{
+			.option_key = "RB_HTTP_MAX_MESSAGES",
+			.worker_info_opt = &worker_info->rb_http_max_messages,
+		},
+		{
+			.option_key = "RB_HTTP_MODE",
+			.worker_info_opt = &worker_info.http_mode
+		}
+			// clang-format on
+	};
+
+	for (size_t i = 0; i < RD_ARRAYSIZE(http_opts); ++i) {
+		char aux[BUFSIZ];
+
+		const int snprintf_rc = snprintf(aux,
+						 sizeof(aux),
+						 "%" PRId64,
+						 http_opts[i].worker_info_opt);
+
+		if (snprintf_rc > sizeof(aux)) {
+			rdlog(LOG_ERR,
+			      "Invalid value [%" PRId64
+			      "] for %s: too long (>%zu)",
+			      http_opts[i].worker_info_opt,
+			      http_opts[i].option_key,
+			      sizeof(aux));
+		} else if (snprintf_rc < 0) {
+			char err[BUFSIZ];
+			rdlog(LOG_ERR,
+			      "Couldn't print %s: %s",
+			      http_opts[i].option_key,
+			      strerror_r(errno, err, sizeof(err)));
+		} else {
+			char err[BUFSIZ];
+			const int rc = rb_http_handler_set_opt(
+					worker_info->http_handler,
+					http_opts[i].option_key,
+					aux,
+					err,
+					sizeof(err));
+
+			if (0 != rc) {
+				rdlog(LOG_ERR,
+				      "Couldn't set %s to %" PRId64 "(%s): %s",
+				      http_opts[i].option_key,
+				      *http_opts[i].worker_info_opt,
+				      aux,
+				      err);
+			}
+		}
+	}
+
+	if (worker_info.http_insecure) {
+		char err[BUFSIZ];
+		const int rc = rb_http_handler_set_opt(
+				worker_info->http_handler,
+				"HTTP_INSECURE",
+				"1",
+				err,
+				sizeof(err));
+
+		if (0 != rc) {
+			rdlog(LOG_ERR, "Couldn't set HTTP_INSECURE: %s", err);
+		}
+	}
+}
+
 #endif
 
 static int worker_process_sensor_send_array(struct _worker_info *worker_info,
@@ -426,8 +516,8 @@ static int worker_process_sensor_send_array(struct _worker_info *worker_info,
 					NULL);
 			if (0 != produce_rc) {
 				rdlog(LOG_ERR,
-				      "[Kafka] Cannot produce kafka "
-				      "message: %s",
+				      "[Kafka] Cannot produce kafka message: "
+				      "%s",
 				      rd_kafka_err2str(rd_kafka_errno2err(
 						      errno)));
 			}
@@ -734,94 +824,7 @@ int main(int argc, char *argv[]) {
 			exit(1);
 		}
 
-		if (worker_info.http_endpoint) {
-			char aux[BUFSIZ];
-			char err[BUFSIZ];
-			int rc = 0;
-
-			char http_max_total_connections[sizeof("184467440737095"
-							       "51616")];
-			char http_timeout[sizeof("18446744073709551616L")];
-			char http_connttimeout[sizeof("18446744073709551616L")];
-			char http_verbose[sizeof("18446744073709551616L")];
-			char rb_http_max_messages[sizeof("18446744073709551616"
-							 "L")];
-
-			snprintf(http_max_total_connections,
-				 sizeof(int64_t),
-				 "%" PRId64 "",
-				 worker_info.http_max_total_connections);
-			snprintf(http_timeout,
-				 sizeof(int64_t),
-				 "%" PRId64 "",
-				 worker_info.http_timeout);
-			snprintf(http_connttimeout,
-				 sizeof(int64_t),
-				 "%" PRId64 "",
-				 worker_info.http_connttimeout);
-			snprintf(http_verbose,
-				 sizeof(int64_t),
-				 "%" PRId64 "",
-				 worker_info.http_verbose);
-			snprintf(rb_http_max_messages,
-				 sizeof(int64_t),
-				 "%" PRId64 "",
-				 worker_info.rb_http_max_messages);
-
-			rb_http_handler_set_opt(worker_info.http_handler,
-						"HTTP_MAX_TOTAL_CONNECTIONS",
-						http_max_total_connections,
-						err,
-						sizeof(err));
-			rb_http_handler_set_opt(worker_info.http_handler,
-						"HTTP_TIMEOUT",
-						http_timeout,
-						err,
-						sizeof(err));
-			rb_http_handler_set_opt(worker_info.http_handler,
-						"HTTP_CONNTTIMEOUT",
-						http_connttimeout,
-						err,
-						sizeof(err));
-			rb_http_handler_set_opt(worker_info.http_handler,
-						"HTTP_VERBOSE",
-						http_verbose,
-						err,
-						sizeof(err));
-			rb_http_handler_set_opt(worker_info.http_handler,
-						"RB_HTTP_MAX_MESSAGES",
-						rb_http_max_messages,
-						err,
-						sizeof(err));
-
-			snprintf(aux,
-				 sizeof(aux),
-				 "%" PRId64,
-				 worker_info.http_mode);
-
-			rc = rb_http_handler_set_opt(worker_info.http_handler,
-						     "RB_HTTP_MODE",
-						     aux,
-						     err,
-						     sizeof(err));
-			if (0 != rc) {
-				rdlog(LOG_ERR,
-				      "Couldn't set RB_HTTP_MODE "
-				      "%" PRId64 "(%s): %s",
-				      worker_info.http_mode,
-				      aux,
-				      err);
-			}
-
-			if (worker_info.http_insecure) {
-				rb_http_handler_set_opt(
-						worker_info.http_handler,
-						"HTTP_INSECURE",
-						"1",
-						err,
-						sizeof(err));
-			}
-		}
+		process_rb_http_options(&worker_info);
 
 		rb_http_handler_run(worker_info.http_handler);
 
