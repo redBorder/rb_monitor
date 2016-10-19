@@ -20,12 +20,14 @@ TESTS_XML = $(TESTS_CHECKS_XML) $(TESTS_VALGRIND_XML)
 COV_FILES = $(foreach ext,gcda gcno, $(SRCS:.c=.$(ext)) $(TESTS_C:.c=.$(ext)))
 
 VALGRIND ?= valgrind
+CLANG_FORMAT ?= clang-format-3.8
 SUPPRESSIONS_FILE ?= tests/valgrind.suppressions
 ifneq ($(wildcard $(SUPPRESSIONS_FILE)),)
 SUPPRESSIONS_VALGRIND_ARG = --suppressions=$(SUPPRESSIONS_FILE)
 endif
 
-.PHONY: version.c tests checks memchecks drdchecks helchecks coverage check_coverage
+.PHONY: version.c tests checks memchecks drdchecks helchecks coverage \
+	check_coverage clang-format-check
 
 all: $(BIN)
 
@@ -44,6 +46,19 @@ install: bin-install
 run_tests = tests/run_tests.sh $(1) $(TESTS_C:.c=)
 run_valgrind = echo "$(MKL_YELLOW) Generating $(2) $(MKL_CLR_RESET)" && $(VALGRIND) --tool=$(1) $(SUPPRESSIONS_VALGRIND_ARG) --xml=yes \
 					--xml-file=$(2) $(3) >/dev/null 2>&1
+
+clang-format-files = $(wildcard src/*.c src/*.h)
+clang-format:
+	@for src in $(clang-format-files); do \
+		$(CLANG_FORMAT) -i $$src; \
+	done
+
+clang-format-check: SHELL=/bin/bash
+clang-format-check:
+	@set -o pipefail; \
+	for src in $(wildcard src/*.c src/*.h); do \
+		diff -Nu <($(CLANG_FORMAT) $$src) $$src | colordiff || ERR="yes";  \
+	done; if [[ ! -z $$ERR ]]; then false; fi
 
 tests: $(TESTS_XML)
 	@$(call run_tests, -cvdh)
