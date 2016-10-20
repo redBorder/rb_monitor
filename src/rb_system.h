@@ -17,20 +17,19 @@
 */
 
 #include <librd/rdlog.h>
+
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-
 
 #pragma once
 
-static inline char * trim_end(char * buf)
-{
-	char * end = buf + strlen(buf)-1;
-	while(end>=buf && isspace(*end))
+static inline char *trim_end(char *buf) {
+	char *end = buf + strlen(buf) - 1;
+	while (end >= buf && isspace(*end))
 		end--;
-	*(end+1)='\0';
+	*(end + 1) = '\0';
 	return buf;
 }
 
@@ -45,23 +44,26 @@ static inline char * trim_end(char * buf)
  @todo see if we can join with snmp_solve_response somehow
  @return               1 if number. 0 ioc.
  */
-static bool system_solve_response(char *buff, size_t buff_size, double *number,
-					void *unused, const char *command) {
+static bool system_solve_response(char *buff,
+				  size_t buff_size,
+				  double *number,
+				  void *unused,
+				  const char *command) {
 	(void)unused;
 
 	bool ret = false;
-	FILE * fp = popen(command, "r");
-	if(NULL==fp) {
-		rdlog(LOG_ERR,"Cannot get system command.");
+	FILE *fp = popen(command, "r");
+	if (NULL == fp) {
+		rdlog(LOG_ERR, "Cannot get system command.");
 	} else {
-		if(NULL==fgets(buff, buff_size, fp)) {
-			rdlog(LOG_ERR,"Cannot get buffer information");
+		if (NULL == fgets(buff, buff_size, fp)) {
+			rdlog(LOG_ERR, "Cannot get buffer information");
 		} else {
-			rdlog(LOG_DEBUG,"System response: %s",buff);
+			rdlog(LOG_DEBUG, "System response: %s", buff);
 			trim_end(buff);
-			char * endPtr;
-			*number = strtod(buff,&endPtr);
-			if(buff!=endPtr)
+			char *endPtr;
+			*number = strtod(buff, &endPtr);
+			if (buff != endPtr)
 				ret = true;
 		}
 

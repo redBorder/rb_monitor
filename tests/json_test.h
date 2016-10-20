@@ -30,16 +30,18 @@ struct json_key_test_elm {
 	SLIST_ENTRY(json_key_test_elm) entry;
 };
 
-typedef SLIST_HEAD(,json_key_test_elm) json_key_test;
-#define JSON_KEY_TEST(check) {.slh_first = check}
-
+typedef SLIST_HEAD(, json_key_test_elm) json_key_test;
+#define JSON_KEY_TEST(check)                                                   \
+	{ .slh_first = check }
 
 /// Convenience macro for a string check
-#define CHILD_X(mkey,new_f,mval,next) (struct json_key_test_elm[])             \
-	{{.key = mkey, .val = new_f(mval), .entry.sle_next = next}}
-#define CHILD_I(mkey,mval,next) \
+#define CHILD_X(mkey, new_f, mval, next)                                       \
+	(struct json_key_test_elm[]) {                                         \
+		{ .key = mkey, .val = new_f(mval), .entry.sle_next = next }    \
+	}
+#define CHILD_I(mkey, mval, next)                                              \
 	(CHILD_X(mkey, json_object_new_int64, mval, next))
-#define CHILD_S(mkey,mval,next) \
+#define CHILD_S(mkey, mval, next)                                              \
 	(CHILD_X(mkey, json_object_new_string, mval, next))
 
 struct json_check;
@@ -59,5 +61,6 @@ void check_list_push(check_list_t *list, struct json_check *check);
 	@param checks_size size of each individual check
 	*/
 void check_list_push_checks(check_list_t *check_list,
-		json_key_test *checks, size_t checks_list_size);
+			    json_key_test *checks,
+			    size_t checks_list_size);
 void json_list_check(check_list_t *check_list, rb_message_list *msgs);

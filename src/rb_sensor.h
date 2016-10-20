@@ -19,32 +19,34 @@
 #pragma once
 
 #include "rb_array.h"
-#include "rb_snmp.h"
 #include "rb_message_list.h"
+#include "rb_snmp.h"
 
-#include <librdkafka/rdkafka.h>
 #include <json-c/json.h>
 #include <librd/rdqueue.h>
+#include <librdkafka/rdkafka.h>
+
 #include <stdbool.h>
 
 /// SHARED Info needed by threads.
-struct _worker_info{
+struct _worker_info {
 	struct snmp_session default_session;
 	pthread_mutex_t snmp_session_mutex;
-	const char * community,*kafka_broker,*kafka_topic;
-	const char * max_kafka_fails; /* I want a const char * because rd_kafka_conf_set implementation */
+	const char *community, *kafka_broker, *kafka_topic;
+	const char *max_kafka_fails; /* I want a const char * because
+					rd_kafka_conf_set implementation */
 
 #ifdef HAVE_RBHTTP
-	const char * http_endpoint;
+	const char *http_endpoint;
 	struct rb_http_handler_s *http_handler;
 	pthread_t pthread_report;
 #endif
 
-	rd_kafka_t * rk;
-	rd_kafka_topic_t * rkt;
-	rd_kafka_conf_t * rk_conf;
-	rd_kafka_topic_conf_t * rkt_conf;
-	int64_t sleep_worker,max_snmp_fails,timeout,debug_output_flags;
+	rd_kafka_t *rk;
+	rd_kafka_topic_t *rkt;
+	rd_kafka_conf_t *rk_conf;
+	rd_kafka_topic_conf_t *rkt_conf;
+	int64_t sleep_worker, max_snmp_fails, timeout, debug_output_flags;
 	int64_t kafka_timeout;
 	rd_fifoq_t *queue;
 #ifdef HAVE_RBHTTP
@@ -67,9 +69,10 @@ void assert_rb_sensor(rb_sensor_t *sensor);
 #endif
 
 rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
-		const struct _worker_info *worker_info);
-bool process_rb_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor,
-							rb_message_list *ret);
+			     const struct _worker_info *worker_info);
+bool process_rb_sensor(struct _worker_info *worker_info,
+		       rb_sensor_t *sensor,
+		       rb_message_list *ret);
 
 /** Obtains sensor name
   @param sensor Sensor
@@ -102,10 +105,9 @@ typedef struct rb_array rb_sensors_array_t;
 
 /** Add a sensor to sensors array
   @note Wrapper function allows typechecking */
-static void rb_sensor_array_add(rb_sensors_array_t *array,
-						rb_sensor_t *sensor) RD_UNUSED;
-static void rb_sensor_array_add(rb_sensors_array_t *array,
-						rb_sensor_t *sensor) {
+static void
+rb_sensor_array_add(rb_sensors_array_t *array, rb_sensor_t *sensor) RD_UNUSED;
+static void
+rb_sensor_array_add(rb_sensors_array_t *array, rb_sensor_t *sensor) {
 	rb_array_add(array, sensor);
 }
-

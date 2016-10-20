@@ -21,11 +21,11 @@
 #include <librd/rdlog.h>
 
 static void json_object_copy0_childs(json_object *dst,
-					/* @todo const */json_object *orig) {
+				     /* @todo const */ json_object *orig) {
 	for (struct json_object_iterator i = json_object_iter_begin(orig),
-					end = json_object_iter_end(orig);
-					!json_object_iter_equal(&i, &end);
-					json_object_iter_next(&i)) {
+					 end = json_object_iter_end(orig);
+	     !json_object_iter_equal(&i, &end);
+	     json_object_iter_next(&i)) {
 
 		const char *key = json_object_iter_peek_name(&i);
 		json_object *val = json_object_iter_peek_value(&i);
@@ -50,22 +50,27 @@ json_object *json_object_object_copy(json_object *orig) {
 	return ret;
 }
 
-bool add_json_child0(json_object *root, const char *key,
-			json_object *child, char *err, size_t err_size) {
+bool add_json_child0(json_object *root,
+		     const char *key,
+		     json_object *child,
+		     char *err,
+		     size_t err_size) {
 	if (NULL == child) {
-		snprintf(err, err_size,
-				"Couldn't allocate child memory (OOM?)");
+		snprintf(err,
+			 err_size,
+			 "Couldn't allocate child memory "
+			 "(OOM?)");
 		return false;
 	}
 
 	/// @todo check return value in modern versions of json-c
 	json_object_object_add(root, key, child);
-	#if 0
+#if 0
 	if (add_rc < 0) {
 		snprintf(err, err_size, "Couldn't add to root json");
 		json_object_put(child);
 		return false;
 	}
-	#endif
+#endif
 	return true;
 }

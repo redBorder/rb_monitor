@@ -9,12 +9,16 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
 
+#include <stdarg.h>
+#include <string.h>
+
 static const uint16_t snmp_port = 161;
+
+// clang-format off
 
 static const char basic_sensor[] = "{\n"
 	"\"sensor_id\":1,\n"

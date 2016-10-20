@@ -23,8 +23,8 @@
 
 #include <stdbool.h>
 
-struct monitor_snmp_new_session_config{
-	const char * community;
+struct monitor_snmp_new_session_config {
+	const char *community;
 	int timeout;
 	u_long flags;
 	long version;
@@ -32,20 +32,27 @@ struct monitor_snmp_new_session_config{
 
 struct monitor_snmp_session;
 
-struct monitor_snmp_session * new_snmp_session(struct snmp_session *ss,const struct monitor_snmp_new_session_config *config);
+struct monitor_snmp_session *
+new_snmp_session(struct snmp_session *ss,
+		 const struct monitor_snmp_new_session_config *config);
 
 /**
   SNMP request & response adaption.
-  @param value_buf   Return buffer where the response will be saved (text format)
+  @param value_buf   Return buffer where the response will be saved (text
+  format)
   @param value_buf_len Buffer value_buf length
-  @param number      If possible, the response will be saved in double format here
+  @param number      If possible, the response will be saved in double format
+  here
   @param _session    SNMP session to use
   @param _oid_string String representing oid
   @return            0 if number was not setted; non 0 otherwise.
  */
-bool snmp_solve_response(char *value_buf, size_t value_buf_len,
-	double *number, struct monitor_snmp_session *session, const char *oid_string);
+bool snmp_solve_response(char *value_buf,
+			 size_t value_buf_len,
+			 double *number,
+			 struct monitor_snmp_session *session,
+			 const char *oid_string);
 
 void destroy_snmp_session(struct monitor_snmp_session *);
 
-int net_snmp_version(const char *string_version,const char *sensor_name);
+int net_snmp_version(const char *string_version, const char *sensor_name);

@@ -21,13 +21,13 @@
 #include "rb_array.h"
 #include "rb_message_list.h"
 
-#include <signal.h>
-#include <pthread.h>
-#include <librd/rdtypes.h>
-#include <librd/rdmem.h>
-
-#include <stdbool.h>
 #include <json-c/json.h>
+#include <librd/rdmem.h>
+#include <librd/rdtypes.h>
+
+#include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
 
 #ifndef NDEBUG
 #define MONITOR_VALUE_MAGIC 0x010AEA1C010AEA1CL
@@ -36,9 +36,9 @@
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
 struct monitor_value {
-	#ifdef MONITOR_VALUE_MAGIC
+#ifdef MONITOR_VALUE_MAGIC
 	uint64_t magic; // Private data, don't need to use them outside.
-	#endif
+#endif
 
 	/// Type of monitor value
 	enum monitor_value_type {
@@ -71,11 +71,11 @@ struct monitor_value {
  * @return New monitor value of array type
  */
 struct monitor_value *new_monitor_value_array(size_t n_children,
-						struct monitor_value **children,
-						struct monitor_value *split_op);
+					      struct monitor_value **children,
+					      struct monitor_value *split_op);
 
 #ifdef MONITOR_VALUE_MAGIC
-#define rb_monitor_value_assert(monitor) \
+#define rb_monitor_value_assert(monitor)                                       \
 	assert(MONITOR_VALUE_MAGIC == (monitor)->magic)
 #else
 #define rb_monitor_value_assert(monitor)
@@ -98,9 +98,9 @@ typedef struct rb_array rb_monitor_value_array_t;
 /** Add a monitor value to monitor values array
   @note Wrapper function allows typechecking */
 static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
-					struct monitor_value *mv) RD_UNUSED;
+				       struct monitor_value *mv) RD_UNUSED;
 static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
-					struct monitor_value *mv) {
+				       struct monitor_value *mv) {
 	rb_array_add(array, mv);
 }
 
@@ -108,22 +108,22 @@ static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
   @param array Original array
   @param pos list of positions (-1 terminated)
   @return New monitor array, that needs to be free with
-        rb_monitor_value_array_done
+	rb_monitor_value_array_done
   @note Monitors are from original array, so they should not be touched
   */
-rb_monitor_value_array_t *rb_monitor_value_array_select(
-		rb_monitor_value_array_t *array, ssize_t *pos);
+rb_monitor_value_array_t *
+rb_monitor_value_array_select(rb_monitor_value_array_t *array, ssize_t *pos);
 
 /** Return monitor value of an array
   @param array Array
   @param i Position of array
   @return Monitor value at position i
   */
-static struct monitor_value *rb_monitor_value_array_at(
-				rb_monitor_value_array_t *array, size_t i)
-							__attribute__((unused));
-static struct monitor_value *rb_monitor_value_array_at(
-				rb_monitor_value_array_t *array, size_t i) {
+static struct monitor_value *
+rb_monitor_value_array_at(rb_monitor_value_array_t *array, size_t i)
+		__attribute__((unused));
+static struct monitor_value *
+rb_monitor_value_array_at(rb_monitor_value_array_t *array, size_t i) {
 	struct monitor_value *ret = array->elms[i];
 	if (ret) {
 		rb_monitor_value_assert(ret);
@@ -140,9 +140,9 @@ struct rb_sensor_s;
   @param monitor Value's monitor
   @return Message array with monitor value
   */
-rb_message_array_t *print_monitor_value(
-			 	const struct monitor_value *monitor_value,
-				const struct rb_monitor_s *monitor);
+rb_message_array_t *
+print_monitor_value(const struct monitor_value *monitor_value,
+		    const struct rb_monitor_s *monitor);
 
 /** Compare monitor's timestamp
   @param m1 First monitor to compare
@@ -152,8 +152,9 @@ rb_message_array_t *print_monitor_value(
   than, equal to, o greater than m2 timestamp
   */
 static int64_t rb_monitor_value_cmp_timestamp(const struct monitor_value *m1,
-			const struct monitor_value *m2) __attribute__((unused));
+					      const struct monitor_value *m2)
+		__attribute__((unused));
 static int64_t rb_monitor_value_cmp_timestamp(const struct monitor_value *m1,
-			const struct monitor_value *m2) {
+					      const struct monitor_value *m2) {
 	return m1->value.timestamp - m2->value.timestamp;
 }

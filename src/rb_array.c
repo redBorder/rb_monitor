@@ -20,7 +20,7 @@
 
 struct rb_array *rb_array_new(size_t size) {
 	struct rb_array *ret = NULL;
-	ret = calloc(1, sizeof(*ret) + size*sizeof(ret->elms[0]));
+	ret = calloc(1, sizeof(*ret) + size * sizeof(ret->elms[0]));
 
 	if (ret) {
 		ret->size = size;

@@ -6,10 +6,14 @@
 #include <librd/rd.h>
 #include <librd/rdfloat.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
+
+#include <stdarg.h>
+#include <string.h>
+
+// clang-format off
 
 static const char split_op_sensor[] =  "{"
 	"\"sensor_id\":1,"

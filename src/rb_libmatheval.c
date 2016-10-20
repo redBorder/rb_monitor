@@ -24,11 +24,11 @@
 
 struct libmatheval_vars *new_libmatheval_vars(size_t new_size) {
 	struct libmatheval_vars *this = NULL;
-	const size_t alloc_size = sizeof(*this)
-		+ new_size*sizeof(this->names[0])
-		+ new_size*sizeof(this->values[0]);
+	const size_t alloc_size = sizeof(*this) +
+				  new_size * sizeof(this->names[0]) +
+				  new_size * sizeof(this->values[0]);
 
-	this = calloc(1,alloc_size);
+	this = calloc(1, alloc_size);
 	if (NULL == this) {
 		rdlog(LOG_ERR, "Cannot allocate memory. Exiting.");
 	} else {
