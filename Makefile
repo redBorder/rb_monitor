@@ -90,7 +90,8 @@ tests/%.xml: tests/%.test
 
 tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
 MALLOC_FUNCTIONS := $(strip malloc calloc strdup realloc \
-	json_object_new_object printbuf_new evaluator_create)
+	json_object_new_object printbuf_new evaluator_create \
+	json_object_new_string json_object_new_int64)
 WRAP_ALLOC_FUNCTIONS := $(foreach fn, $(MALLOC_FUNCTIONS)\
 						,-Wl,-u,$(fn) -Wl,-wrap,$(fn))
 tests/%.test: tests/%.o $(filter-out src/main.o,$(OBJS)) $(OBJ_DEPS_TESTS)
