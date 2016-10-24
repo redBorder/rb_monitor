@@ -26,6 +26,45 @@ static const char *invalid_sensors[] = {
 			"\"sensor_ip\": \"localhost\",\n"
 			"\"community\" : \"public\",\n"
 		"}",
+		/* No name */
+		"{\n"
+			"\"sensor_id\":1,\n"
+			"\"timeout\":100000000000000000000000,\n"
+			"\"sensor_ip\": \"localhost\",\n"
+			"\"community\" : \"public\",\n"
+			"\"monitors\": /* this field MUST be the last! */"
+			"["
+				"{\"name\": \"load_1\", "
+				"\"system\":  \"echo 1\","
+				"\"unit\": \"%\", \"send\": 0},"
+			"]"
+		"}",
+		/* No peer ip */
+		"{\n"
+			"\"sensor_name\": \"sensor-arriba\",\n"
+			"\"sensor_id\":1,\n"
+			"\"timeout\":100000000000000000000000,\n"
+			"\"community\" : \"public\",\n"
+			"\"monitors\": /* this field MUST be the last! */"
+			"["
+				"{\"name\": \"load_1\", "
+				"\"system\":  \"echo 1\","
+				"\"unit\": \"%\", \"send\": 0},"
+			"]"
+		"}",
+		/* No community */
+		"{\n"
+			"\"sensor_name\": \"sensor-arriba\",\n"
+			"\"sensor_id\":1,\n"
+			"\"timeout\":100000000000000000000000,\n"
+			"\"sensor_ip\": \"localhost\",\n"
+			"\"monitors\": /* this field MUST be the last! */"
+			"["
+				"{\"name\": \"load_1\", "
+				"\"system\":  \"echo 1\","
+				"\"unit\": \"%\", \"send\": 0},"
+			"]"
+		"}",
 	};
 
 void test_invalid_sensors() {
