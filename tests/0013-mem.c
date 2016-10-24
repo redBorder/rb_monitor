@@ -61,14 +61,11 @@ static void mem_test(void (*cb)(const char *sensor_str),
 }
 
 static void mem_parse_sensor(const char *sensor_str) {
-	const size_t aux_mem_wrap_fail_in = mem_wrap_fail_in; // Exclude this code
-	mem_wrap_fail_in = 0;
 	struct _worker_info worker_info;
 	memset(&worker_info, 0, sizeof(worker_info));
 
 	snmp_sess_init(&worker_info.default_session);
 	struct json_object *json_sensor = json_tokener_parse(sensor_str);
-	mem_wrap_fail_in = aux_mem_wrap_fail_in;
 	rb_sensor_t *sensor = parse_rb_sensor(json_sensor, &worker_info);
 	json_object_put(json_sensor);
 
