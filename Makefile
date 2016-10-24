@@ -89,7 +89,7 @@ tests/%.xml: tests/%.test
 	@CMOCKA_XML_FILE="$@" CMOCKA_MESSAGE_OUTPUT=XML "./$<" >/dev/null 2>&1
 
 tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
-MALLOC_FUNCTIONS := $(strip malloc calloc strdup realloc \
+MALLOC_FUNCTIONS := $(strip malloc calloc __strdup strdup \
 	json_object_new_object printbuf_new evaluator_create \
 	json_object_new_string json_object_new_int64)
 WRAP_ALLOC_FUNCTIONS := $(foreach fn, $(MALLOC_FUNCTIONS)\

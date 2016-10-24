@@ -99,8 +99,8 @@ size_t mem_wraps_get_fail_in() {
 	}
 
 WRAP_MEM_FN(malloc, void *, size_t m, m)
-WRAP_MEM_FN(realloc, void *, void *ptr COMMA size_t m, ptr COMMA m)
 WRAP_MEM_FN(calloc, void *, size_t n COMMA size_t m, n COMMA m)
+WRAP_MEM_FN(__strdup, char *, const char *str, str)
 WRAP_MEM_FN(strdup, char *, const char *str, str)
 WRAP_MEM_FN(json_object_new_object, json_object *, , )
 WRAP_MEM_FN(json_object_new_string, json_object *, const char *str, str)
