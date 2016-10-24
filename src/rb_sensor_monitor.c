@@ -542,13 +542,15 @@ op_libmatheval_vars(rb_monitor_value_array_t *op_vars, char **names) {
 	struct libmatheval_vars *libmatheval_vars =
 			new_libmatheval_vars(op_vars->count);
 	size_t expected_v_elms = 0;
-	unsigned int expected_mv_type = 0;
 	if (NULL == libmatheval_vars) {
 		/// @todo error treatment
 		return NULL;
 	}
 
 	for (size_t i = 0; i < op_vars->count; ++i) {
+		assert (rb_monitor_value_array_at(op_vars, 0)->type ==
+			rb_monitor_value_array_at(op_vars, i)->type);
+
 		struct monitor_value *mv =
 				rb_monitor_value_array_at(op_vars, i);
 
@@ -556,16 +558,10 @@ op_libmatheval_vars(rb_monitor_value_array_t *op_vars, char **names) {
 			libmatheval_vars->names[i] = names[i];
 
 			if (0 == libmatheval_vars->count) {
-				expected_mv_type = mv->type;
 				if (MONITOR_VALUE_T__ARRAY == mv->type) {
 					expected_v_elms =
 							mv->array.children_count;
 				}
-			} else if (expected_mv_type != mv->type) {
-				rdlog(LOG_ERR,
-				      "trying to operate with vector "
-				      "and array");
-				goto err;
 			} else if (mv->type == MONITOR_VALUE_T__ARRAY &&
 				   mv->array.children_count !=
 						   expected_v_elms) {
