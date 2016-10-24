@@ -1,4 +1,5 @@
 [![Build Status](https://travis-ci.org/redBorder/rb_monitor.svg?branch=master)](https://travis-ci.org/redBorder/rb_monitor)
+[![Coverity Scan Build Status](https://scan.coverity.com/projects/10570/badge.svg)](https://scan.coverity.com/projects/redborder-rb_monitor)
 [![Coverage Status](https://coveralls.io/repos/github/redBorder/rb_monitor/badge.svg?branch=master)](https://coveralls.io/github/redBorder/rb_monitor?branch=redborder)
 
 # rb_monitor
