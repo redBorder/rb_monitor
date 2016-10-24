@@ -63,17 +63,18 @@ void assert_rb_sensor(rb_sensor_t *sensor) {
  * @return Sensor name or "(some_sensor)" string if not defined
  */
 const char *rb_sensor_name(const rb_sensor_t *sensor) {
-	static const char failsafe_ret[] = "(some_sensor)";
+	assert(sensor);
+
 	json_object *jsensor_name = NULL;
 	const bool get_rc =
 			json_object_object_get_ex(sensor->data.enrichment,
 						  SENSOR_NAME_ENRICHMENT_KEY,
 						  &jsensor_name);
 
-	const char *ret = (get_rc && jsensor_name)
-					  ? json_object_get_string(jsensor_name)
-					  : NULL;
-	return ret ? ret : failsafe_ret;
+	assert(get_rc);
+	(void)get_rc;
+
+	return json_object_get_string(jsensor_name);
 }
 
 /** Checks if a property is set. If not, it will show error message and will
@@ -97,6 +98,55 @@ static void check_setted(const void *ptr,
 	}
 }
 
+/** Sensor enrichment information */
+struct sensor_enrichment {
+	const char *sensor_name; ///< Sensor name
+	int64_t sensor_id;       ///< Sensor id
+};
+
+/**
+ * Create sensor enrichment
+ * @param  data              Data to enrich with
+ * @param  sensor_enrichment Struct to hold data
+ * @return                   Bool if success, false in other way
+ */
+static bool sensor_create_enrichment(const struct sensor_enrichment *data,
+				     json_object *sensor_enrichment) {
+	char errbuf[BUFSIZ];
+
+	assert(data);
+	assert(data->sensor_name);
+	assert(sensor_enrichment);
+
+	const bool name_rc = ADD_JSON_STRING(sensor_enrichment,
+					     SENSOR_NAME_ENRICHMENT_KEY,
+					     data->sensor_name,
+					     errbuf,
+					     sizeof(errbuf));
+	if (!name_rc) {
+		rdlog(LOG_ERR,
+		      "Couldn't add sensor name to enrichment: %s",
+		      errbuf);
+		return false;
+	}
+
+	if (data->sensor_id > 0) {
+		const bool id_rc = ADD_JSON_INT64(sensor_enrichment,
+						  SENSOR_ID_ENRICHMENT_KEY,
+						  data->sensor_id,
+						  errbuf,
+						  sizeof(errbuf));
+		if (!id_rc) {
+			rdlog(LOG_ERR,
+			      "Couldn't add sensor id to enrichment: %s",
+			      errbuf);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 /** Fill sensor information
   @param sensor Sensor to store information
   @param sensor_info JSON describing sensor
@@ -104,14 +154,17 @@ static void check_setted(const void *ptr,
 static bool
 sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 			       /* const */ json_object *sensor_info) {
-	char errbuf[BUFSIZ];
 	struct json_object *sensor_monitors = NULL;
-	const int64_t sensor_id = PARSE_CJSON_CHILD_INT64(
-			sensor_info, SENSOR_ID_ENRICHMENT_KEY, 0);
-	char *sensor_name = PARSE_CJSON_CHILD_STR(
-			sensor_info, SENSOR_NAME_ENRICHMENT_KEY, NULL);
+	// clang-format off
+	const struct sensor_enrichment sensor_enrichment = {
+		.sensor_id = PARSE_CJSON_CHILD_INT64(
+			sensor_info, SENSOR_ID_ENRICHMENT_KEY, 0),
+		.sensor_name = PARSE_CJSON_CHILD_STR(
+			sensor_info, SENSOR_NAME_ENRICHMENT_KEY, NULL)
+	};
+	// clang-format on
 
-	if (NULL == sensor_name) {
+	if (NULL == sensor_enrichment.sensor_name) {
 		rdlog(LOG_ERR, "Sensor with no name, couldn't parse");
 		goto err;
 	}
@@ -128,62 +181,39 @@ sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 			sensor_info,
 			"timeout",
 			(int64_t)sensor->data.snmp_params.session.timeout);
-	sensor->data.snmp_params.peername =
-			PARSE_CJSON_CHILD_STR(sensor_info, "sensor_ip", NULL);
-	sensor->data.snmp_params.session.community =
-			PARSE_CJSON_CHILD_STR(sensor_info, "community", NULL);
+	sensor->data.snmp_params.peername = PARSE_CJSON_CHILD_DUP_STR(
+			sensor_info, "sensor_ip", NULL);
+	sensor->data.snmp_params.session.community = PARSE_CJSON_CHILD_DUP_STR(
+			sensor_info, "community", NULL);
 
-	const char *snmp_version = PARSE_CJSON_CHILD_STR(
+	const char *snmp_version = PARSE_CJSON_CHILD_DUP_STR(
 			sensor_info, "snmp_version", NULL);
 	if (snmp_version) {
-		sensor->data.snmp_params.session.version =
-				net_snmp_version(snmp_version, sensor_name);
+		sensor->data.snmp_params.session.version = net_snmp_version(
+				snmp_version, sensor_enrichment.sensor_name);
 	}
 
 	json_object_object_get_ex(
 			sensor_info, "enrichment", &sensor->data.enrichment);
-	if ((sensor_name || sensor_id > 0) && NULL == sensor->data.enrichment) {
+	if (NULL == sensor->data.enrichment) {
 		sensor->data.enrichment = json_object_new_object();
 		if (NULL == sensor->data.enrichment) {
 			rdlog(LOG_CRIT,
 			      "Couldn't allocate sensor %s enrichment",
-			      sensor_name);
+			      sensor_enrichment.sensor_name);
 			goto err;
 		}
 	}
 
-	if (sensor_name) {
-		const bool name_rc = ADD_JSON_STRING(sensor->data.enrichment,
-						     SENSOR_NAME_ENRICHMENT_KEY,
-						     sensor_name,
-						     errbuf,
-						     sizeof(errbuf));
-		if (!name_rc) {
-			rdlog(LOG_ERR,
-			      "Couldn't add sensor name to enrichment: %s",
-			      errbuf);
-			goto err;
-		}
-		free(sensor_name);
-		sensor_name = NULL;
-	}
-
-	if (sensor_id > 0) {
-		const bool id_rc = ADD_JSON_INT64(sensor->data.enrichment,
-						  SENSOR_ID_ENRICHMENT_KEY,
-						  sensor_id,
-						  errbuf,
-						  sizeof(errbuf));
-		if (!id_rc) {
-			rdlog(LOG_ERR,
-			      "Couldn't add sensor id to enrichment: %s",
-			      errbuf);
-			goto err;
-		}
-	}
+	const bool create_enrichment_rc = sensor_create_enrichment(
+			&sensor_enrichment, sensor->data.enrichment);
 
 	sensor->monitors = parse_rb_monitors(sensor_monitors,
 					     sensor->data.enrichment);
+	if (!create_enrichment_rc) {
+		goto err;
+	}
+
 	if (NULL != sensor->monitors) {
 		const size_t monitors_count = sensor->monitors->count;
 		sensor->op_vars = get_monitors_dependencies(sensor->monitors);
@@ -201,7 +231,6 @@ sensor_common_attrs_parse_json(rb_sensor_t *sensor,
 	return true;
 
 err:
-	free(sensor_name);
 	return false;
 }
 

@@ -48,11 +48,18 @@ static char *json_object_get_dup_string(json_object *json) {
 	return strdup(json_object_get_string(json));
 }
 
-/// Convenience macro to get a string chuld duplicated
-#define PARSE_CJSON_CHILD_STR(base, child_key, default_value)                  \
+/// Convenience macro to get a string child duplicated
+#define PARSE_CJSON_CHILD_DUP_STR(base, child_key, default_value)              \
 	PARSE_CJSON_CHILD0(base,                                               \
 			   child_key,                                          \
 			   json_object_get_dup_string,                         \
+			   default_value)
+
+/// Convenience macro to get a string child
+#define PARSE_CJSON_CHILD_STR(base, child_key, default_value)                  \
+	PARSE_CJSON_CHILD0(base,                                               \
+			   child_key,                                          \
+			   json_object_get_string,                             \
 			   default_value)
 
 /** Duplicate a JSON object

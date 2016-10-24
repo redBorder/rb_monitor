@@ -292,17 +292,17 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	assert(json_monitor);
 	assert(sensor_enrichment);
 
-	char *aux_name = PARSE_CJSON_CHILD_STR(json_monitor, "name", NULL);
+	char *aux_name = PARSE_CJSON_CHILD_DUP_STR(json_monitor, "name", NULL);
 	if (NULL == aux_name) {
 		rdlog(LOG_ERR, "Monitor with no name");
 		return NULL;
 	}
 
-	char *aux_split_op =
-			PARSE_CJSON_CHILD_STR(json_monitor, "split_op", NULL);
-	char *unit = PARSE_CJSON_CHILD_STR(json_monitor, "unit", NULL);
-	char *group_name =
-			PARSE_CJSON_CHILD_STR(json_monitor, "group_name", NULL);
+	char *aux_split_op = PARSE_CJSON_CHILD_DUP_STR(
+			json_monitor, "split_op", NULL);
+	char *unit = PARSE_CJSON_CHILD_DUP_STR(json_monitor, "unit", NULL);
+	char *group_name = PARSE_CJSON_CHILD_DUP_STR(
+			json_monitor, "group_name", NULL);
 
 	/// @todo change to true/false
 	int aux_timestamp_given = PARSE_CJSON_CHILD_INT64(
@@ -338,14 +338,15 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 	ret->magic = RB_MONITOR_MAGIC;
 #endif
 
-	ret->splittok = PARSE_CJSON_CHILD_STR(json_monitor, "split", NULL);
+	ret->splittok = PARSE_CJSON_CHILD_DUP_STR(json_monitor, "split", NULL);
 	ret->splitop = aux_split_op;
 	ret->name = aux_name;
-	ret->name_split_suffix = PARSE_CJSON_CHILD_STR(
+	ret->name_split_suffix = PARSE_CJSON_CHILD_DUP_STR(
 			json_monitor, "name_split_suffix", NULL);
-	ret->instance_prefix = PARSE_CJSON_CHILD_STR(
+	ret->instance_prefix = PARSE_CJSON_CHILD_DUP_STR(
 			json_monitor, "instance_prefix", NULL);
-	ret->group_id = PARSE_CJSON_CHILD_STR(json_monitor, "group_id", NULL);
+	ret->group_id = PARSE_CJSON_CHILD_DUP_STR(
+			json_monitor, "group_id", NULL);
 	ret->timestamp_given = aux_timestamp_given;
 	ret->send = PARSE_CJSON_CHILD_INT64(json_monitor, "send", 1);
 	ret->integer = PARSE_CJSON_CHILD_INT64(json_monitor, "integer", 0);
