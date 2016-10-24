@@ -45,8 +45,7 @@
 static char *
 json_object_get_dup_string(json_object *json) __attribute__((unused));
 static char *json_object_get_dup_string(json_object *json) {
-	const char *ret = json_object_get_string(json);
-	return ret ? strdup(ret) : NULL;
+	return strdup(json_object_get_string(json));
 }
 
 /// Convenience macro to get a string chuld duplicated
