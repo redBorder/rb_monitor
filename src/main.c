@@ -726,7 +726,7 @@ int main(int argc, char *argv[]) {
 		MC_SET_DEBUG(1);
 	}
 
-	if (config_path) {
+	if (!config_path) {
 		rdlog(LOG_ERR, "Config path not set. Exiting");
 		exit(1);
 	}
