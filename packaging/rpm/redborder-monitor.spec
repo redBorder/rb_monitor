@@ -1,4 +1,4 @@
-Name:    rb_monitor
+Name:    redborder-monitor
 Version: %{__version}
 Release: %{__release}%{?dist}
 
@@ -25,19 +25,19 @@ make
 
 %install
 DESTDIR=%{buildroot} make install
-mkdir -p %{buildroot}/usr/share/rb_monitor
-mkdir -p %{buildroot}/etc/rb-monitor
-install -D -m 644 rb-monitor.service %{buildroot}/usr/lib/systemd/system/rb-monitor.service
-install -D -m 644 packaging/rpm/config.json %{buildroot}/usr/share/rb_monitor
+mkdir -p %{buildroot}/usr/share/redborder-monitor
+mkdir -p %{buildroot}/etc/redborder-monitor
+install -D -m 644 redborder-monitor.service %{buildroot}/usr/lib/systemd/system/redborder-monitor.service
+install -D -m 644 packaging/rpm/config.json %{buildroot}/usr/share/redborder-monitor/config.json
 
 %clean
 rm -rf %{buildroot}
 
 %pre
-getent group rb-monitor >/dev/null || groupadd -r rb-monitor
-getent passwd rb-monitor >/dev/null || \
-    useradd -r -g rb-monitor -d / -s /sbin/nologin \
-    -c "User of rb_monitor service" rb-monitor
+getent group redborder-monitor >/dev/null || groupadd -r redborder-monitor
+getent passwd redborder-monitor >/dev/null || \
+    useradd -r -g redborder-monitor -d / -s /sbin/nologin \
+    -c "User of redborder-monitor service" redborder-monitor
 exit 0
 
 %post -p /sbin/ldconfig
@@ -47,8 +47,8 @@ exit 0
 %defattr(755,root,root)
 /usr/bin/rb_monitor
 %defattr(644,root,root)
-/usr/share/rb_monitor/config.json
-/usr/lib/systemd/system/rb-monitor.service
+/usr/share/redborder-monitor/config.json
+/usr/lib/systemd/system/redborder-monitor.service
 
 %changelog
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
