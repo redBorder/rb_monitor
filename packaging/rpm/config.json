@@ -9,5 +9,6 @@
     "kafka_broker": "127.0.0.1",
     "kafka_topic": "rb_monitor",
     "kafka_partition": 0
-  }
+  },
+  "sensors": []
 }

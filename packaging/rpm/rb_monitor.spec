@@ -28,7 +28,7 @@ DESTDIR=%{buildroot} make install
 mkdir -p %{buildroot}/usr/share/rb_monitor
 mkdir -p %{buildroot}/etc/rb-monitor
 install -D -m 644 rb-monitor.service %{buildroot}/usr/lib/systemd/system/rb-monitor.service
-install -D -m 644 config.json %{buildroot}/usr/share/rb_monitor
+install -D -m 644 packaging/rpm/config.json %{buildroot}/usr/share/rb_monitor
 
 %clean
 rm -rf %{buildroot}
@@ -53,5 +53,3 @@ exit 0
 %changelog
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
 - first spec version
-
-
