@@ -253,15 +253,13 @@ And the kafka output will be:
 ```
 
 ### HTTP output
-If you want to send the JSON directly via HTP POST, you can use this sensor properties:
+If you want to send the JSON directly via HTP POST, you can use this conf properties:
 ```json
-"sensors":[
-  {
+"conf": {
   ...
-    "http_endpoint": "http://localhost:8080/monitor",
+  "http_endpoint": "http://localhost:8080/monitor",
   ...
-  }
-]
+}
 ```
 
 Note that you need to configure with `--enable-http`
