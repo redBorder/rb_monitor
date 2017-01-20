@@ -22,26 +22,27 @@ install:
 
 script:
   - make clang-format-check
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor ./configure
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make
-  - docker run -v $(pwd):/app -e CFLAGS=-w redborder/build-dockerfiles:rb_monitor make tests -j 4
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor ./configure
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor make
+  - docker run -v $(pwd):/app -e CFLAGS=-w redborder/dev-containers:rb_monitor make tests -j 4
+  - git clean -fdx
 
 after_success:
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make clean
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor ./configure --enable-coverage
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make coverage
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor lcov --remove tests/coverage.info 'tests/*' '/usr/*' --output-file tests/coverage.info
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor lcov --list tests/coverage.info
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor ./configure --enable-coverage
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor make coverage
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor lcov --remove tests/coverage.info 'tests/*' '/usr/*' --output-file tests/coverage.info
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor lcov --list tests/coverage.info
   - coveralls --exclude /usr/lib --exclude tests --gcov-options '\-lp'
+  - git clean -fdx
 
 before_deploy:
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make clean
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor ./configure
-  - docker run -v $(pwd):/app redborder/build-dockerfiles:rb_monitor make
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor ./configure
+  - docker run -v $(pwd):/app redborder/dev-containers:rb_monitor make
   - tar -cvzf rb_monitor-${TRAVIS_TAG}.tar.gz rb_monitor
 
 deploy:
   provider: releases
+  skip_cleanup: true
   api_key:
     secure: yJNiqNsVRWCIMeIATFjnucWFroG9bZ00JeoqB6h3vQgr4nnVawO4saTRG/q4dYwvUIMMq48WF9Aad2znAWegqrOhZEB+3Qne9XiYs9XAl5C9LiuVospZCmPlOhBWuTMHEewtFtJ6mfz8/UeT2ks+chxxTRrNrPBPriR40+nP4gg=
   file: rb_monitor-${TRAVIS_TAG}.tar.gz
