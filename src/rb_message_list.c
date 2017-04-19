@@ -15,19 +15,28 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-#pragma once
 
-#include "config.h"
+#include "rb_message_list.h"
 
-#ifdef HAVE_ZOOKEEPER
+#include <stdlib.h>
 
-#include <json/json.h>
-#include <librd/rdqueue.h>
+/** Creates a new message array
+  @param s Size of array
+  @return New messages array
+  */
+rb_message_array_t *new_messages_array(size_t s) {
+	rb_message_array_t *ret = calloc(1,sizeof(ret) +
+							s*sizeof(ret->msgs[0]));
+	if (ret) {
+		ret->count = s;
+	}
 
-struct rb_monitor_zk;
-struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
-  uint64_t push_timeout,json_object *zk_sensors,rd_fifoq_t *workers_queue);
+	return ret;
+}
 
-void stop_zk(struct rb_monitor_zk *zk);
-
-#endif
+/** Releases message array resources
+  @param msgs Message array
+  */
+void message_array_done(rb_message_array_t *msgs) {
+	free(msgs);
+}

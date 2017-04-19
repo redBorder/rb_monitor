@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -18,41 +18,93 @@
 
 #include "rb_value.h"
 
+#include "rb_sensor.h"
+#include "rb_sensor_monitor.h"
+
 #include <librd/rdlog.h>
 #include <librd/rdmem.h>
 #include <json-c/printbuf.h>
 
+struct monitor_value *new_monitor_value_array(const char *name,
+		size_t n_children, struct monitor_value **children,
+		struct monitor_value *split_op) {
+	struct monitor_value *ret = calloc(1, sizeof(*ret));
+	if (NULL == ret) {
+		if (split_op) {
+			rb_monitor_value_done(split_op);
+		}
+		for (size_t i=0; i<n_children; ++i) {
+			if (children[i]) {
+				rb_monitor_value_done(children[i]);
+			}
+		}
+		free(children);
+
+		rdlog(LOG_ERR, "Couldn't allocate monitor value");
+		return NULL;
+	}
+
+#ifdef MONITOR_VALUE_MAGIC
+	ret->magic = MONITOR_VALUE_MAGIC;
+#endif
+
+	ret->type = MONITOR_VALUE_T__ARRAY;
+	ret->name = name;
+	ret->array.children_count = n_children;
+	ret->array.split_op_result = split_op;
+	ret->array.children = children;
+
+	return ret;
+}
+
 /* Copy just the 'useful' data of the node, not list-related */
-void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src)
-{
+void monitor_value_copy(struct monitor_value *dst,
+					const struct monitor_value *src) {
 	assert(src);
 	assert(dst);
-	dst->timestamp           = src->timestamp;
-	dst->sensor_id           = src->sensor_id;
-	dst->sensor_id_valid     = src->sensor_id_valid;
-	if(src->sensor_name)
-		dst->sensor_name     = rd_memctx_strdup(&dst->memctx,src->sensor_name);
-	if(src->name)
-		dst->name            = rd_memctx_strdup(&dst->memctx,src->name);
-	if(src->send_name)
-		dst->send_name       = rd_memctx_strdup(&dst->memctx,src->send_name);
-	if(src->instance_prefix)
-		dst->instance_prefix = rd_memctx_strdup(&dst->memctx,src->instance_prefix);
-	dst->type                = src->type;
-	dst->instance            = src->instance;
-	dst->instance_valid      = src->instance_valid;
-	dst->bad_value           = src->bad_value;
-	dst->value               = src->value;
-	dst->integer             = src->integer;
-	if(src->string_value)
-		dst->string_value    = rd_memctx_strdup(&dst->memctx,src->string_value);
-	if(src->unit)
-		dst->unit            = rd_memctx_strdup(&dst->memctx,src->unit);
-	if(src->group_name)
-		dst->group_name      = rd_memctx_strdup(&dst->memctx,src->group_name);
-	if(src->group_id)
-		dst->group_id        = rd_memctx_strdup(&dst->memctx,src->group_id);
-	dst->enrichment          = src->enrichment;
+
+	memset(dst, 0, sizeof(*dst));
+
+#ifdef MONITOR_VALUE_MAGIC
+	dst->magic = MONITOR_VALUE_MAGIC;
+#endif
+
+        if(src->name) {
+                dst->name      = strdup(src->name);
+        }
+        if(src->group_id) {
+		dst->group_id  = strdup(src->group_id);
+	}
+
+        switch(src->type) {
+        case MONITOR_VALUE_T__VALUE:
+        	dst->value.timestamp = src->value.timestamp;
+        	dst->value.bad_value = src->value.bad_value;
+        	dst->value.value     = src->value.value;
+		if(src->value.string_value) {
+			dst->value.string_value = strdup(src->value.string_value);
+		}
+
+        	break;
+	case MONITOR_VALUE_T__ARRAY:
+		dst->array.children_count = src->array.children_count;
+		if (src->array.split_op_result) {
+			dst->array.split_op_result = calloc(1,
+					sizeof(dst->array.split_op_result));
+			if (dst->array.split_op_result) {
+				monitor_value_copy(dst->array.split_op_result,
+					src->array.split_op_result);
+			} else {
+				/// @TODO error treatment
+			}
+		}
+
+		for (size_t i=0; i<dst->array.children_count; ++i) {
+			monitor_value_copy(dst->array.children[i],
+					src->array.children[i]);
+		}
+		break;
+        };
 }
 
 /// @TODO we should print all with this function
@@ -115,40 +167,171 @@ static void print_monitor_value_enrichment(struct printbuf *printbuf,const json_
 	}
 }
 
-struct printbuf * print_monitor_value(const struct monitor_value *monitor_value)
-{
+#define NO_INSTANCE -1
+static void print_monitor_value0(rb_message *message,
+			const struct monitor_value *monitor_value,
+			const rb_monitor_t *monitor, const rb_sensor_t *sensor,
+			int instance) {
+	assert(monitor_value->type == MONITOR_VALUE_T__VALUE);
+
 	struct printbuf * printbuf = printbuf_new();
-	if(likely(NULL!=printbuf))
-	{
+	if(likely(NULL!=printbuf)) {
+		const int sensor_id = rb_sensor_id(sensor);
+		const char *sensor_name = rb_sensor_name(sensor);
+		const char *monitor_group_name = rb_monitor_group_name(monitor);
+		const char *monitor_type = rb_monitor_type(monitor);
+		const char *monitor_unit = rb_monitor_unit(monitor);
+		const char *monitor_instance_prefix =
+					rb_monitor_instance_prefix(monitor);
+		const char *monitor_name_split_suffix =
+					rb_monitor_name_split_suffix(monitor);
+		struct json_object *sensor_enrichment =
+						rb_sensor_enrichment(sensor);
 		// @TODO use printbuf_memappend_fast instead! */
 		sprintbuf(printbuf, "{");
-		sprintbuf(printbuf,"\"timestamp\":%lu",monitor_value->timestamp);
-		if(monitor_value->sensor_id_valid)
-			sprintbuf(printbuf, ",\"sensor_id\":%lu",monitor_value->sensor_id);
-		if(monitor_value->sensor_name)
-			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",monitor_value->sensor_name);
-		if(monitor_value->send_name)
-			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->send_name);
-		else
-			sprintbuf(printbuf, ",\"monitor\":\"%s\"",monitor_value->name);
-		if(monitor_value->instance_valid && monitor_value->instance_prefix)
-			sprintbuf(printbuf, ",\"instance\":\"%s%u\"",monitor_value->instance_prefix,monitor_value->instance);
-		if(monitor_value->integer)
-			sprintbuf(printbuf, ",\"value\":%ld", (long int)monitor_value->value);
-		else
-			sprintbuf(printbuf, ",\"value\":\"%lf\"", monitor_value->value);
-		if(monitor_value->type)
-			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_value->type());
-		if(monitor_value->unit)
-			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_value->unit);
-		if(monitor_value->group_name)
-			sprintbuf(printbuf, ",\"group_name\":\"%s\"", monitor_value->group_name);
-		if(monitor_value->group_id)
-			sprintbuf(printbuf, ",\"group_id\":%s", monitor_value->group_id);
-		if(monitor_value->enrichment)
-			print_monitor_value_enrichment(printbuf,monitor_value->enrichment);
+		sprintbuf(printbuf, "\"timestamp\":%lu",
+						monitor_value->value.timestamp);
+		if (sensor_id) {
+			sprintbuf(printbuf, ",\"sensor_id\":%lu", sensor_id);
+		}
+		if (sensor_name) {
+			sprintbuf(printbuf, ",\"sensor_name\":\"%s\"",
+						sensor_name);
+		}
+
+		if (NO_INSTANCE != instance && monitor_name_split_suffix) {
+			sprintbuf(printbuf, ",\"monitor\":\"%s%s\"",
+						monitor_value->name,
+						monitor_name_split_suffix);
+		} else {
+			sprintbuf(printbuf, ",\"monitor\":\"%s\"",
+							monitor_value->name);
+		}
+
+		if (NO_INSTANCE != instance && monitor_instance_prefix) {
+			sprintbuf(printbuf, ",\"instance\":\"%s%d\"",
+					monitor_instance_prefix, instance);
+		}
+
+		if (rb_monitor_is_integer(monitor)) {
+			sprintbuf(printbuf, ",\"value\":%"PRId64,
+					(int64_t)monitor_value->value.value);
+		} else {
+			sprintbuf(printbuf, ",\"value\":\"%lf\"",
+						monitor_value->value.value);
+		}
+		if (monitor_type) {
+			sprintbuf(printbuf, ",\"type\":\"%s\"",monitor_type);
+		}
+		if (monitor_unit) {
+			sprintbuf(printbuf, ",\"unit\":\"%s\"", monitor_unit);
+		}
+		if (monitor_group_name){
+			sprintbuf(printbuf, ",\"group_name\":\"%s\"",
+							monitor_group_name);
+		}
+		if (monitor_value->group_id){
+			sprintbuf(printbuf, ",\"group_id\":%s",
+						monitor_value->group_id);
+		}
+		if (sensor_enrichment) {
+			print_monitor_value_enrichment(printbuf,
+							sensor_enrichment);
+		}
 		sprintbuf(printbuf, "}");
+
+		message->payload = printbuf->buf;
+		message->len = printbuf->bpos;
+
+		printbuf->buf = NULL;
+		printbuf_free(printbuf);
+
+	}
+}
+
+rb_message_array_t *print_monitor_value(
+		const struct monitor_value *monitor_value,
+		const rb_monitor_t *monitor, const rb_sensor_t *sensor) {
+	const size_t ret_size = monitor_value->type == MONITOR_VALUE_T__VALUE ?
+		1 : monitor_value->array.children_count +
+			(monitor_value->array.split_op_result ? 1 : 0);
+
+	rb_message_array_t *ret = new_messages_array(ret_size);
+	if (ret == NULL) {
+		rdlog(LOG_ERR, "Couldn't allocate messages array");
+		return NULL;
 	}
 
-	return printbuf;
+	if (monitor_value->type == MONITOR_VALUE_T__VALUE) {
+		print_monitor_value0(&ret->msgs[0], monitor_value, monitor,
+			sensor, NO_INSTANCE);
+	} else {
+		size_t i_msgs = 0;
+		assert(monitor_value->type == MONITOR_VALUE_T__ARRAY);
+		for (size_t i=0; i<monitor_value->array.children_count; ++i) {
+			if (monitor_value->array.children[i]) {
+				print_monitor_value0(&ret->msgs[i_msgs++],
+					monitor_value->array.children[i],
+					monitor, sensor, i);
+			}
+		}
+
+		if (monitor_value->array.split_op_result) {
+			rb_message *msg = &ret->msgs[i_msgs++];
+			assert(NULL == msg->payload);
+			print_monitor_value0(msg,
+				monitor_value->array.split_op_result, monitor,
+				sensor, NO_INSTANCE);
+		}
+
+		ret->count = i_msgs;
+	}
+
+	return ret;
+}
+
+static ssize_t pos_array_length(ssize_t *pos) {
+	assert(pos);
+	ssize_t i = 0;
+	for (i=0; -1 != pos[i]; ++i);
+	return i;
+}
+
+rb_monitor_value_array_t *rb_monitor_value_array_select(
+				rb_monitor_value_array_t *array, ssize_t *pos) {
+	if (NULL == pos || NULL == array) {
+		return NULL;
+	}
+
+	const size_t ret_size = pos_array_length(pos);
+	rb_monitor_value_array_t *ret = rb_monitor_value_array_new(ret_size);
+	if (NULL == ret) {
+		rdlog(LOG_ERR, "Couldn't allocate select return (OOM?)");
+		return NULL;
+	}
+
+
+	assert(array);
+	assert(pos);
+
+	for (ssize_t i=0; -1 != pos[i]; ++i) {
+		rb_monitor_value_array_add(ret, array->elms[pos[i]]);
+	}
+
+	return ret;
+}
+
+void rb_monitor_value_done(struct monitor_value *mv) {
+	if (MONITOR_VALUE_T__ARRAY == mv->type) {
+		for (size_t i=0; i<mv->array.children_count; ++i) {
+			if (mv->array.children[i]) {
+				rb_monitor_value_done(mv->array.children[i]);
+			}
+		}
+		if (mv->array.split_op_result) {
+			rb_monitor_value_done(mv->array.split_op_result);
+		}
+		free(mv->array.children);
+	}
+	free(mv);
 }

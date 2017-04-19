@@ -15,19 +15,30 @@
   You should have received a copy of the GNU Affero General Public License
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
-#pragma once
 
-#include "config.h"
+#include "rb_libmatheval.h"
 
-#ifdef HAVE_ZOOKEEPER
+#include <librd/rdlog.h>
 
-#include <json/json.h>
-#include <librd/rdqueue.h>
+#include <stdlib.h>
 
-struct rb_monitor_zk;
-struct rb_monitor_zk *init_rbmon_zk(char *host,uint64_t pop_watcher_timeout,
-  uint64_t push_timeout,json_object *zk_sensors,rd_fifoq_t *workers_queue);
+struct libmatheval_vars *new_libmatheval_vars(size_t new_size) {
+	struct libmatheval_vars *this = NULL;
+	const size_t alloc_size = sizeof(*this)
+		+ new_size*sizeof(this->names[0])
+		+ new_size*sizeof(this->values[0]);
 
-void stop_zk(struct rb_monitor_zk *zk);
+	this = calloc(1,alloc_size);
+	if (NULL == this) {
+		rdlog(LOG_ERR, "Cannot allocate memory. Exiting.");
+	} else {
+		this->names = (void *)&this[1];
+		this->values = (void *)&this->names[new_size];
+	}
 
-#endif
+	return this;
+}
+
+void delete_libmatheval_vars(struct libmatheval_vars *this) {
+	free(this);
+}

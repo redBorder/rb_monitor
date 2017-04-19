@@ -1,0 +1,117 @@
+{
+   SNMP new session memory leak (Centos 6.5)
+   Memcheck:Leak
+   fun:calloc
+   fun:snmp_sess_add_ex
+   fun:snmp_sess_add
+   fun:snmp_sess_open
+   fun:new_snmp_session
+   ...
+}
+
+{
+   Net-SNMP never-freed
+   Memcheck:Leak
+   ...
+   obj:/usr/lib64/libsnmp.so.20.0.0
+   fun:snmp_sess_init
+   ...
+}
+
+{
+   Libmatheval once memory leak
+   Memcheck:Leak
+   fun:malloc
+   fun:yyalloc
+   fun:yy_create_buffer
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   ...
+}
+
+# The next memory leak is controlled, it should only happens at config parsing
+{
+   libmatheval memory leak when it can't create an evaluator (invalid op)
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   fun:node_create
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+}
+
+{
+   libmatheval internal malloc fail
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   ...
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+   fun:mem_parse_sensor
+   ...
+}
+
+{
+   libmatheval internal malloc fail 1
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   ...
+   fun:evaluator_get_variables
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+   fun:mem_parse_sensor
+   ...
+}
+
+{
+   libmatheval internal malloc fail 2
+   Memcheck:Leak
+   fun:malloc
+   fun:xmalloc
+   fun:symbol_table_insert
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+}
+
+{
+   libmatheval internal malloc fail 3
+   Memcheck:Leak
+   fun:malloc
+   fun:yyalloc
+   fun:yyensure_buffer_stack
+   fun:yylex
+   fun:yyparse
+   fun:evaluator_create
+   fun:rb_monitor_get_op_variables
+   fun:get_monitor_dependencies
+   fun:get_monitors_dependencies
+   fun:sensor_common_attrs_parse_json
+   fun:sensor_common_attrs
+   fun:parse_rb_sensor
+}

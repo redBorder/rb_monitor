@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -18,9 +18,7 @@
 
 #include "json_test.h"
 
-#include <librd/rd.h>
 #include <librd/rdfloat.h>
-#include <librd/rdlru.h>
 
 #include <string.h>
 #include <stdarg.h>
@@ -115,25 +113,32 @@ void check_list_push_checks(check_list_t *check_list,
 }
 
 /** Checks and consume produced messages against check_list */
-void json_list_check(check_list_t *check_list, rd_lru_t *msgs) {
-	while(!TAILQ_EMPTY(check_list)) {
-		struct json_check *check = TAILQ_FIRST(check_list);
-		TAILQ_REMOVE(check_list, check, entry);
-		char *msg = rd_lru_pop(msgs);
-		assert_non_null(msg);
+void json_list_check(check_list_t *check_list, rb_message_list *msgs) {
 
-		json_object *jmsg = json_tokener_parse(msg);
-		assert_non_null(jmsg);
+	while(!(rb_message_list_empty(msgs))) {
+		rb_message_array_t *array = rb_message_list_first(msgs);
+		rb_message_list_remove(msgs, array);
+		for (size_t i=0; i<array->count; ++i) {
+			char *msg = array->msgs[i].payload;
+			json_object *jmsg = json_tokener_parse(msg);
+			assert_non_null(jmsg);
 
-		json_check(check->json, jmsg);
+			struct json_check *check = TAILQ_FIRST(check_list);
+			assert_non_null(check);
+			TAILQ_REMOVE(check_list, check, entry);
 
-		json_object_put(jmsg);
-		json_object_put(check->json);
-		free(msg);
-		free(check);
+			json_check(check->json, jmsg);
+
+			json_object_put(jmsg);
+			json_object_put(check->json);
+			free(msg);
+			free(check);
+
+		}
+		message_array_done(array);
 	}
 
-	assert_null(rd_lru_pop(msgs));
+	assert_true(TAILQ_EMPTY(check_list));
 }
 
 struct json_check *prepare_test_basic_sensor_check(size_t childs_len,

@@ -46,7 +46,7 @@ static const char split_op_sensor[] =  "{"
 
 		/* invalid split op of a vector operation */
 		/* (not sending anything at this moment) */
-		"{\"name\": \"load_1+5_sum\", \"op\": \"load_1+load_5\","
+		"{\"name\": \"load_1+5_invalid_sop\", \"op\": \"load_1+load_5\","
 				"\"name_split_suffix\":\"_per_instance\","
 				"\"split\":\";\",\"split_op\":\"invalid\","
 				"\"instance_prefix\":\"load-instance-\","
@@ -122,6 +122,20 @@ static void prepare_split_op_monitor_checks(check_list_t *check_list) {
 	check_list_push_checks(check_list, checks_v_sum,
 				RD_ARRAYSIZE(checks_v_sum), TEST1_V_SIZE);
 	check_list_push_checks(check_list, checks_op_sum, 1, TEST1_AVG_SIZE);
+
+	struct json_key_test *checks_v_invalid[] = {
+		TEST1_CHECKS0_I("load_1+5_invalid_sop_per_instance","7.000000",
+							"load-instance-0"),
+		TEST1_CHECKS0_I("load_1+5_invalid_sop_per_instance","8.000000",
+							"load-instance-1"),
+		TEST1_CHECKS0_I("load_1+5_invalid_sop_per_instance","9.000000",
+							"load-instance-2"),
+		TEST1_CHECKS0_I("load_1+5_invalid_sop_per_instance","10.000000",
+							"load-instance-3")
+	};
+
+	check_list_push_checks(check_list, checks_v_invalid,
+				RD_ARRAYSIZE(checks_v_invalid), TEST1_V_SIZE);
 }
 
 /** Basic split monitor test, with sum/mean op */

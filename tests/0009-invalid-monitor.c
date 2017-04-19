@@ -22,6 +22,14 @@ static const char invalid_monitor[] = "{\n"
 		// Monitor with no name
 		"{\"system\":  \"echo 3\", \"send\": 1},\n"
 
+		// Unknown monitor type (no system, oid, op)
+		"{\"name\": \"unknown_op\","
+					" \"unit\": \"%\", \"send\": 1},\n"
+
+		// Unknown op command
+		"{\"name\": \"unknown_op_arg\",\"system\":null,"
+					" \"unit\": \"%\", \"send\": 1},\n"
+
 		// Empty returned value
 		"{\"name\": \"null\", \"system\": \"echo -n\","
 					" \"unit\": \"%\", \"send\": 1},\n"
@@ -30,13 +38,43 @@ static const char invalid_monitor[] = "{\n"
 		"{\"name\": \"invalid_key\", \"system\":  \"echo 12\","
 			" \"unit\": \"%\", \"send\": 1, \"invalid_key\":1},\n"
 
-		// Get a bad variable
-		"{\"name\": \"bad_var\", \"system\": \"echo 0\", \"nonzero\":1,"
+		// Unknown variable
+		"{\"name\": \"unknown_var_op\", \"op\": \"no_var+1\","
 					" \"unit\": \"%\", \"send\": 1},\n"
 
-		// Use previous bad variable
-		"{\"name\": \"bad_var_op\", \"op\": \"bad_var+1\","
+		// Unknown operation
+		"{\"name\": \"unknown_op\", \"op\": \"no_var\\\\1\","
 					" \"unit\": \"%\", \"send\": 1},\n"
+
+		// Operation with timestamp involved (invalid), split and with
+		// no monitors variables in operation
+		"{\"name\": \"unknown_op\", \"op\": \"1+1\","
+			"\"unit\": \"%\", \"send\": 1,"
+			"\"split\":\";\",\"split_op\":\"sum\","
+			"\"timestamp_given\":1},\n"
+
+		// Operation with timestamp involved (invalid), timestamp
+		// separation with no value
+		"{\"name\": \"invalid_ts1\", \"system\": \"echo '1:'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
+		// Operation with timestamp involved (invalid), timestamp
+		// separator with no timestamp
+		"{\"name\": \"invalid_ts2\", \"system\": \"echo '1:2;7;3:4'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
+		// Operation with timestamp involved (invalid), timestamp
+		// separator at the end of string
+		"{\"name\": \"invalid_ts2\", \"system\": \"echo '1:2;7:4;3'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\",\n"
+			"\"timestamp_given\":1},\n"
+
+		// Can't convert number
+		"{\"name\": \"v1\","
+		"\"system\": \"echo '9e999999999999999999999999999999999999'\","
+			" \"unit\": \"%\", \"send\": 0, \"split\":\";\"},\n"
 
 		// operation over two vector of different sizes
 		"{\"name\": \"v1\", \"system\": \"echo '0;1;2;3'\","
@@ -76,7 +114,7 @@ static const char invalid_monitor[] = "{\n"
 static void prepare_invalid_monitor_checks(check_list_t *check_list) {
 	struct json_key_test *checks[] = {
 		TEST1_CHECKS("system","invalid_key","12.000000"),
-		TEST1_CHECKS("op","bad_var_op","1.000000"),
+		// TEST1_CHECKS("op","bad_var_op","1.000000"),
 	};
 
 	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),

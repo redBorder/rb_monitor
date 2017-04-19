@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -16,26 +16,15 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include "rb_array.h"
 
-#include <stdbool.h>
-#include "librd/rdlru.h"
-#include "librd/rdavl.h"
-#include <json-c/printbuf.h>
+struct rb_array *rb_array_new(size_t size) {
+	struct rb_array *ret = NULL;
+	ret = calloc(1, sizeof(*ret) + size*sizeof(ret->elms[0]));
 
-#include "rb_value.h"
+	if (ret) {
+		ret->size = size;
+	}
 
-struct monitor_values_tree;
-
-struct monitor_values_tree * new_monitor_values_tree();
-
-/**
-  Add a monitor value to a monitor_values_tree.
-  @note src value will be copied.
- */
-const struct monitor_value * update_monitor_value(struct monitor_values_tree *tree,const struct monitor_value *src);
-
-/**
-  Destroy values tree
- */
-void destroy_monitor_values_tree(struct monitor_values_tree*tree);
+	return ret;
+}

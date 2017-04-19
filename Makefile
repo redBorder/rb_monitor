@@ -2,9 +2,11 @@
 BIN = rb_monitor
 
 SRCS = $(addprefix src/, \
-	main.c rb_snmp.c rb_value.c rb_values_list.c rb_zk.c rb_monitor_zk.c)
+	main.c rb_snmp.c rb_value.c rb_zk.c rb_monitor_zk.c \
+	rb_sensor.c rb_sensor_queue.c rb_array.c rb_sensor_monitor.c \
+	rb_sensor_monitor_array.c rb_message_list.c rb_libmatheval.c)
 OBJS = $(SRCS:.c=.o)
-TESTS_C = $(wildcard tests/0*.c)
+TESTS_C = $(sort $(wildcard tests/0*.c))
 
 TESTS = $(TESTS_C:.c=.test)
 TESTS_OBJS = $(TESTS:.test=.o)
@@ -39,41 +41,44 @@ clean: bin-clean
 install: bin-install
 
 run_tests = tests/run_tests.sh $(1) $(TESTS_C:.c=)
-run_valgrind = $(VALGRIND) --tool=$(1) $(SUPPRESSIONS_VALGRIND_ARG) --xml=yes \
-					--xml-file=$(2) $(3)  &>/dev/null
+run_valgrind = echo "$(MKL_YELLOW) Generating $(2) $(MKL_CLR_RESET)" && $(VALGRIND) --tool=$(1) $(SUPPRESSIONS_VALGRIND_ARG) --xml=yes \
+					--xml-file=$(2) $(3) >/dev/null 2>&1
 
 tests: $(TESTS_XML)
-	$(call run_tests, -cvdh)
+	@$(call run_tests, -cvdh)
 
 checks: $(TESTS_CHECKS_XML)
-	$(call run_tests,-c)
+	@$(call run_tests,-c)
 
 memchecks: $(TESTS_VALGRIND_XML)
-	$(call run_tests,-v)
+	@$(call run_tests,-v)
 
 drdchecks: $(TESTS_DRD_XML)
-	$(call run_tests,-d)
+	@$(call run_tests,-d)
 
 helchecks: $(TESTS_HELGRIND_XML)
-	$(call run_tests,-h)
+	@$(call run_tests,-h)
 
 tests/%.mem.xml: tests/%.test
-	-$(call run_valgrind,memcheck,"$@","./$<")
+	-@$(call run_valgrind,memcheck,"$@","./$<")
 
 tests/%.helgrind.xml: tests/%.test
-	-$(call run_valgrind,helgrind,"$@","./$<")
+	-@$(call run_valgrind,helgrind,"$@","./$<")
 
 tests/%.drd.xml: tests/%.test
-	-$(call run_valgrind,drd,"$@","./$<")
+	-@$(call run_valgrind,drd,"$@","./$<")
 
 tests/%.xml: tests/%.test
-	CMOCKA_XML_FILE="$@" CMOCKA_MESSAGE_OUTPUT=XML "./$<" &>/dev/null
+	@echo "$(MKL_YELLOW) Generating $@$(MKL_CLR_RESET)"
+	@CMOCKA_XML_FILE="$@" CMOCKA_MESSAGE_OUTPUT=XML "./$<" >/dev/null 2>&1
 
 tests/%.test: CPPFLAGS := -I. $(CPPFLAGS)
-tests/%.test: tests/%.o $(filter-out src/main.o,$(OBJS)) tests/json_test.o \
-								src/main.c
-	$(CC) $(CPPFLAGS) $(LDFLAGS) $(filter-out src/main.c,$^) -o $@ $(LIBS) \
-									-lcmocka
+OBJ_DEPS_TESTS := tests/json_test.o tests/sensor_test.o
+MALLOC_FUNCTIONS := malloc calloc strdup realloc
+WRAP_ALLOC_FUNCTIONS := $(foreach fn, $(MALLOC_FUNCTIONS)\
+						,-Wl,-u,$(fn) -Wl,-wrap,$(fn))
+tests/%.test: tests/%.o $(filter-out src/main.o,$(OBJS)) $(OBJ_DEPS_TESTS)
+	$(CC) $(WRAP_ALLOC_FUNCTIONS) $(CPPFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS) -lcmocka
 
 check_coverage:
 	@( if [[ "x$(WITH_COVERAGE)" == "xn" ]]; then \
