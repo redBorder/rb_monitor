@@ -132,7 +132,14 @@ bool snmp_solve_response(char *value_buf,
 			*number = strtod(value_buf, NULL);
 			ret = 1;
 			break;
-
+		case 65:
+			snprintf(value_buf,
+				 value_buf_len,
+				 "%ld",
+				 *response->variables->val.integer);
+			*number = *response->variables->val.integer;
+			ret = 1;
+			break;
 		default:
 			rdlog(LOG_WARNING,
 			      "Unknow variable type %d in SNMP response",
