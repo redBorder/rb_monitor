@@ -144,8 +144,7 @@ bool snmp_solve_response(char *value_buf,
 		  // TODO: Prepare this for high values also
       snprintf(value_buf,value_buf_len,"%lu",response->variables->val.counter64->low);
       //snprintf(value_buf++,value_buf_len,"%lu",response->variables->val.counter64->high);
-      u_long number_long = response->variables->val.counter64->low;
-      *number = (double) number_long;
+      *number = (double) response->variables->val.counter64->low;
       ret = 1;
       break;
 		default:
