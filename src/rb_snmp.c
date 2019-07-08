@@ -128,7 +128,7 @@ int snmp_solve_response(char * value_buf,const size_t value_buf_len,double * num
                                  snprintf(value_buf,value_buf_len,"%lu",response->variables->val.counter64->low);
                                  *number = (double) response->variables->val.counter64->low;
                                  ret = 1;
-
+                                 break;
 			default:
 				rdlog(LOG_WARNING,"Unknow variable type %d in SNMP response. Line %d",response->variables->type,__LINE__);
 		};
