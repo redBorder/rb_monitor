@@ -42,7 +42,7 @@ DESTDIR=%{buildroot} make install
 mkdir -p %{buildroot}/usr/share/redborder-monitor
 mkdir -p %{buildroot}/etc/redborder-monitor
 install -D -m 644 redborder-monitor.service %{buildroot}/usr/lib/systemd/system/redborder-monitor.service
-install -D -m 644 packaging/rpm/config.json %{buildroot}/usr/share/r_monitor
+install -D -m 644 packaging/rpm/config.json %{buildroot}/usr/share/redborder-monitor
 
 %clean
 rm -rf %{buildroot}
