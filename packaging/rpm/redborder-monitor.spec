@@ -59,7 +59,7 @@ exit 0
 
 %files
 %defattr(755,root,root)
-/usr/bin/redborder-monitor
+/usr/bin/rb_monitor
 %defattr(644,root,root)
 /usr/share/redborder-monitor/config.json
 /usr/lib/systemd/system/redborder-monitor.service
