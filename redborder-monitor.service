@@ -2,7 +2,7 @@
 Description=data events via SNMP or scripting to json/kafka
 
 [Service]
-ExecStart=/usr/bin/rb_monitor -c /etc/rb-monitor/config.json
+ExecStart=/usr/bin/rb_monitor -c /etc/redborder-monitor/config.json
 Restart=always
 User=rb-monitor
 Group=rb-monitor
