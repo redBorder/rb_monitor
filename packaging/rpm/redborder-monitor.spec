@@ -54,7 +54,10 @@ getent passwd redborder-monitor >/dev/null || \
     -c "User of redborder_monitor service" redborder-monitor
 exit 0
 
-%post -p /sbin/ldconfig
+%post
+/sbin/ldconfig
+systemctl daemon-reload
+
 %postun -p /sbin/ldconfig
 
 %files
