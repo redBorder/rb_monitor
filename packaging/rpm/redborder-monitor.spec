@@ -34,10 +34,8 @@ make install
 popd
 ldconfig
 
-curl --version
-sleep 5
 export PKG_CONFIG_PATH=/usr/lib/pkgconfig
-./configure --prefix=/ --sbindir=/ --exec-prefix=/ --enable-rbhttp
+./configure --prefix=/usr --sbindir=/usr/bin --exec-prefix=/usr --enable-rbhttp
 make
 
 %install
