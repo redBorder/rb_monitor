@@ -6,12 +6,11 @@ License: GNU AGPLv3
 URL: https://github.com/redBorder/rb_monitor
 Source0: %{name}-%{version}.tar.gz
 
-BuildRequires: gcc git librd-devel net-snmp-devel json-c-devel libmatheval-devel
-#BuildRequires: librdkafka-devel
+BuildRequires: gcc git librd-devel net-snmp-devel json-c-devel librdkafka-devel libmatheval-devel libpcap-devel librb-http0 libcurl-devel >= 7.48.0
 
 Summary: Get data events via SNMP or scripting and send results in json over kafka.
 Group:   Development/Libraries/C and C++
-Requires: librd0 libmatheval librdkafka1 net-snmp
+Requires: librd0 libmatheval libpcap librdkafka1 net-snmp librb-http0
 Requires(pre): shadow-utils
 
 %description
@@ -22,17 +21,21 @@ Requires(pre): shadow-utils
 
 %build
 git clone --branch v0.9.2 https://github.com/edenhill/librdkafka.git /tmp/librdkafka-v0.9.2
-cd /tmp/librdkafka-v0.9.2
-#make uninstall
+pushd /tmp/librdkafka-v0.9.2
 ./configure --prefix=/usr --sbindir=/usr/bin --exec-prefix=/usr && make
 make install
-cd -
+popd
+ldconfig
+
+git clone --branch 1.2.0 https://github.com/redBorder/librb-http.git /tmp/librd-http
+pushd /tmp/librd-http
+./configure --prefix=/usr --sbindir=/usr/bin --exec-prefix=/usr && make
+make install
+popd
 ldconfig
 
 export PKG_CONFIG_PATH=/usr/lib/pkgconfig
-ls /usr/lib/pkgconfig
-
-./configure --prefix=/usr
+./configure --prefix=/usr --sbindir=/usr/bin --exec-prefix=/usr --enable-rbhttp
 make
 
 %install
@@ -70,3 +73,5 @@ systemctl daemon-reload
 %changelog
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
 - first spec version
+
+
