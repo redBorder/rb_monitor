@@ -122,4 +122,7 @@ coverage: check_coverage $(TESTS)
 rpm: clean
 	$(MAKE) -C packaging/rpm
 
+rpmtest:
+	$(MAKE) LATEST=`git stash create` -C packaging/rpm
+
 -include $(DEPS)
