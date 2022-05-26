@@ -8,8 +8,6 @@ MOCK_CONFIG?=default
 
 RESULT_DIR?=pkgs
 
-LATEST?=HEAD
-
 all: rpm
 
 
@@ -19,7 +17,7 @@ SOURCES:
 archive: SOURCES
 	cd ../../ && \
 	git archive --prefix=$(PACKAGE_NAME)-$(VERSION)/ \
-		-o packaging/rpm/SOURCES/$(PACKAGE_NAME)-$(VERSION).tar.gz $(LATEST)
+		-o packaging/rpm/SOURCES/$(PACKAGE_NAME)-$(VERSION).tar.gz HEAD
 
 
 build_prepare: archive
