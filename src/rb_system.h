@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -17,24 +17,21 @@
 */
 
 #include <librd/rdlog.h>
+
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-
 
 #pragma once
 
-static inline char * trim_end(char * buf)
-{
-	char * end = buf + strlen(buf)-1;
-	while(end>=buf && isspace(*end))
+static inline char *trim_end(char *buf) {
+	char *end = buf + strlen(buf) - 1;
+	while (end >= buf && isspace(*end))
 		end--;
-	*(end+1)='\0';
+	*(end + 1) = '\0';
 	return buf;
 }
-
-static inline const char *system_type_fn(void){return "system";}
 
 /**
  Exec a system command and puts the output in value_buf
@@ -47,31 +44,29 @@ static inline const char *system_type_fn(void){return "system";}
  @todo see if we can join with snmp_solve_response somehow
  @return               1 if number. 0 ioc.
  */
-static int system_solve_response(char * buff,const size_t buff_size,
-	double * number,
-	__attribute__((unused)) void * unused,const char *command)
-{
-	int ret=0;
-	FILE * fp = popen(command, "r");
-	if(NULL==fp)
-	{
-		rdlog(LOG_ERR,"Cannot get system command.");
-	}
-	else
-	{
-		if(NULL==fgets(buff, buff_size, fp))
-		{
-			rdlog(LOG_ERR,"Cannot get buffer information");
-		}
-		else
-		{
-			rdlog(LOG_DEBUG,"System response: %s",buff);
+static bool system_solve_response(char *buff,
+				  size_t buff_size,
+				  double *number,
+				  void *unused,
+				  const char *command) {
+	(void)unused;
+
+	bool ret = false;
+	FILE *fp = popen(command, "r");
+	if (NULL == fp) {
+		rdlog(LOG_ERR, "Cannot get system command.");
+	} else {
+		if (NULL == fgets(buff, buff_size, fp)) {
+			rdlog(LOG_ERR, "Cannot get buffer information");
+		} else {
+			rdlog(LOG_DEBUG, "System response: %s", buff);
 			trim_end(buff);
-			char * endPtr;
-			*number = strtod(buff,&endPtr);
-			if(buff!=endPtr)
-				ret++;
+			char *endPtr;
+			*number = strtod(buff, &endPtr);
+			if (buff != endPtr)
+				ret = true;
 		}
+
 		fclose(fp);
 	}
 

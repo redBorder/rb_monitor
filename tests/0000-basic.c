@@ -6,10 +6,14 @@
 #include <librd/rd.h>
 #include <librd/rdfloat.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
+
+#include <stdarg.h>
+#include <string.h>
+
+// clang-format off
 
 static const char basic_sensor[] = "{\n"
 	"\"sensor_id\":1,\n"
@@ -23,6 +27,8 @@ static const char basic_sensor[] = "{\n"
 					" \"unit\": \"%\", \"send\": 1},\n"
 		"{\"name\": \"load_15\", \"system\": \"echo 2\","
 					" \"unit\": \"%\", \"send\": 1},\n"
+		"{\"name\": \"no_unit\", \"system\": \"echo 5\","
+					"\"send\": 1},\n"
 	"]\n"
 	"}";
 
@@ -44,6 +50,10 @@ static const char monitor_send_parameter_sensor[] =  "{"
 		"// This line will be sent: \"send:1\"\n"
 		"{\"name\": \"load_15\", \"system\": \"echo 2\","
 					"\"unit\": \"%\", \"send\": 1},"
+
+		"// This line will also be sent\n"
+		"{\"name\": \"no_unit\", \"system\": \"echo 5\","
+					"\"send\": 1},\n"
 	"]"
 	"}";
 
@@ -64,28 +74,38 @@ static const char monitor_integer[] = "{"
 	"]\n"
 	"}";
 
-#define TEST1_CHECKS0(mmonitor,mvalue_type,mvalue) (struct json_key_test[]) {  \
-	CHILD_I("sensor_id",1),                                                \
-	CHILD_S("sensor_name","sensor-arriba"),                                \
-	CHILD_S("monitor",mmonitor),                                           \
-	mvalue_type("value",mvalue),                                           \
-	CHILD_S("type","system"),                                              \
-	CHILD_S("unit","%"),                                                   \
-}
+#define TEST1_CHECKS00(mmonitor,mvalue_type,mvalue)                            \
+	CHILD_I("sensor_id",1,                                                 \
+	CHILD_S("sensor_name","sensor-arriba",                                 \
+	CHILD_S("monitor",mmonitor,                                            \
+	mvalue_type("value",mvalue,                                            \
+	CHILD_S("type","system",NULL)))))
+
+#define TEST1_CHECKS0(mmonitor,mvalue_type,mvalue)                             \
+	CHILD_S("unit","%",                                                    \
+	TEST1_CHECKS00(mmonitor,mvalue_type,mvalue))
+
+#define TEST1_CHECKS0_NOUNIT0(mmonitor,mvalue_type,mvalue)                     \
+	TEST1_CHECKS00(mmonitor,mvalue_type,mvalue)
+
+#define TEST1_CHECKS0_NOUNIT(mmonitor,mvalue) \
+			TEST1_CHECKS0_NOUNIT0(mmonitor,CHILD_S,mvalue)
 
 #define TEST1_CHECKS(mmonitor,mvalue) TEST1_CHECKS0(mmonitor,CHILD_S,mvalue)
 
-#define TEST1_SAMPLE TEST1_CHECKS("a","b")
-#define TEST1_SIZE sizeof(TEST1_SAMPLE)/sizeof(TEST1_SAMPLE[0])
-
 static void prepare_test_basic_sensor_checks(check_list_t *check_list) {
-	struct json_key_test *checks[] = {
-		TEST1_CHECKS("load_5","3.000000"),
-		TEST1_CHECKS("load_15","2.000000"),
+	json_key_test checks[] = {
+		JSON_KEY_TEST(TEST1_CHECKS("load_5","3.000000")),
+		JSON_KEY_TEST(TEST1_CHECKS("load_15","2.000000")),
 	};
 
-	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),
-								TEST1_SIZE);
+	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks));
+
+	json_key_test checks_nu[] = {
+		JSON_KEY_TEST(TEST1_CHECKS0_NOUNIT("no_unit","5.000000")),
+	};
+
+	check_list_push_checks(check_list, checks_nu, RD_ARRAYSIZE(checks_nu));
 }
 
 /** Basic test */
@@ -97,12 +117,11 @@ TEST_FN(test_monitor_send_parameter, prepare_test_basic_sensor_checks,
 
 /** Test force integer parameter */
 static void prepare_test_integer_checks(check_list_t *check_list) {
-	struct json_key_test *checks[] = {
-		TEST1_CHECKS0("forced_int",CHILD_I,5),
+	json_key_test checks[] = {
+		JSON_KEY_TEST(TEST1_CHECKS0("forced_int",CHILD_I,5)),
 	};
 
-	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks),
-								TEST1_SIZE);
+	check_list_push_checks(check_list, checks, RD_ARRAYSIZE(checks));
 }
 
 TEST_FN(test_monitor_integer, prepare_test_integer_checks, monitor_integer)

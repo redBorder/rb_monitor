@@ -16,25 +16,29 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include "rb_libmatheval.h"
 
-#include <stdbool.h>
-#include <string.h>
+#include <librd/rdlog.h>
 
-/** Libmatheval needed variables */
-struct libmatheval_vars {
-	char **names;   ///< Variable names
-	double *values; ///< Variable values
-	size_t count;
-};
+#include <stdlib.h>
 
-/** Create a new libmatheval vars
-  @param new_size # vars it can hold
-  @return New libmatheval vars
-  */
-struct libmatheval_vars *new_libmatheval_vars(size_t new_size);
+struct libmatheval_vars *new_libmatheval_vars(size_t new_size) {
+	struct libmatheval_vars *this = NULL;
+	const size_t alloc_size = sizeof(*this) +
+				  new_size * sizeof(this->names[0]) +
+				  new_size * sizeof(this->values[0]);
 
-/** Deallocate libmatheval vars
-  @param this libmatheval vars to deallocate
-  */
-void delete_libmatheval_vars(struct libmatheval_vars *this);
+	this = calloc(1, alloc_size);
+	if (NULL == this) {
+		rdlog(LOG_ERR, "Cannot allocate memory. Exiting.");
+	} else {
+		this->names = (void *)&this[1];
+		this->values = (void *)&this->names[new_size];
+	}
+
+	return this;
+}
+
+void delete_libmatheval_vars(struct libmatheval_vars *this) {
+	free(this);
+}

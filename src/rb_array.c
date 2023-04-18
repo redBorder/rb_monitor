@@ -16,25 +16,15 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include "rb_array.h"
 
-#include <stdbool.h>
-#include <string.h>
+struct rb_array *rb_array_new(size_t size) {
+	struct rb_array *ret = NULL;
+	ret = calloc(1, sizeof(*ret) + size * sizeof(ret->elms[0]));
 
-/** Libmatheval needed variables */
-struct libmatheval_vars {
-	char **names;   ///< Variable names
-	double *values; ///< Variable values
-	size_t count;
-};
+	if (ret) {
+		ret->size = size;
+	}
 
-/** Create a new libmatheval vars
-  @param new_size # vars it can hold
-  @return New libmatheval vars
-  */
-struct libmatheval_vars *new_libmatheval_vars(size_t new_size);
-
-/** Deallocate libmatheval vars
-  @param this libmatheval vars to deallocate
-  */
-void delete_libmatheval_vars(struct libmatheval_vars *this);
+	return ret;
+}

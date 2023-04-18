@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -18,59 +18,143 @@
 
 #pragma once
 
-#include <signal.h>
-#include <pthread.h>
-#include <librd/rdtypes.h>
-#include <librd/rdlru.h>
-#include <librd/rdavl.h>
-#include <librd/rdmem.h>
+#include "rb_array.h"
+#include "rb_message_list.h"
 
-#include <stdbool.h>
 #include <json-c/json.h>
+#include <librd/rdmem.h>
+#include <librd/rdtypes.h>
 
+#include <pthread.h>
+#include <signal.h>
+#include <stdbool.h>
 
-// #define MONITOR_VALUE_MAGIC 0x12345678
+#ifndef NDEBUG
+#define MONITOR_VALUE_MAGIC 0x010AEA1C010AEA1CL
+#endif
 
 /// @todo make the vectors entry here.
 /// @note if you edit this structure, remember to edit monitor_value_copy
-struct monitor_value{
-	rd_memctx_t memctx;
-	rd_avl_node_t avl_node;
+struct monitor_value {
+#ifdef MONITOR_VALUE_MAGIC
+	uint64_t magic; // Private data, don't need to use them outside.
+#endif
 
-	#ifdef MONITOR_VALUE_MAGIC
-	int magic; // Private data, don't need to use them outside.
-	#endif
-
-	/* config.json extracted */
-	bool sensor_id_valid;
-	int sensor_id;
-	const char * sensor_name;
-	const char * name;            // Intern name: *__gid__*__pos__
-	const char * send_name;       // Extern name. If not __gid__ nor __pos__, it is NULL and you have to check name.
-	                              // @todo make a function name() for do the last.
-	const char * instance_prefix;
-	const char * unit;
-	const char * group_name;
-	const char * group_id;
-	bool integer;
-
-	/* enrichment */
-	const json_object *enrichment;
+	/// Type of monitor value
+	enum monitor_value_type {
+		/// This is a raw value
+		MONITOR_VALUE_T__VALUE,
+		/// This is an array of monitors values
+		MONITOR_VALUE_T__ARRAY,
+	} type;
 
 	/* response */
-	time_t timestamp;
-	double value;
-	const char * string_value;
-	const char * (*type)(void); // way that the value has been obtained
-
-	/* vector response */
-	unsigned int instance;
-	bool instance_valid;
-	bool bad_value;
+	union {
+		struct {
+			time_t timestamp;
+			double value;
+			bool bad_value;
+			const char *string_value;
+		} value;
+		struct {
+			size_t children_count;
+			struct monitor_value *split_op_result;
+			struct monitor_value **children;
+		} array;
+	};
 };
 
-void monitor_value_copy(struct monitor_value *dst,const struct monitor_value *src);
+/** Creates a new monitor value array
+ * @param n_children Number of childrens
+ * @param children Childrens
+ * @param split_op Split operation
+ * @return New monitor value of array type
+ */
+struct monitor_value *new_monitor_value_array(size_t n_children,
+					      struct monitor_value **children,
+					      struct monitor_value *split_op);
 
-int process_monitor_value(struct monitor_value *monitor_value);
+#ifdef MONITOR_VALUE_MAGIC
+#define rb_monitor_value_assert(monitor)                                       \
+	assert(MONITOR_VALUE_MAGIC == (monitor)->magic)
+#else
+#define rb_monitor_value_assert(monitor)
+#endif
 
-struct printbuf * print_monitor_value(const struct monitor_value *monitor_value);
+void rb_monitor_value_done(struct monitor_value *mv);
+
+/** Sensors array */
+typedef struct rb_array rb_monitor_value_array_t;
+
+/** Create a new array with count capacity */
+#define rb_monitor_value_array_new(sz) rb_array_new(sz)
+
+/** Destroy a sensors array */
+#define rb_monitor_value_array_done(array) rb_array_done(array)
+
+/** Checks if a monitor value array is full */
+#define rb_monitor_value_array_full(array) rb_array_full(array)
+
+/** Add a monitor value to monitor values array
+  @note Wrapper function allows typechecking */
+static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
+				       struct monitor_value *mv) RD_UNUSED;
+static void rb_monitor_value_array_add(rb_monitor_value_array_t *array,
+				       struct monitor_value *mv) {
+	rb_array_add(array, mv);
+}
+
+/** Select individual positions of original array
+  @param array Original array
+  @param pos list of positions (-1 terminated)
+  @return New monitor array, that needs to be free with
+	rb_monitor_value_array_done
+  @note Monitors are from original array, so they should not be touched
+  */
+rb_monitor_value_array_t *
+rb_monitor_value_array_select(rb_monitor_value_array_t *array, ssize_t *pos);
+
+/** Return monitor value of an array
+  @param array Array
+  @param i Position of array
+  @return Monitor value at position i
+  */
+static struct monitor_value *
+rb_monitor_value_array_at(rb_monitor_value_array_t *array, size_t i)
+		__attribute__((unused));
+static struct monitor_value *
+rb_monitor_value_array_at(rb_monitor_value_array_t *array, size_t i) {
+	struct monitor_value *ret = array->elms[i];
+	if (ret) {
+		rb_monitor_value_assert(ret);
+	}
+	return ret;
+}
+
+/// @todo delete this FW declarations, print should not be here
+struct rb_monitor_s;
+struct rb_sensor_s;
+
+/** Print a sensor value
+  @param monitor_value Value to print
+  @param monitor Value's monitor
+  @return Message array with monitor value
+  */
+rb_message_array_t *
+print_monitor_value(const struct monitor_value *monitor_value,
+		    const struct rb_monitor_s *monitor);
+
+/** Compare monitor's timestamp
+  @param m1 First monitor to compare
+  @param m2 Second monitor to compare
+  @warning assert that both monitor value are type value
+  @return integer lees than, equal to, o greater than 0 if m1 timestamp is less
+  than, equal to, o greater than m2 timestamp
+  */
+static int64_t rb_monitor_value_cmp_timestamp(const struct monitor_value *m1,
+					      const struct monitor_value *m2)
+		__attribute__((unused));
+static int64_t rb_monitor_value_cmp_timestamp(const struct monitor_value *m1,
+					      const struct monitor_value *m2) {
+	return m1->value.timestamp - m2->value.timestamp;
+}
