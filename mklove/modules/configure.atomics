@@ -47,6 +47,7 @@ function checks {
     if ! mkl_compile_check __atomic_32 HAVE_ATOMICS_32 cont CC "" \
         "
 #include <inttypes.h>
+int32_t foo (int32_t i);
 int32_t foo (int32_t i) {
   return __atomic_add_fetch(&i, 1, __ATOMIC_SEQ_CST);
 }"
@@ -56,6 +57,7 @@ int32_t foo (int32_t i) {
             cont CC "" \
             "
 #include <inttypes.h>
+int32_t foo (int32_t i);
 int32_t foo (int32_t i) {
   return __atomic_add_fetch(&i, 1, __ATOMIC_SEQ_CST);
 }"
@@ -67,6 +69,7 @@ int32_t foo (int32_t i) {
             if mkl_compile_check __sync_32 HAVE_ATOMICS_32 disable CC "" \
                 "
 #include <inttypes.h>
+int32_t foo (int32_t i);
 int32_t foo (int32_t i) {
   return __sync_add_and_fetch(&i, 1);
 }"
@@ -93,6 +96,7 @@ int32_t foo (int32_t i) {
     if ! mkl_compile_check __atomic_64 HAVE_ATOMICS_64 cont CC "" \
         "
 #include <inttypes.h>
+int64_t foo (int64_t i);
 int64_t foo (int64_t i) {
   return __atomic_add_fetch(&i, 1, __ATOMIC_SEQ_CST);
 }"
@@ -102,6 +106,7 @@ int64_t foo (int64_t i) {
             cont CC "" \
             "
 #include <inttypes.h>
+int64_t foo (int64_t i);
 int64_t foo (int64_t i) {
   return __atomic_add_fetch(&i, 1, __ATOMIC_SEQ_CST);
 }"
@@ -113,6 +118,7 @@ int64_t foo (int64_t i) {
             if mkl_compile_check __sync_64 HAVE_ATOMICS_64 disable CC "" \
                 "
 #include <inttypes.h>
+int64_t foo (int64_t i);
 int64_t foo (int64_t i) {
   return __sync_add_and_fetch(&i, 1);
 }"

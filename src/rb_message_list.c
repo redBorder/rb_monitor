@@ -16,25 +16,27 @@
   along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
+#include "rb_message_list.h"
 
-#include <stdbool.h>
-#include <string.h>
+#include <stdlib.h>
 
-/** Libmatheval needed variables */
-struct libmatheval_vars {
-	char **names;   ///< Variable names
-	double *values; ///< Variable values
-	size_t count;
-};
-
-/** Create a new libmatheval vars
-  @param new_size # vars it can hold
-  @return New libmatheval vars
+/** Creates a new message array
+  @param s Size of array
+  @return New messages array
   */
-struct libmatheval_vars *new_libmatheval_vars(size_t new_size);
+rb_message_array_t *new_messages_array(size_t s) {
+	rb_message_array_t *ret =
+			calloc(1, sizeof(ret) + s * sizeof(ret->msgs[0]));
+	if (ret) {
+		ret->count = s;
+	}
 
-/** Deallocate libmatheval vars
-  @param this libmatheval vars to deallocate
+	return ret;
+}
+
+/** Releases message array resources
+  @param msgs Message array
   */
-void delete_libmatheval_vars(struct libmatheval_vars *this);
+void message_array_done(rb_message_array_t *msgs) {
+	free(msgs);
+}

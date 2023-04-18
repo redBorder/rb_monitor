@@ -1,46 +1,80 @@
+/*
+  Copyright (C) 2016 Eneo Tecnologia S.L.
+  Author: Eugenio Perez <eupm90@gmail.com>
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as
+  published by the Free Software Foundation, either version 3 of the
+  License, or (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#pragma once
+
 #include "config.h"
 
 #include "json_test.h"
 
-#define UNDER_TEST
-#include "main.c"
+/** Check cjson_sensor but only free returned messages
+ * @param cjson_sensor Sensor in JSON format
+ */
+void test_sensor_void(const char *cjson_sensor);
 
-/// @TODO sepparate in .c file when we can extract struct definitions!
+/** Checks to pass a sensor n times
+  @param cjson_sensor Sensor in json text format
+  @param checks Checks to pass every time a sensor is processed
+  @param n Number of checks (and times to pass)
+  */
+void test_sensor_n(const char *cjson_sensor, check_list_t *checks, size_t n);
+
+/** Convenience function to pass checks over one sensor */
+static void test_sensor(const char *cjson_sensor, check_list_t *checks)
+		__attribute__((unused));
 static void test_sensor(const char *cjson_sensor, check_list_t *checks) {
-	struct _worker_info worker_info;
-	struct _perthread_worker_info pt_worker_info;
-	rd_lru_t *messages = rd_lru_new();
-
-	memset(&worker_info, 0, sizeof(worker_info));
-	memset(&pt_worker_info, 0, sizeof(pt_worker_info));
-
-	worker_info.monitor_values_tree = new_monitor_values_tree();
-	snmp_sess_init(&worker_info.default_session);
-	struct json_object *json_sensor = json_tokener_parse(cjson_sensor);
-
-	process_sensor(&worker_info, &pt_worker_info, json_sensor, messages);
-	json_list_check(checks, messages);
-	json_object_put(json_sensor);
-
-	destroy_monitor_values_tree(worker_info.monitor_values_tree);
-	rd_lru_destroy(messages);
+	test_sensor_n(cjson_sensor, checks, 1);
 }
 
 /** Basic sensor test
   @param prepare_checks_cb Construct checks using provided callback
   @param sensor JSON describing sensor under test
   */
-static void basic_test_checks_cb(
-		void (*prepare_checks_cb)(check_list_t *checks),
-		const char *sensor) __attribute__((unused));
-static void basic_test_checks_cb(
-		void (*prepare_checks_cb)(check_list_t *checks),
-		const char *sensor) {
-	check_list_t checks = TAILQ_HEAD_INITIALIZER(checks);
-	prepare_checks_cb(&checks);
-	test_sensor(sensor, &checks);
+static void
+basic_test_checks_cb(void (*prepare_checks_cb[])(check_list_t *checks),
+		     size_t checks_size,
+		     const char *sensor) __attribute__((unused));
+static void
+basic_test_checks_cb(void (*prepare_checks_cb[])(check_list_t *checks),
+		     size_t checks_size,
+		     const char *sensor) {
+	check_list_t checks[checks_size];
+	for (size_t i = 0; i < checks_size; ++i) {
+		TAILQ_INIT(&checks[i]);
+		prepare_checks_cb[i](&checks[i]);
+	}
+	test_sensor_n(sensor, checks, checks_size);
 }
 
 /// Convenience macro to create tests functions
-#define TEST_FN(fn_name, prepare_checks_cb, json_sensor) \
-static void fn_name() {basic_test_checks_cb(prepare_checks_cb, json_sensor);}
+#define TEST_FN_N(fn_name, prepare_checks_cb_v, n, json_sensor)                \
+	static void fn_name() {                                                \
+		basic_test_checks_cb(prepare_checks_cb_v, n, json_sensor);     \
+	}
+
+/// Convenience macro to create tests functions
+#define TEST_FN(fn_name, prepare_checks_cb, json_sensor)                       \
+	static void fn_name() {                                                \
+		typeof(prepare_checks_cb) *cb = &prepare_checks_cb;            \
+		basic_test_checks_cb(&cb, 1, json_sensor);                     \
+	}
+
+void mem_wraps_set_fail_in(size_t i);
+size_t mem_wraps_get_fail_in();
+
+extern size_t mem_wrap_fail_in;

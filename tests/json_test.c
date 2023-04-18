@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -18,20 +18,15 @@
 
 #include "json_test.h"
 
-#include <librd/rd.h>
 #include <librd/rdfloat.h>
-#include <librd/rdlru.h>
 
-#include <string.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <setjmp.h>
+#include <setjmp.h> // Needs to be before of cmocka.h
+
 #include <cmocka.h>
 
-/// Convenience function
-static void assert_int_equal2(LargestIntegralType a, LargestIntegralType b) {
-	assert_in_set(a, &b, 1);
-}
+#include <stdarg.h>
+#include <stdbool.h>
+#include <string.h>
 
 struct json_check {
 	struct json_object *json;
@@ -39,57 +34,53 @@ struct json_check {
 };
 
 static void json_check(/*const*/ json_object *check,
-						/*const*/ json_object *other) {
+		       /*const*/ json_object *other) {
 	json_object_object_foreach(check, key, val) {
 		/* All members checked must exist */
 		struct json_object *o_val = NULL;
-		const bool get_rc = json_object_object_get_ex(other, key,
-									&o_val);
+		const bool get_rc =
+				json_object_object_get_ex(other, key, &o_val);
 		assert_true(get_rc); // o_Val exists
 		assert_int_equal(json_object_get_type(val),
-						json_object_get_type(o_val));
+				 json_object_get_type(o_val));
 
 		/* And to be equal than other['key'] */
 		// assert_true(json_object_equal(val, o_val));
-		switch(json_object_get_type(val)) {
-			case json_type_null:
-				assert_null(o_val);
-				break;
-			case json_type_boolean:
-				assert_int_equal(json_object_get_boolean(val),
-					json_object_get_boolean(o_val));
-				break;
-			case json_type_double:
-				assert_true(rd_deq(json_object_get_double(val),
-					json_object_get_double(o_val)));
-				break;
-			case json_type_int:
-				assert_int_equal2(json_object_get_int64(val),
-					json_object_get_int64(o_val));
-				break;
-			case json_type_object:
-				{
-					/*const*/struct json_object *chld
-									= NULL;
-					const bool chld_get_rc =
-						json_object_object_get_ex(other,
-								key, &o_val);
-					assert_true(chld_get_rc);
-					json_check(val, chld);
-				}
-				break;
-			case json_type_array:
-				/// Still not needed
-				assert_true(false);
-				break;
-			case json_type_string:
-				assert_string_equal(json_object_get_string(val),
-					json_object_get_string(o_val));
-				break;
-			default:
-				/// Unhandled case!
-				assert_true(false);
-				break;
+		switch (json_object_get_type(val)) {
+		case json_type_null:
+			assert_null(o_val);
+			break;
+		case json_type_boolean:
+			assert_int_equal(json_object_get_boolean(val),
+					 json_object_get_boolean(o_val));
+			break;
+		case json_type_double:
+			assert_true(rd_deq(json_object_get_double(val),
+					   json_object_get_double(o_val)));
+			break;
+		case json_type_int:
+			assert_true(json_object_get_int64(val) ==
+				    json_object_get_int64(o_val));
+			break;
+		case json_type_object: {
+			/*const*/ struct json_object *chld = NULL;
+			const bool chld_get_rc = json_object_object_get_ex(
+					other, key, &o_val);
+			assert_true(chld_get_rc);
+			json_check(val, chld);
+		} break;
+		case json_type_array:
+			/// Still not needed
+			assert_true(false);
+			break;
+		case json_type_string:
+			assert_string_equal(json_object_get_string(val),
+					    json_object_get_string(o_val));
+			break;
+		default:
+			/// Unhandled case!
+			assert_true(false);
+			break;
 		};
 	}
 }
@@ -103,50 +94,55 @@ void check_list_push(check_list_t *list, struct json_check *object) {
 }
 
 void check_list_push_checks(check_list_t *check_list,
-		struct json_key_test **checks, size_t checks_list_size,
-		size_t checks_size) {
+			    json_key_test *checks,
+			    size_t checks_list_size) {
 	size_t i;
 
-	for (i=0; i<checks_list_size; ++i) {
-		struct json_check *check = prepare_test_basic_sensor_check(
-							checks_size, checks[i]);
+	for (i = 0; i < checks_list_size; ++i) {
+		struct json_check *check =
+				prepare_test_basic_sensor_check(&checks[i]);
 		check_list_push(check_list, check);
 	}
 }
 
 /** Checks and consume produced messages against check_list */
-void json_list_check(check_list_t *check_list, rd_lru_t *msgs) {
-	while(!TAILQ_EMPTY(check_list)) {
-		struct json_check *check = TAILQ_FIRST(check_list);
-		TAILQ_REMOVE(check_list, check, entry);
-		char *msg = rd_lru_pop(msgs);
-		assert_non_null(msg);
+void json_list_check(check_list_t *check_list, rb_message_list *msgs) {
 
-		json_object *jmsg = json_tokener_parse(msg);
-		assert_non_null(jmsg);
+	while (!(rb_message_list_empty(msgs))) {
+		rb_message_array_t *array = rb_message_list_first(msgs);
+		rb_message_list_remove(msgs, array);
+		for (size_t i = 0; i < array->count; ++i) {
+			char *msg = array->msgs[i].payload;
+			json_object *jmsg = json_tokener_parse(msg);
+			assert_non_null(jmsg);
 
-		json_check(check->json, jmsg);
+			struct json_check *check = TAILQ_FIRST(check_list);
+			assert_non_null(check);
+			TAILQ_REMOVE(check_list, check, entry);
 
-		json_object_put(jmsg);
-		json_object_put(check->json);
-		free(msg);
-		free(check);
+			json_check(check->json, jmsg);
+
+			json_object_put(jmsg);
+			json_object_put(check->json);
+			free(msg);
+			free(check);
+		}
+		message_array_done(array);
 	}
 
-	assert_null(rd_lru_pop(msgs));
+	assert_true(TAILQ_EMPTY(check_list));
 }
 
-struct json_check *prepare_test_basic_sensor_check(size_t childs_len,
-				struct json_key_test *childs) {
-	size_t i;
+struct json_check *prepare_test_basic_sensor_check(json_key_test *childs) {
+	struct json_key_test_elm *i = NULL;
 	struct json_check *ret = calloc(1, sizeof(ret[0]));
 	assert_non_null(ret);
 	ret->json = json_object_new_object();
 	assert_non_null(ret->json);
 
-	for (i=0; i<childs_len; ++i) {
-		/* const int add_rc = */ json_object_object_add(ret->json,
-			childs[i].key, childs[i].val);
+	SLIST_FOREACH(i, childs, entry) {
+		/* const int add_rc = */ json_object_object_add(
+				ret->json, i->key, i->val);
 		// assert_int_equal(add_rc, 0);
 	}
 

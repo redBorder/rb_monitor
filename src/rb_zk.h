@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015 Eneo Tecnologia S.L.
+  Copyright (C) 2016 Eneo Tecnologia S.L.
   Author: Eugenio Perez <eupm90@gmail.com>
 
   This program is free software: you can redistribute it and/or modify
@@ -24,14 +24,19 @@
 /// @TODO document all callbacks localities, in what thread will be them
 /// executed
 struct rb_zk;
-struct rb_zk *rb_zk_init(char *host,int timeout);
+struct rb_zk *rb_zk_init(char *host, int timeout);
 
 /**
 	Create a node of zookeeper. Just a simple wrapper
 	*/
-int rb_zk_create_node(struct rb_zk *zk,const char *path,const char *value,
-    int valuelen,const struct ACL_vector *acl,int flags,char *path_buffer,
-    int path_buffer_len);
+int rb_zk_create_node(struct rb_zk *zk,
+		      const char *path,
+		      const char *value,
+		      int valuelen,
+		      const struct ACL_vector *acl,
+		      int flags,
+		      char *path_buffer,
+		      int path_buffer_len);
 
 /// Zookeeper mutex.
 struct rb_zk_mutex;
@@ -53,7 +58,8 @@ int rb_zk_mutex_obtained(struct rb_zk_mutex *mutex);
 	@param mutex Mutex affected
 	@param opaque Mutex opaque
 	*/
-typedef void (*rb_mutex_status_change_cb)(struct rb_zk_mutex *mutex,void *opaque);
+typedef void (*rb_mutex_status_change_cb)(struct rb_zk_mutex *mutex,
+					  void *opaque);
 
 /** Callback called when a mutex have an error.
 	It will be called in rb_zk own thread.
@@ -63,15 +69,20 @@ typedef void (*rb_mutex_status_change_cb)(struct rb_zk_mutex *mutex,void *opaque
 	@param rc     Return code provided by Zookeeper
 	@param opaque Mutex opaque.
 	*/
-typedef void (*rb_mutex_error_cb)(struct rb_zk *rb_zk, struct rb_zk_mutex *mutex,
-	const char *cause,int rc,void *opaque);
+typedef void (*rb_mutex_error_cb)(struct rb_zk *rb_zk,
+				  struct rb_zk_mutex *mutex,
+				  const char *cause,
+				  int rc,
+				  void *opaque);
 
 /** Create a zookeeper node in a recursive way
 	@param rb_zk Zookeeper handler
 	@param path  Path you want to create
 	@param flags Flags you want the path be created with.
 	*/
-int rb_zk_create_recursive_node(struct rb_zk *rb_zk,const char *path,int flags);
+int rb_zk_create_recursive_node(struct rb_zk *rb_zk,
+				const char *path,
+				int flags);
 
 /// redBorder Zookeeper queue element basic type. It contains all the pop()
 /// configuration
@@ -85,20 +96,28 @@ struct rb_zk_queue_element;
 	@param opaque Opaque provided in the queue element creation
 	*/
 typedef void (*rb_zk_queue_error_cb_t)(struct rb_zk *rb_zk,
-                   struct rb_zk_queue_element *elm,const char *cause,int rc,void *opaque);
+				       struct rb_zk_queue_element *elm,
+				       const char *cause,
+				       int rc,
+				       void *opaque);
 
 /** Creates a new redBorder Zookeeper queue element
 	@param rb_zk     Handler
 	@param path      Queue path the element is related.
-	@param error_cb  Queue error callback. It will be called in rb_zk own thread.
-	@param data_cb   Data complete callback. It will be called in rb_zk own thread.
+	@param error_cb  Queue error callback. It will be called in rb_zk own
+   thread.
+	@param data_cb   Data complete callback. It will be called in rb_zk own
+   thread.
 	@param delete_cb Lock deleted (and pop completed) callback.
 	@param opaque    Queue element opaque
     @return New queue element.
 	*/
 struct rb_zk_queue_element *new_queue_element(struct rb_zk *rb_zk,
-	const char *path,rb_zk_queue_error_cb_t error_cb,
-	data_completion_t data_cb,void_completion_t delete_cb,void *opaque);
+					      const char *path,
+					      rb_zk_queue_error_cb_t error_cb,
+					      data_completion_t data_cb,
+					      void_completion_t delete_cb,
+					      void *opaque);
 
 /** Obtain the opaque member of a queue element.
 	@elm Queue element
@@ -111,7 +130,10 @@ void *rb_zk_queue_element_opaque(struct rb_zk_queue_element *elm);
 	@param rc    Zookeeper return code
 	@param cause Cause of the error (if any)
     */
-typedef void (*rb_zk_push_callback)(struct rb_zk *zk,const char *path,int rc,const char *cause);
+typedef void (*rb_zk_push_callback)(struct rb_zk *zk,
+				    const char *path,
+				    int rc,
+				    const char *cause);
 
 /** Push an element to a Zookeeper queue
     @param zk       redBorder Zookeeper handler
@@ -121,8 +143,12 @@ typedef void (*rb_zk_push_callback)(struct rb_zk *zk,const char *path,int rc,con
     @param cb       Callback to execute at completion.
     @param opaque   Opaque of queue element.
     */
-void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int valuelen,
-	string_completion_t cb,void *opaque);
+void rb_zk_queue_push(struct rb_zk *zk,
+		      const char *path,
+		      const char *value,
+		      int valuelen,
+		      string_completion_t cb,
+		      void *opaque);
 
 /** Try to obtain a mutex
     @param zk         redBorder Zookeeper handler
@@ -131,30 +157,39 @@ void rb_zk_queue_push(struct rb_zk *zk,const char *path,const char *value,int va
     @param error_cb   Callback to execute on error.
     @param cb_opaque  Callback opaque.
     */
-struct rb_zk_mutex *rb_zk_mutex_lock(struct rb_zk *zk,const char *mutex_path,
-	rb_mutex_status_change_cb schange_cb,rb_mutex_error_cb error_cb,void *cb_opaque);
+struct rb_zk_mutex *rb_zk_mutex_lock(struct rb_zk *zk,
+				     const char *mutex_path,
+				     rb_mutex_status_change_cb schange_cb,
+				     rb_mutex_error_cb error_cb,
+				     void *cb_opaque);
 
 /** Release a lock.
 	@param zk          redBorder Zookeeper handler
 	@param rb_zk_mutex Mutex you want to release
 	@param schange_cb  Callback called when mutex status change
 	@param error_cb    Callback called when an error happens. In this case,
-	                   rb_zk_mutex will be deleted, and you have to create it again.
+			   rb_zk_mutex will be deleted, and you have to create
+   it again.
 */
-void rb_zk_mutex_unlock(struct rb_zk *zk,struct rb_zk_mutex *mutex);
+void rb_zk_mutex_unlock(struct rb_zk *zk, struct rb_zk_mutex *mutex);
 
 /** Pop an element from the queue.
 	@param zk redBorder ZooKeeper handler.
-	@param qelement Queue element configuration. From this moment, qelement is owned by zk.
+	@param qelement Queue element configuration. From this moment, qelement
+   is owned by zk.
 	*/
-void rb_zk_queue_pop_nolock(struct rb_zk *zk,struct rb_zk_queue_element *qelement);
+void rb_zk_queue_pop_nolock(struct rb_zk *zk,
+			    struct rb_zk_queue_element *qelement);
 
 /** Pop an element from the queue.
 	@param zk redBorder ZooKeeper handler.
-	@param qelement Queue element configuration. From this moment, qelement is owned by zk.
+	@param qelement Queue element configuration. From this moment, qelement
+   is owned by zk.
 	@param mutex Mutex to lock before do the pop.
 	*/
-void rb_zk_queue_pop(struct rb_zk *zk,struct rb_zk_queue_element *qelement,const char *mutex);
+void rb_zk_queue_pop(struct rb_zk *zk,
+		     struct rb_zk_queue_element *qelement,
+		     const char *mutex);
 
 /** Release redBorder zookeeper resources
     @param zk redBorder Zookeeper handler

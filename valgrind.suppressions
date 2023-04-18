@@ -1,9 +1,0 @@
-{
-   SNMP known memory leaks
-   Memcheck:Leak
-   ...
-   obj:/usr/lib64/libsnmp.so.20.0.0
-   fun:snmp_sess_init
-   ...
-   fun:main
-}
