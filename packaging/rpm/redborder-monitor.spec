@@ -68,5 +68,7 @@ systemctl daemon-reload
 /usr/lib/systemd/system/redborder-monitor.service
 
 %changelog
+* Tue Apr 18 2023 Luis J. Blanco <ljblanco@redborder.com> - 1.0.3
+- packaging optimization and rb_values added
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
 - first spec version
