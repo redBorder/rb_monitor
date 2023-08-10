@@ -132,21 +132,17 @@ bool snmp_solve_response(char *value_buf,
 			*number = strtod(value_buf, NULL);
 			ret = 1;
 			break;
-		case 65: //counter32
-			snprintf(value_buf,
-				 value_buf_len,
-				 "%ld",
-				 *response->variables->val.integer);
+        case 65: //counter32 TODO: replace by ASN_COUNTER32 if exists
+			snprintf(value_buf, value_buf_len, "%ld", *response->variables->val.integer);
 			*number = *response->variables->val.integer;
 			ret = 1;
 			break;
 		case ASN_COUNTER64: //counter64
-		  // TODO: Prepare this for high values also
-      snprintf(value_buf,value_buf_len,"%lu",response->variables->val.counter64->low);
-      //snprintf(value_buf++,value_buf_len,"%lu",response->variables->val.counter64->high);
-      *number = (double) response->variables->val.counter64->low;
-      ret = 1;
-      break;
+			// TODO: Prepare this for high values also
+			snprintf(value_buf,value_buf_len,"%lu",response->variables->val.counter64->low);
+			*number = (double) response->variables->val.counter64->low;
+			ret = 1;
+			break;
 		default:
 			rdlog(LOG_WARNING,
 			      "Unknow variable type %d in SNMP response",
