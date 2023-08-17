@@ -404,31 +404,31 @@ static void process_rb_http_options(struct _worker_info *worker_info) {
 	const struct {
 		const char *option_key;
 		int64_t *worker_info_opt;
-	} http_opts = {
+	} http_opts[] = {
 			// clang-format off
 		{
-			.option_key = "HTTP_MAX_TOTAL_CONNECTIONS",
-			.worker_info_opt = &worker_info->http_max_total_connections,
+			"HTTP_MAX_TOTAL_CONNECTIONS",
+			&worker_info->http_max_total_connections,
 		},
 		{
-			.option_key = "HTTP_TIMEOUT",
-			.worker_info_opt = &worker_info->http_timeout,
+			"HTTP_TIMEOUT",
+			&worker_info->http_timeout,
 		},
 		{
-			.option_key = "HTTP_CONNTTIMEOUT",
-			.worker_info_opt = &worker_info->http_connttimeout,
+			"HTTP_CONNTTIMEOUT",
+			&worker_info->http_connttimeout,
 		},
 		{
-			.option_key = "HTTP_VERBOSE",
-			.worker_info_opt = &worker_info->http_verbose,
+			"HTTP_VERBOSE",
+			&worker_info->http_verbose,
 		},
 		{
-			.option_key = "RB_HTTP_MAX_MESSAGES",
-			.worker_info_opt = &worker_info->rb_http_max_messages,
+			"RB_HTTP_MAX_MESSAGES",
+			&worker_info->rb_http_max_messages,
 		},
 		{
-			.option_key = "RB_HTTP_MODE",
-			.worker_info_opt = &worker_info.http_mode
+			"RB_HTTP_MODE",
+			&worker_info->http_mode
 		}
 			// clang-format on
 	};
@@ -474,7 +474,7 @@ static void process_rb_http_options(struct _worker_info *worker_info) {
 		}
 	}
 
-	if (worker_info.http_insecure) {
+	if (worker_info->http_insecure) {
 		char err[BUFSIZ];
 		const int rc = rb_http_handler_set_opt(
 				worker_info->http_handler,

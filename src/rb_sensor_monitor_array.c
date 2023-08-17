@@ -116,11 +116,13 @@ process_monitor_value_v_print(const rb_monitor_t *monitor,
 		.magic = MONITOR_VALUE_MAGIC,
 #endif
 		.type = MONITOR_VALUE_T__ARRAY,
-		.array = {
-			.children_count = new_mv->array.children_count,
-			.split_op_result = new_mv->array.split_op_result,
-			.children = print_children,
-		},
+                {
+		   .array = {
+		   	.children_count = new_mv->array.children_count,
+		   	.split_op_result = new_mv->array.split_op_result,
+		   	.children = print_children,
+		   }
+                }
 	};
 	// clang-format on
 
