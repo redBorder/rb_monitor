@@ -42,7 +42,7 @@ rm -rf %{buildroot}
 getent group %{name} >/dev/null || groupadd -r %{name}
 getent passwd %{name} >/dev/null || \
     useradd -r -g %{name} -d / -s /sbin/nologin \
-    -c "User of rb_monitor service" %{name}
+    -c "User of %{name} service" %{name}
 exit 0
 
 %post -p /sbin/ldconfig
