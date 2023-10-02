@@ -15,7 +15,7 @@ BuildRequires: gcc librd-devel net-snmp-devel json-c-devel librdkafka-devel libm
 
 Summary: Get data events via SNMP or scripting and send results in json over kafka.
 Group:   Development/Libraries/C and C++
-Requires: librd0 libmatheval librdkafka1 net-snmp
+Requires: librd0 libmatheval librdkafka net-snmp
 Requires(pre): shadow-utils
 
 %description
