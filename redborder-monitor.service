@@ -1,0 +1,11 @@
+[Unit]
+Description=data events via SNMP or scripting to json/kafka
+
+[Service]
+ExecStart=/usr/bin/rb_monitor -c /etc/redborder-monitor/config.json
+Restart=always
+User=redborder-monitor
+Group=redborder-monitor
+
+[Install]
+WantedBy=multi-user.target
