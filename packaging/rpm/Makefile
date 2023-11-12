@@ -1,4 +1,4 @@
-PACKAGE_NAME?=	rb_monitor
+PACKAGE_NAME?=	redborder-monitor
 
 VERSION?=	$(shell git describe --abbrev=6 --tags HEAD --always | sed 's/-/_/g')
 

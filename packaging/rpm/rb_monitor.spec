@@ -11,11 +11,11 @@ License: GNU AGPLv3
 URL: https://github.com/redBorder/rb_monitor
 Source0: %{name}-%{version}.tar.gz
 
-BuildRequires: gcc librd-devel net-snmp-devel json-c-devel librdkafka-devel libmatheval-devel
+BuildRequires: gcc librd-devel net-snmp-devel json-c-devel librdkafka-devel libmatheval-devel librb-http-devel
 
 Summary: Get data events via SNMP or scripting and send results in json over kafka.
 Group:   Development/Libraries/C and C++
-Requires: librd0 libmatheval librdkafka net-snmp
+Requires: librd0 libmatheval librdkafka net-snmp librb-http0
 Requires(pre): shadow-utils
 
 %description
@@ -25,7 +25,7 @@ Requires(pre): shadow-utils
 %setup -qn %{name}-%{version}
 
 %build
-./configure --prefix=/usr
+./configure --prefix=/usr --exec-prefix=/usr --enable-rbhttp
 make
 
 %install
