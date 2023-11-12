@@ -639,10 +639,14 @@ rb_monitor_op_value(void *f,
 
 	/* Foreach variable in operation, value */
 	for (size_t v = 0; v < op_vars->count; ++v) {
-		const struct monitor_value *mv_v =
-				rb_monitor_value_array_at(op_vars, v);
-		assert(mv_v);
-		assert(MONITOR_VALUE_T__VALUE == mv_v->type);
+		const struct monitor_value *mv_v = rb_monitor_value_array_at(op_vars, v);
+
+		if (NULL == mv_v || MONITOR_VALUE_T__VALUE != mv_v->type) {
+			rdlog(LOG_ERR, "Could not execute operation, missing valid parameter values");
+			return NULL;
+		}
+
+		rdlog(LOG_DEBUG, "value operation is : %lf ", mv_v->value.value);
 		libmatheval_vars->values[v] = mv_v->value.value;
 	}
 
