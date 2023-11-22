@@ -63,7 +63,7 @@ static bool system_solve_response(char *buff,
 			char *endPtr;
 			*number = strtod(buff, &endPtr);
 			if (buff != endPtr) {
-				rdlog(LOG_DEBUG, "System response: %s for command", buff, command);
+				rdlog(LOG_DEBUG, "System response: %s for command %s", buff, command);
 				ret = true;
 			} else {
 				rdlog(LOG_DEBUG, "invalid buffer response for %s", command);
