@@ -56,5 +56,8 @@ exit 0
 /usr/lib/systemd/system/%{name}.service
 
 %changelog
+* Thu Nov 30 2023 David Vanhoucke <dvanhoucke@redborder.com> - 1.0.4-1
+- Fix check variables before using it
+
 * Wed May 11 2016 Juan J. Prieto <jjprieto@redborder.com> - 1.0.0-1
 - first spec version
