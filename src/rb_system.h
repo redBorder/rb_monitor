@@ -59,12 +59,15 @@ static bool system_solve_response(char *buff,
 		if (NULL == fgets(buff, buff_size, fp)) {
 			rdlog(LOG_ERR, "Cannot get buffer information");
 		} else {
-			rdlog(LOG_DEBUG, "System response: %s", buff);
 			trim_end(buff);
 			char *endPtr;
 			*number = strtod(buff, &endPtr);
-			if (buff != endPtr)
+			if (buff != endPtr) {
+				rdlog(LOG_DEBUG, "System response: %s for command %s", buff, command);
 				ret = true;
+			} else {
+				rdlog(LOG_DEBUG, "invalid buffer response for %s", command);
+			}
 		}
 
 		fclose(fp);

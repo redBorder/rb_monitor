@@ -673,11 +673,13 @@ rb_monitor_op_vector_i(void *f,
 	for (size_t v = 0; v < op_vars->count; ++v) {
 		const struct monitor_value *mv_v =
 				rb_monitor_value_array_at(op_vars, v);
-		assert(mv_v);
-		assert(MONITOR_VALUE_T__ARRAY == mv_v->type);
 
-		const struct monitor_value *mv_v_i =
-				mv_v->array.children[v_pos];
+		if (NULL == mv_v || MONITOR_VALUE_T__VALUE != mv_v->type) {
+			rdlog(LOG_ERR, "Could not execute operation, missing valid parameter values");
+			return NULL;
+		}
+
+		const struct monitor_value *mv_v_i = mv_v->array.children[v_pos];
 		if (NULL == mv_v_i) {
 			// We don't have this value, so we can't do operation
 			return NULL;
