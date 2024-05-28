@@ -439,7 +439,7 @@ static void process_rb_http_options(struct _worker_info *worker_info) {
 		const int snprintf_rc = snprintf(aux,
 						 sizeof(aux),
 						 "%" PRId64,
-						 http_opts[i].worker_info_opt);
+						 *(http_opts[i].worker_info_opt));
 
 		if (snprintf_rc > sizeof(aux)) {
 			rdlog(LOG_ERR,
