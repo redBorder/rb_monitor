@@ -795,6 +795,10 @@ int main(int argc, char *argv[]) {
 		// if(worker_info->debug_output_flags | DEBUG_SYSLOG)
 		//	rd_kafka_set_logger(worker_info.rk,rd_kafka_log_syslog);
 
+		worker_info.rkt = rd_kafka_topic_new(worker_info.rk,
+                                         worker_info.kafka_topic,
+                                         worker_info.rkt_conf);
+
 		worker_info.rk_conf = NULL;
 		worker_info.rkt_conf = NULL;
 
