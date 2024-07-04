@@ -774,7 +774,14 @@ int main(int argc, char *argv[]) {
 
 	if (worker_info.kafka_broker) {
 		rd_kafka_conf_set_dr_cb(worker_info.rk_conf, msg_delivered);
-		char errstr[BUFSIZ];
+    char errstr[BUFSIZ];
+    
+    // Set the brokers before creating the producer
+    if (rd_kafka_conf_set(worker_info.rk_conf, "bootstrap.servers", worker_info.kafka_broker, errstr, sizeof(errstr)) != RD_KAFKA_CONF_OK) {
+        rdlog(LOG_ERR, "Error setting brokers: %s\n", errstr);
+        exit(1);
+    }
+		
 		if (!(worker_info.rk = rd_kafka_new(RD_KAFKA_PRODUCER,
 						    worker_info.rk_conf,
 						    errstr,
@@ -787,16 +794,6 @@ int main(int argc, char *argv[]) {
 
 		// if(worker_info->debug_output_flags | DEBUG_SYSLOG)
 		//	rd_kafka_set_logger(worker_info.rk,rd_kafka_log_syslog);
-
-		if (rd_kafka_brokers_add(worker_info.rk,
-					 worker_info.kafka_broker) == 0) {
-			rdlog(LOG_ERR, "No valid brokers specified\n");
-			exit(1);
-		}
-
-		worker_info.rkt = rd_kafka_topic_new(worker_info.rk,
-						     worker_info.kafka_topic,
-						     worker_info.rkt_conf);
 
 		worker_info.rk_conf = NULL;
 		worker_info.rkt_conf = NULL;
