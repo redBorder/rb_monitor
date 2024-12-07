@@ -24,6 +24,9 @@
 
 #define rb_monitors_array_new(count) rb_array_new(count)
 #define rb_monitors_array_full(array) rb_array_full(array)
+
+pthread_mutex_t monitor_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /** @note Doing with a function provides type safety */
 static void
 rb_monitors_array_add(rb_monitors_array_t *array, rb_monitor_t *monitor) {
@@ -259,6 +262,8 @@ bool process_monitors_array(struct _worker_info *worker_info,
 	}
 
 	for (size_t i = 0; aok && i < monitors->count; ++i) {
+		pthread_mutex_lock(&monitor_mutex);
+
 		rb_monitor_value_array_t *op_vars =
 				rb_monitor_value_array_select(
 						last_known_monitor_values,
@@ -281,6 +286,8 @@ bool process_monitors_array(struct _worker_info *worker_info,
 		}
 
 		rb_monitor_value_array_done(op_vars);
+
+		pthread_mutex_unlock(&monitor_mutex);
 	}
 
 	for (size_t i = 0; aok && i < monitors->count; ++i) {
