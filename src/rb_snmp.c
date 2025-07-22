@@ -162,6 +162,8 @@ int net_snmp_version(const char *string_version, const char *sensor_name) {
 			return SNMP_VERSION_1;
 		} else if (0 == strcmp(string_version, "2c")) {
 			return SNMP_VERSION_2c;
+		} else if (0 == strcmp(string_version, "3")) {
+			return SNMP_VERSION_3;
 		}
 	}
 
