@@ -40,6 +40,12 @@ new_snmp_session(struct snmp_session *initial_session,
 		session->magic = SNMP_SESS_MAGIC;
 #endif
 
+        initial_session->local_port = 0;
+        initial_session->remote_port = 0;
+        initial_session->timeout = config->timeout;
+        initial_session->community = (u_char *)strdup(config->community);
+        initial_session->version = config->version;
+
 		session->sessp = snmp_sess_open(initial_session);
 
 		if (session->sessp) {
@@ -56,6 +62,8 @@ new_snmp_session(struct snmp_session *initial_session,
 			ss->version = config->version;
 		} else {
 			rdlog(LOG_ERR, "Failed to load SNMP session");
+			free(session);
+			session = NULL;
 		}
 	}
 	return session;
