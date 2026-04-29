@@ -361,6 +361,13 @@ static rb_monitor_t *parse_rb_monitor0(enum monitor_cmd_type type,
 		goto err;
 	}
 
+  json_object *monitor_enrichment = NULL;
+  if (json_object_object_get_ex(json_monitor, "enrichment", &monitor_enrichment)) {
+    json_object_object_foreach(monitor_enrichment, key, val) {
+      json_object_object_add(ret->enrichment, key, json_object_get(val));
+    }
+  }
+
 #define RB_MONITOR_ENRICHMENT_STR(mkey, mval)                                  \
 	{                                                                      \
 		.key = mval ? mkey : NULL,                                     \
