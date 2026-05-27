@@ -70,7 +70,7 @@ static bool system_solve_response(char *buff,
 			}
 		}
 
-		fclose(fp);
+		pclose(fp);
 	}
 
 	return ret;

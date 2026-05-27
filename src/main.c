@@ -491,7 +491,7 @@ static void process_rb_http_options(struct _worker_info *worker_info) {
 
 #endif
 
-static int worker_process_sensor_send_array(struct _worker_info *worker_info,
+int worker_process_sensor_send_array(struct _worker_info *worker_info,
 					    rb_message_array_t *msgs) {
 	for (size_t i = 0; i < msgs->count; ++i) {
 		char *msg = msgs->msgs[i].payload;
@@ -573,7 +573,16 @@ worker_process_sensor(struct _worker_info *worker_info, rb_sensor_t *sensor) {
 	assert(sensor);
 	assert_rb_sensor(sensor);
 
+	if (0 != rb_sensor_trylock(sensor)) {
+		rdlog(LOG_INFO, "Sensor %s is already being processed. Skipping.",
+		      rb_sensor_name(sensor));
+		rb_sensor_put(sensor);
+		return 0;
+	}
+
 	process_rb_sensor(worker_info, sensor, &messages);
+	rb_sensor_unlock(sensor);
+
 	rb_sensor_put(sensor);
 
 	worker_process_sensor_send_messages(worker_info, &messages);
@@ -868,8 +877,18 @@ int main(int argc, char *argv[]) {
 	}
 
 	while (run) {
-		queue_sensors(sensors_array, &queue);
-		sleep(main_info.sleep_main);
+		for (size_t i = 0; i < sensors_array->count && run; ++i) {
+			rb_sensor_t *sensor = sensors_array->elms[i];
+			rb_sensor_get(sensor);
+			queue_sensor(worker_info.queue, sensor);
+			if (main_info.sleep_main > 0) {
+				usleep((useconds_t)((main_info.sleep_main * 1000000) /
+						    sensors_array->count));
+			}
+		}
+		if (sensors_array->count == 0) {
+			sleep((unsigned int)main_info.sleep_main);
+		}
 	}
 
 	rdlog(LOG_INFO, "Leaving, wait for workers...");
