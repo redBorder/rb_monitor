@@ -49,6 +49,7 @@ struct rb_sensor_s {
 	rb_monitor_value_array_t *last_vals; ///< Last values
 	ssize_t **op_vars; ///< Operation variables that needs each monitor
 	int refcnt;	///< Reference counting
+	pthread_mutex_t lock; ///< Sensor lock
 };
 
 #ifdef RB_SENSOR_MAGIC
@@ -56,6 +57,18 @@ void assert_rb_sensor(rb_sensor_t *sensor) {
 	assert(RB_SENSOR_MAGIC == sensor->magic);
 }
 #endif
+
+void rb_sensor_lock(rb_sensor_t *sensor) {
+	pthread_mutex_lock(&sensor->lock);
+}
+
+int rb_sensor_trylock(rb_sensor_t *sensor) {
+	return pthread_mutex_trylock(&sensor->lock);
+}
+
+void rb_sensor_unlock(rb_sensor_t *sensor) {
+	pthread_mutex_unlock(&sensor->lock);
+}
 
 /** We assume that sensor name is only requested in config errors, so we only
   save it in enrichment json
@@ -285,6 +298,7 @@ rb_sensor_t *parse_rb_sensor(/* const */ json_object *sensor_info,
 
 	if (ret) {
 		sensor_set_defaults(worker_info, ret);
+		pthread_mutex_init(&ret->lock, NULL);
 		const bool sensor_ok = sensor_common_attrs(ret, sensor_info);
 		if (!sensor_ok) {
 			rb_sensor_put(ret);
@@ -343,6 +357,7 @@ static void sensor_done(rb_sensor_t *sensor) {
 	if (sensor->data.enrichment) {
 		json_object_put(sensor->data.enrichment);
 	}
+	pthread_mutex_destroy(&sensor->lock);
 	free(sensor);
 }
 

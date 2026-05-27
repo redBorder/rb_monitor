@@ -74,6 +74,14 @@ bool process_rb_sensor(struct _worker_info *worker_info,
 		       rb_sensor_t *sensor,
 		       rb_message_list *ret);
 
+/** Sends a message array
+  @param worker_info Worker info
+  @param msgs Messages to send
+  @return 0 if OK
+  */
+int worker_process_sensor_send_array(struct _worker_info *worker_info,
+					    rb_message_array_t *msgs);
+
 /** Obtains sensor name
   @param sensor Sensor
   @return Name of sensor.
@@ -90,6 +98,17 @@ void rb_sensor_get(rb_sensor_t *sensor);
   @param sensor Sensor
   */
 void rb_sensor_put(rb_sensor_t *sensor);
+
+/** Try to lock sensor mutex
+  @param sensor Sensor
+  @return 0 if lock was acquired, EBUSY if already locked, or error code
+  */
+int rb_sensor_trylock(rb_sensor_t *sensor);
+
+/** Unlock sensor mutex
+  @param sensor Sensor
+  */
+void rb_sensor_unlock(rb_sensor_t *sensor);
 
 /** Sensors array */
 typedef struct rb_array rb_sensors_array_t;
