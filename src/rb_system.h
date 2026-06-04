@@ -57,7 +57,7 @@ static bool system_solve_response(char *buff,
 		rdlog(LOG_ERR, "Cannot get system command.");
 	} else {
 		if (NULL == fgets(buff, buff_size, fp)) {
-			rdlog(LOG_ERR, "Cannot get buffer information");
+			rdlog(LOG_ERR, "Cannot get buffer information for %s", command);
 		} else {
 			trim_end(buff);
 			char *endPtr;
@@ -71,6 +71,12 @@ static bool system_solve_response(char *buff,
 		}
 
 		pclose(fp);
+	}
+
+	if (!ret) {
+		snprintf(buff, buff_size, "0");
+		*number = 0;
+		ret = true;
 	}
 
 	return ret;

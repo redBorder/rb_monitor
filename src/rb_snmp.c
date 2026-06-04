@@ -96,15 +96,17 @@ bool snmp_solve_response(char *value_buf,
 	assert(value_buf);
 	assert(number);
 
-	if (status != STAT_SUCCESS) {
+	if (status != STAT_SUCCESS || NULL == response) {
 		rdlog(LOG_ERR,
 		      "Snmp error: %s",
-		      snmp_api_errstring(snmp_sess_session(session->sessp)
-							 ->s_snmp_errno));
-		// rdlog(LOG_ERR,"Error in packet.Reason:
-		// %s\n",snmp_errstring(response->errstat));
-	} else if (NULL == response) {
-		rdlog(LOG_ERR, "No SNMP response given.");
+		      status != STAT_SUCCESS
+				      ? snmp_api_errstring(
+							snmp_sess_session(session->sessp)
+									->s_snmp_errno)
+				      : "No SNMP response given.");
+		snprintf(value_buf, value_buf_len, "0");
+		*number = 0;
+		ret = 1;
 	} else {
 		rdlog(LOG_DEBUG,
 		      "SNMP OID %s response type %d: %s\n",
@@ -127,7 +129,9 @@ bool snmp_solve_response(char *value_buf,
 			break;
 		case ASN_OCTET_STR:
 			if (effective_len == 0) {
-				ret = 0;
+				snprintf(value_buf, value_buf_len, "0");
+				*number = 0;
+				ret = 1;
 				break;
 			}
 
@@ -140,7 +144,7 @@ bool snmp_solve_response(char *value_buf,
 			*number = strtod(value_buf, NULL);
 			ret = 1;
 			break;
-        case 65: //counter32 TODO: replace by ASN_COUNTER32 if exists
+	    case 65: //counter32 TODO: replace by ASN_COUNTER32 if exists
 			snprintf(value_buf, value_buf_len, "%ld", *response->variables->val.integer);
 			*number = *response->variables->val.integer;
 			ret = 1;
@@ -155,6 +159,9 @@ bool snmp_solve_response(char *value_buf,
 			rdlog(LOG_WARNING,
 			      "Unknow variable type %d in SNMP response",
 			      response->variables->type);
+			snprintf(value_buf, value_buf_len, "0");
+			*number = 0;
+			ret = 1;
 		};
 	}
 

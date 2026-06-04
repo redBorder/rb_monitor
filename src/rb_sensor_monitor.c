@@ -486,19 +486,12 @@ rb_monitor_get_external_value(const rb_monitor_t *monitor,
 				     monitor->cmd_arg);
 
 	if (0 == strlen(value_buf)) {
-		rdlog(LOG_WARNING, "Not seeing %s value.", monitor->name);
-		return false;
+		rdlog(LOG_WARNING, "Not seeing %s value. Forcing to 0.", monitor->name);
+		snprintf(value_buf, sizeof(value_buf), "0");
+		number = 0;
 	}
 
 	if (!monitor->splittok) {
-		if (!ok) {
-			rdlog(LOG_WARNING,
-			      "Value '%s' of [%s:%s] is not a number",
-			      value_buf,
-			      monitor->cmd_arg,
-			      monitor->name);
-			return false;
-		}
 		ret = process_novector_monitor(value_buf, number, time(NULL));
 	} else /* We have a vector here */ {
 		ret = process_vector_monitor(monitor, value_buf, time(NULL));
