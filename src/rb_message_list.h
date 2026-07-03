@@ -43,7 +43,7 @@ rb_message_array_t *new_messages_array(size_t s);
 void message_array_done(rb_message_array_t *msgs);
 
 /// List of message array
-typedef TAILQ_HEAD(, rb_message_array) rb_message_list;
+typedef TAILQ_HEAD(, rb_message_array_s) rb_message_list;
 #define rb_message_list_init(msg_list) TAILQ_INIT(msg_list)
 #define rb_message_list_push(msg_list, msg_array)                              \
 	TAILQ_INSERT_TAIL(msg_list, msg_array, entry)

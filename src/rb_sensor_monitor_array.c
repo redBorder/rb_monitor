@@ -184,8 +184,10 @@ process_monitor_value(const rb_monitor_t *monitor,
 			NULL == old_mv ||
 			!rb_monitor_timestamp_provided(monitor) ||
 			(monitor_value->type == MONITOR_VALUE_T__VALUE &&
-			 rb_monitor_value_cmp_timestamp(old_mv, monitor_value) <
-					 0);
+			 (rb_monitor_value_cmp_timestamp(old_mv, monitor_value) <
+					  0 ||
+			  rd_dne(old_mv->value.value,
+				 monitor_value->value.value)));
 
 	if (update_value) {
 		if (rb_monitor_send(monitor)) {
@@ -259,27 +261,42 @@ bool process_monitors_array(struct _worker_info *worker_info,
 		process_ctx = new_process_sensor_monitor_ctx(snmp_sessp);
 	}
 
+	rb_monitor_value_array_t *current_iteration_values =
+			rb_monitor_value_array_new(monitors->count);
+	if (NULL == current_iteration_values) {
+		aok = false;
+	} else {
+		current_iteration_values->count = monitors->count;
+		memcpy(current_iteration_values->elms,
+		       last_known_monitor_values->elms,
+		       monitors->count * sizeof(void *));
+	}
+
 	for (size_t i = 0; aok && i < monitors->count; ++i) {
 		rb_monitor_value_array_t *op_vars =
 				rb_monitor_value_array_select(
-						last_known_monitor_values,
+						current_iteration_values,
 						monitors_deps[i]);
 
 		const rb_monitor_t *monitor =
 				rb_monitors_array_elm_at(monitors, i);
 		struct monitor_value *value = process_sensor_monitor(
 				process_ctx, monitor, op_vars);
+
 		if (value) {
 			struct monitor_value *last_known_monitor_value_i =
 					last_known_monitor_values->elms[i];
 
-			last_known_monitor_values
-					->elms[i] = process_monitor_value(
-					monitor,
-					value,
-					last_known_monitor_value_i,
-					ret);
+			last_known_monitor_values->elms[i] =
+					process_monitor_value(
+							monitor,
+							value,
+							last_known_monitor_value_i,
+							ret);
 		}
+		
+		current_iteration_values->elms[i] =
+				last_known_monitor_values->elms[i];
 
 		rb_monitor_value_array_done(op_vars);
 
@@ -289,6 +306,8 @@ bool process_monitors_array(struct _worker_info *worker_info,
 			worker_process_sensor_send_array(worker_info, msgs);
 		}
 	}
+
+	rb_monitor_value_array_done(current_iteration_values);
 
 	if (process_ctx) {
 		destroy_process_sensor_monitor_ctx(process_ctx);
