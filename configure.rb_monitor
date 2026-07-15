@@ -5,7 +5,7 @@ mkl_require good_cflags
 mkl_require gitversion as GITVERSION
 mkl_require atomics must pass
 
-#mkl_mkvar_append CPPFLAGS CPPFLAGS "-DFORTIFY_SOURCE=2"
+#mkl_mkvar_append CPPFLAGS CPPFLAGS "-D_FORTIFY_SOURCE=2"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-DNDEBUG"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-std=gnu99"
 mkl_mkvar_append CPPFLAGS CPPFLAGS "-D_GNU_SOURCE"
